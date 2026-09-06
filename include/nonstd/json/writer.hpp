@@ -3,7 +3,7 @@
 // JSON output. Write only - there is no JSON parser here, and BJData remains the format
 // anything is read from.
 //
-// Two ways in. A json_writer emits directly, so a type using bjdata_convert or
+// Two ways in. A writer emits directly, so a type using bjdata_convert or
 // BJDATA_DEFINE_TYPE serialises to JSON with no intermediate at all: those take `auto
 // &visitor` and never name the BJData writer. And write_json(sink, view) walks a document
 // that already exists, which covers the to_bjdata form and is what you want for dumping a
@@ -25,25 +25,28 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
+namespace nonstd::json {
 
-struct json_options {
+using namespace serial;
+
+
+struct writer_options {
     /** Spaces per nesting level. Zero writes the document on one line. */
     std::size_t indent = 0;
 };
 
-class json_array_scope;
-class json_object_scope;
-class json_writer;
+class array_scope;
+class object_scope;
+class writer;
 
 /** @brief Emits JSON text into a sink. */
-class json_writer : public byte_emitter {
-    json_options options {};
+class writer : public byte_emitter {
+    writer_options options {};
     std::uint32_t written_mask = 0;   ///< bit i: an element has already been written at level i
     bool pending_value = false;       ///< a key has been written and owes a value
 
-    friend class json_array_scope;
-    friend class json_object_scope;
+    friend class array_scope;
+    friend class object_scope;
 
     void indent_to(int level) noexcept {
         if (this->options.indent == 0) return;
@@ -145,11 +148,11 @@ class json_writer : public byte_emitter {
 
 public:
     template<sink S>
-    explicit json_writer(S &out, json_options options = {}) noexcept: byte_emitter(out), options(options) {}
+    explicit writer(S &out, writer_options options = {}) noexcept: byte_emitter(out), options(options) {}
 
     template<typename F>
         requires (!sink<F> && std::invocable<F &, std::span<const std::byte>>)
-    explicit json_writer(F &callable, json_options options = {}) noexcept: byte_emitter(callable), options(options) {}
+    explicit writer(F &callable, writer_options options = {}) noexcept: byte_emitter(callable), options(options) {}
 
     void null() noexcept {
         this->begin_value();
@@ -204,8 +207,8 @@ public:
         this->pending_value = true;
     }
 
-    [[nodiscard]] json_array_scope array() noexcept;
-    [[nodiscard]] json_object_scope object() noexcept;
+    [[nodiscard]] array_scope array() noexcept;
+    [[nodiscard]] object_scope object() noexcept;
 
     template<typename T>
     void value(const T &item) noexcept {
@@ -232,22 +235,22 @@ private:
     }
 };
 
-class json_array_scope {
-    json_writer *out = nullptr;
+class array_scope {
+    writer *out = nullptr;
 
 public:
-    explicit json_array_scope(json_writer &out) noexcept: out(&out) { this->out->begin_array(); }
-    json_array_scope(const json_array_scope &) = delete;
-    json_array_scope &operator=(const json_array_scope &) = delete;
-    json_array_scope(json_array_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
-    json_array_scope &operator=(json_array_scope &&other) noexcept {
+    explicit array_scope(writer &out) noexcept: out(&out) { this->out->begin_array(); }
+    array_scope(const array_scope &) = delete;
+    array_scope &operator=(const array_scope &) = delete;
+    array_scope(array_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
+    array_scope &operator=(array_scope &&other) noexcept {
         if (this != &other) {
             if (this->out != nullptr) this->out->end_array();
             this->out = std::exchange(other.out, nullptr);
         }
         return *this;
     }
-    ~json_array_scope() {
+    ~array_scope() {
         if (this->out != nullptr) this->out->end_array();
     }
 
@@ -255,22 +258,22 @@ public:
     void value(const T &item) const noexcept { this->out->value(item); }
 };
 
-class json_object_scope {
-    json_writer *out = nullptr;
+class object_scope {
+    writer *out = nullptr;
 
 public:
-    explicit json_object_scope(json_writer &out) noexcept: out(&out) { this->out->begin_object(); }
-    json_object_scope(const json_object_scope &) = delete;
-    json_object_scope &operator=(const json_object_scope &) = delete;
-    json_object_scope(json_object_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
-    json_object_scope &operator=(json_object_scope &&other) noexcept {
+    explicit object_scope(writer &out) noexcept: out(&out) { this->out->begin_object(); }
+    object_scope(const object_scope &) = delete;
+    object_scope &operator=(const object_scope &) = delete;
+    object_scope(object_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
+    object_scope &operator=(object_scope &&other) noexcept {
         if (this != &other) {
             if (this->out != nullptr) this->out->end_object();
             this->out = std::exchange(other.out, nullptr);
         }
         return *this;
     }
-    ~json_object_scope() {
+    ~object_scope() {
         if (this->out != nullptr) this->out->end_object();
     }
 
@@ -281,23 +284,23 @@ public:
     }
 };
 
-inline json_array_scope json_writer::array() noexcept { return json_array_scope { *this }; }
-inline json_object_scope json_writer::object() noexcept { return json_object_scope { *this }; }
+inline array_scope writer::array() noexcept { return array_scope { *this }; }
+inline object_scope writer::object() noexcept { return object_scope { *this }; }
 
 template<detail::byte_range R>
-void json_writer::bytes(const R &items) noexcept {
+void writer::bytes(const R &items) noexcept {
     const auto scope = this->array();
     for (const auto item : items) this->integer(static_cast<std::uint64_t>(std::to_integer<unsigned char>(item)));
 }
 
 template<std::ranges::input_range R>
-void json_writer::range(const R &items) noexcept {
+void writer::range(const R &items) noexcept {
     const auto scope = this->array();
     for (const auto &item : items) emit_value(*this, item);
 }
 
 template<typename T>
-void json_writer::emit_custom(const T &item) noexcept {
+void writer::emit_custom(const T &item) noexcept {
     // serializer dispatches on the writer: a bjdata_convert serves every format, while a
     // to_bjdata names the BJData writer and so is rejected here - the same limitation
     // from_bjdata has on the way in. Transcribe such a type explicitly instead, with
@@ -307,21 +310,21 @@ void json_writer::emit_custom(const T &item) noexcept {
 
 /** Writes a C++ value to a sink as JSON. */
 template<sink S, typename T>
-std::expected<std::size_t, error> write_json(S &out, const T &value, json_options options = {}) {
-    json_writer target { out, options };
+std::expected<std::size_t, error> write_json(S &out, const T &value, writer_options options = {}) {
+    writer target { out, options };
     target.value(value);
     return target.finish();
 }
 
 /** The allocating convenience over write_json. */
 template<typename T>
-[[nodiscard]] std::string to_json(const T &value, json_options options = {}) {
+[[nodiscard]] std::string to_json(const T &value, writer_options options = {}) {
     std::string text;
     container_sink out { text };
-    json_writer target { out, options };
+    writer target { out, options };
     target.value(value);
     if (!target.finish()) text.clear();
     return text;
 }
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::json

@@ -21,10 +21,12 @@
 
 namespace nonstd::bjdata {
 
-void write_json_value(json_writer &out, view source);
+using namespace serial;
+
+void write_json_value(json::writer &out, view source);
 
 /** An N-D array is nested rather than flattened, which is what a JSON consumer expects. */
-inline void write_json_ndarray(json_writer &out, const ndarray_view &source) {
+inline void write_json_ndarray(json::writer &out, const ndarray_view &source) {
     if (source.rank() == 0) {
         write_json_value(out, source.value());
         return;
@@ -34,7 +36,7 @@ inline void write_json_ndarray(json_writer &out, const ndarray_view &source) {
 }
 
 /** Transcribes one BJData value, and everything under it, as JSON. */
-inline void write_json_value(json_writer &out, view source) {
+inline void write_json_value(json::writer &out, view source) {
     switch (source.type()) {
         case kind::null:
             out.null();
@@ -86,8 +88,8 @@ inline void write_json_value(json_writer &out, view source) {
  * call it a success. payload_bytes() costs a single pass over the value.
  */
 template<sink S>
-std::expected<std::size_t, error> write_json(S &out, view source, json_options options = {}) {
-    json_writer target { out, options };
+std::expected<std::size_t, error> write_json(S &out, view source, json::writer_options options = {}) {
+    json::writer target { out, options };
     if (!source.payload_bytes()) {
         target.fail(errc::unexpected_end);
         return target.finish();
@@ -97,7 +99,7 @@ std::expected<std::size_t, error> write_json(S &out, view source, json_options o
 }
 
 /** The allocating convenience over write_json. Empty when the document does not parse. */
-[[nodiscard]] inline std::string to_json(view source, json_options options = {}) {
+[[nodiscard]] inline std::string to_json(view source, json::writer_options options = {}) {
     std::string text;
     container_sink out { text };
     if (!write_json(out, source, options)) text.clear();

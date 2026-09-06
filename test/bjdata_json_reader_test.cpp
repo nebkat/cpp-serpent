@@ -10,16 +10,16 @@
 #include <string>
 #include <vector>
 
-using namespace nonstd::bjdata;
+using namespace nonstd::json;
 
-static_assert(std::forward_iterator<json_array_iterator>);
-static_assert(std::forward_iterator<json_member_iterator>);
-static_assert(std::ranges::forward_range<json_array_range>);
-static_assert(std::ranges::forward_range<json_member_range>);
+static_assert(std::forward_iterator<array_iterator>);
+static_assert(std::forward_iterator<member_iterator>);
+static_assert(std::ranges::forward_range<array_range>);
+static_assert(std::ranges::forward_range<member_range>);
 
 namespace {
 
-json_reader parse(std::string_view text) { return json_reader::over(text); }
+reader parse(std::string_view text) { return reader::over(text); }
 
 void scalars() {
     check(parse("null").is_null(), "null");
@@ -158,7 +158,7 @@ void truncation() {
             check(!validate_json(prefix).has_value(), "a truncated document fails validation");
 
             // Traversal of an unvalidated truncated document must still be safe.
-            const auto value = json_reader::over(prefix);
+            const auto value = reader::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
                 (void) element.as_int<long long>();

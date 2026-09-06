@@ -12,6 +12,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 /**
  * @brief A multi-dimensional view over a typed array counted by a dimension array.
  *

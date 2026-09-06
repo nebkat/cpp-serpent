@@ -13,6 +13,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 namespace detail {
 
 template<typename T>

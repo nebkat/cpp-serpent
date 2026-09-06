@@ -16,7 +16,10 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata::json_detail {
+namespace nonstd::json::scanner {
+
+using namespace serial;
+
 
 [[nodiscard]] constexpr bool is_space(char value) noexcept {
     return value == ' ' || value == '\t' || value == '\n' || value == '\r';
@@ -402,4 +405,4 @@ inline void skip_value(cursor &scan, int depth) noexcept {
     }
 }
 
-}// namespace nonstd::bjdata::json_detail
+}// namespace nonstd::json::scanner

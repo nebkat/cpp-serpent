@@ -1,6 +1,6 @@
 #pragma once
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 /** The JSON-level shape of a value, as opposed to whatever a format spells it with. */
 enum class kind {
@@ -14,4 +14,4 @@ enum class kind {
     object,
 };
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

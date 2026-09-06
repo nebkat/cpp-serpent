@@ -419,17 +419,20 @@ python3 test/generate_fixtures.py /tmp/bjdatacli
 
 ## Layout
 
-```
-include/nonstd/
-  serial.hpp   serial/    format-neutral: kind, errc, sinks, the emitter, the
-                          customization layer. Depends on nothing else here.
-  bjdata.hpp   bjdata/    markers, the view, the writer, N-D arrays, block notation
-  json.hpp     json/      the scanner, the reader, the writer
-               bjdata/json.hpp   the one header that knows both formats
-  unaligned.hpp, unaligned_ptr.hpp
-```
+| directory | namespace | contents |
+|---|---|---|
+| `serial/` | `nonstd::serial` | format-neutral: `kind`, `errc`, sinks, the emitter, the customization layer |
+| `bjdata/` | `nonstd::bjdata` | markers, `view`, `writer`, N-D arrays, block notation |
+| `json/` | `nonstd::json` | `scanner`, `reader`, `writer` |
+| `bjdata/json.hpp` | `nonstd::bjdata` | the one header that knows both formats |
 
-`serial/` depends on neither format; `bjdata/` and `json/` each depend only on `serial/`.
+Each format namespace adopts the neutral one (`using namespace serial;`), so `bjdata::view`
+and `json::reader` both see `errc`, `kind` and `serializer` without qualification, and a
+`using namespace nonstd::bjdata;` in your own code picks them up too. Using both formats at
+once means qualifying `bjdata::writer` against `json::writer`, which is the point.
+
+`serial/` depends on neither format; `bjdata/` and `json/` each depend only on `serial/`, and
+that is enforced by the build rather than by convention — every header compiles on its own.
 The single bridge is `bjdata/json.hpp`, which renders a BJData document as JSON — and is
 also how a `to_bjdata`-only type reaches JSON, by being encoded and then transcribed:
 

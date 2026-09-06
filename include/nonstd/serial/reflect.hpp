@@ -28,7 +28,7 @@
 #define BJDATA_HAS_REFLECTION 0
 #endif
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 /** Whether this build can enumerate a type's fields for itself. */
 inline constexpr bool reflection_available = BJDATA_HAS_REFLECTION != 0;
@@ -256,4 +256,4 @@ concept reflected_type = false;
 
 #endif
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

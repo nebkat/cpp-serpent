@@ -22,6 +22,10 @@
 #endif
 
 using namespace nonstd::bjdata;
+namespace json = nonstd::json;
+using nonstd::json::to_json;
+using nonstd::json::from_json;
+using nonstd::json::validate_json;
 
 namespace {
 
@@ -176,7 +180,7 @@ void reencode(writer &out, view source) {
 }
 
 /** The same canonical rendering as digest(), over the JSON reader instead of the view. */
-std::string json_digest(const json_reader &source) {
+std::string json_digest(const json::reader &source) {
     switch (source.type()) {
         case kind::null:
             return "Z";
@@ -284,7 +288,7 @@ int main(int argc, char **argv) {
             const auto parsed = validate_json(text);
             check(parsed.has_value(), name + ": dart's JSON validates");
             if (parsed) {
-                check_equal(std::string_view { json_digest(json_reader::over(text)) },
+                check_equal(std::string_view { json_digest(json::reader::over(text)) },
                             std::string_view { read_text(directory / (name + ".digest")) },
                             name + ": the JSON reader agrees with the BJData reader");
             }

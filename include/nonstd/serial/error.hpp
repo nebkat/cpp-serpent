@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdlib>
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 enum class errc {
     ok = 0,
@@ -104,4 +104,4 @@ public:
 #endif
 }
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

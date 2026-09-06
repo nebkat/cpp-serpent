@@ -29,29 +29,32 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
+namespace nonstd::json {
 
-class json_reader;
-class json_array_iterator;
-class json_array_range;
-class json_member_iterator;
-class json_member_range;
+using namespace serial;
+
+
+class reader;
+class array_iterator;
+class array_range;
+class member_iterator;
+class member_range;
 
 /** @brief A handle to one JSON value inside a text buffer. */
-class json_reader {
+class reader {
     std::string_view source;
     const char *first = nullptr;   ///< this value's first character, whitespace already skipped
 
 public:
-    constexpr json_reader() = default;
-    constexpr json_reader(std::string_view source, const char *first) noexcept: source(source), first(first) {}
+    constexpr reader() = default;
+    constexpr reader(std::string_view source, const char *first) noexcept: source(source), first(first) {}
 
     /** Wraps a document, skipping leading whitespace. Performs no deep parsing. */
-    [[nodiscard]] static json_reader over(std::string_view text) noexcept {
-        json_detail::cursor scan { text, text.data() };
-        json_detail::skip_whitespace(scan);
+    [[nodiscard]] static reader over(std::string_view text) noexcept {
+        scanner::cursor scan { text, text.data() };
+        scanner::skip_whitespace(scan);
         if (!scan.available(1)) return {};
-        return json_reader { text, scan.position };
+        return reader { text, scan.position };
     }
 
     [[nodiscard]] constexpr std::string_view buffer() const noexcept { return this->source; }
@@ -71,7 +74,7 @@ public:
             case '{': return kind::object;
             default: break;
         }
-        if (*this->first == '-' || json_detail::is_digit(*this->first)) return this->number_kind();
+        if (*this->first == '-' || scanner::is_digit(*this->first)) return this->number_kind();
         return kind::invalid;
     }
 
@@ -91,7 +94,7 @@ public:
     [[nodiscard]] std::optional<bool> as_bool() const noexcept {
         if (this->type() != kind::boolean) return std::nullopt;
         auto scan = this->scan();
-        json_detail::scan_literal(scan, *this->first == 't' ? "true" : "false");
+        scanner::scan_literal(scan, *this->first == 't' ? "true" : "false");
         if (!scan.ok()) return std::nullopt;
         return *this->first == 't';
     }
@@ -133,8 +136,8 @@ public:
         if (!text) return std::nullopt;
 
         std::string decoded;
-        decoded.reserve(json_detail::decoded_length(*text));
-        json_detail::decode_string(*text, [&](char value) { decoded.push_back(value); });
+        decoded.reserve(scanner::decoded_length(*text));
+        scanner::decode_string(*text, [&](char value) { decoded.push_back(value); });
         return decoded;
     }
 
@@ -142,8 +145,8 @@ public:
         const auto text = this->scanned_string();
         if (!text) return false;
         destination.clear();
-        destination.reserve(json_detail::decoded_length(*text));
-        json_detail::decode_string(*text, [&](char value) { destination.push_back(value); });
+        destination.reserve(scanner::decoded_length(*text));
+        scanner::decode_string(*text, [&](char value) { destination.push_back(value); });
         return true;
     }
 
@@ -151,47 +154,47 @@ public:
     [[nodiscard]] std::optional<std::size_t> decode_string_into(std::span<char> destination) const noexcept {
         const auto text = this->scanned_string();
         if (!text) return std::nullopt;
-        if (json_detail::decoded_length(*text) > destination.size()) return std::nullopt;
+        if (scanner::decoded_length(*text) > destination.size()) return std::nullopt;
 
         std::size_t written = 0;
-        json_detail::decode_string(*text, [&](char value) { destination[written++] = value; });
+        scanner::decode_string(*text, [&](char value) { destination[written++] = value; });
         return written;
     }
 
     /** Compares against a string without materialising this one. */
     [[nodiscard]] bool string_is(std::string_view other) const noexcept {
         const auto text = this->scanned_string();
-        return text && json_detail::equals(*text, other);
+        return text && scanner::equals(*text, other);
     }
 
     // ---------------- containers ----------------
 
     [[nodiscard]] std::size_t size() const noexcept;
-    [[nodiscard]] json_array_range array() const noexcept;
-    [[nodiscard]] json_member_range items() const noexcept;
+    [[nodiscard]] array_range array() const noexcept;
+    [[nodiscard]] member_range items() const noexcept;
 
-    [[nodiscard]] json_reader operator[](std::size_t index) const noexcept;
-    [[nodiscard]] json_reader operator[](std::string_view key) const noexcept;
-    [[nodiscard]] json_reader find(std::string_view key) const noexcept { return (*this)[key]; }
+    [[nodiscard]] reader operator[](std::size_t index) const noexcept;
+    [[nodiscard]] reader operator[](std::string_view key) const noexcept;
+    [[nodiscard]] reader find(std::string_view key) const noexcept { return (*this)[key]; }
 
     /** The text this value occupies, or nothing if it does not parse. */
     [[nodiscard]] std::optional<std::string_view> extent() const noexcept {
         if (this->first == nullptr) return std::nullopt;
         auto scan = this->scan();
-        json_detail::skip_value(scan, 0);
+        scanner::skip_value(scan, 0);
         if (!scan.ok()) return std::nullopt;
         return std::string_view { this->first, static_cast<std::size_t>(scan.position - this->first) };
     }
 
     // ---------------- checked ----------------
 
-    [[nodiscard]] json_reader at(std::size_t index) const {
+    [[nodiscard]] reader at(std::size_t index) const {
         auto result = (*this)[index];
         if (!result.is_valid()) raise(errc::out_of_range, this->offset());
         return result;
     }
 
-    [[nodiscard]] json_reader at(std::string_view key) const {
+    [[nodiscard]] reader at(std::string_view key) const {
         auto result = (*this)[key];
         if (!result.is_valid()) raise(errc::out_of_range, this->offset());
         return result;
@@ -230,13 +233,13 @@ public:
 private:
     [[nodiscard]] constexpr const char *limit() const noexcept { return this->source.data() + this->source.size(); }
 
-    [[nodiscard]] json_detail::cursor scan() const noexcept {
-        return json_detail::cursor { this->source, this->first };
+    [[nodiscard]] scanner::cursor scan() const noexcept {
+        return scanner::cursor { this->source, this->first };
     }
 
     [[nodiscard]] std::string_view number_text() const noexcept {
         auto scan = this->scan();
-        const auto text = json_detail::scan_number(scan);
+        const auto text = scanner::scan_number(scan);
         return scan.ok() ? text : std::string_view {};
     }
 
@@ -247,40 +250,40 @@ private:
         return text.find_first_of(".eE") == std::string_view::npos ? kind::integer : kind::real;
     }
 
-    [[nodiscard]] std::optional<json_detail::string_span> scanned_string() const noexcept {
+    [[nodiscard]] std::optional<scanner::string_span> scanned_string() const noexcept {
         if (this->type() != kind::string) return std::nullopt;
         auto scan = this->scan();
-        const auto text = json_detail::scan_string(scan);
+        const auto text = scanner::scan_string(scan);
         if (!scan.ok()) return std::nullopt;
         return text;
     }
 
-    friend class json_array_iterator;
-    friend class json_member_iterator;
+    friend class array_iterator;
+    friend class member_iterator;
 };
 
 /** A key and its value. The key stays encoded until key_string() or key_is() asks. */
-struct json_key_value {
-    json_detail::string_span key;
-    json_reader value;
+struct key_value {
+    scanner::string_span key;
+    reader value;
 
     [[nodiscard]] std::string key_string() const {
         std::string decoded;
-        decoded.reserve(json_detail::decoded_length(this->key));
-        json_detail::decode_string(this->key, [&](char value) { decoded.push_back(value); });
+        decoded.reserve(scanner::decoded_length(this->key));
+        scanner::decode_string(this->key, [&](char value) { decoded.push_back(value); });
         return decoded;
     }
 
     [[nodiscard]] bool key_is(std::string_view other) const noexcept {
-        return json_detail::equals(this->key, other);
+        return scanner::equals(this->key, other);
     }
 };
 
 /** Forward iterator over the elements of an array. */
-class json_array_iterator {
+class array_iterator {
 public:
-    using value_type        = json_reader;
-    using reference         = json_reader;
+    using value_type        = reader;
+    using reference         = reader;
     using difference_type   = std::ptrdiff_t;
     using iterator_concept  = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
@@ -291,34 +294,34 @@ private:
     bool exhausted = true;
 
 public:
-    json_array_iterator() = default;
+    array_iterator() = default;
 
-    explicit json_array_iterator(const json_reader &container) noexcept: source(container.source) {
+    explicit array_iterator(const reader &container) noexcept: source(container.source) {
         if (container.type() != kind::array) return;
-        json_detail::cursor scan { this->source, container.first + 1 };
-        json_detail::skip_whitespace(scan);
+        scanner::cursor scan { this->source, container.first + 1 };
+        scanner::skip_whitespace(scan);
         if (!scan.available(1) || scan.peek() == ']') return;
         this->cursor = scan.position;
         this->exhausted = false;
     }
 
-    [[nodiscard]] json_reader operator*() const noexcept {
+    [[nodiscard]] reader operator*() const noexcept {
         if (this->exhausted) return {};
-        return json_reader { this->source, this->cursor };
+        return reader { this->source, this->cursor };
     }
 
-    json_array_iterator &operator++() noexcept {
+    array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
-        json_detail::cursor scan { this->source, this->cursor };
-        json_detail::skip_value(scan, 1);
-        json_detail::skip_whitespace(scan);
+        scanner::cursor scan { this->source, this->cursor };
+        scanner::skip_value(scan, 1);
+        scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
             this->exhausted = true;
             return *this;
         }
         scan.advance(1);
-        json_detail::skip_whitespace(scan);
+        scanner::skip_whitespace(scan);
         if (!scan.available(1)) {
             this->exhausted = true;
             return *this;
@@ -327,23 +330,23 @@ public:
         return *this;
     }
 
-    json_array_iterator operator++(int) noexcept {
+    array_iterator operator++(int) noexcept {
         auto previous = *this;
         ++(*this);
         return previous;
     }
 
-    [[nodiscard]] friend bool operator==(const json_array_iterator &left, const json_array_iterator &right) noexcept {
+    [[nodiscard]] friend bool operator==(const array_iterator &left, const array_iterator &right) noexcept {
         if (left.exhausted || right.exhausted) return left.exhausted == right.exhausted;
         return left.cursor == right.cursor;
     }
 };
 
 /** Forward iterator over the key/value pairs of an object. */
-class json_member_iterator {
+class member_iterator {
 public:
-    using value_type        = json_key_value;
-    using reference         = json_key_value;
+    using value_type        = key_value;
+    using reference         = key_value;
     using difference_type   = std::ptrdiff_t;
     using iterator_concept  = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
@@ -354,49 +357,49 @@ private:
     bool exhausted = true;
 
 public:
-    json_member_iterator() = default;
+    member_iterator() = default;
 
-    explicit json_member_iterator(const json_reader &container) noexcept: source(container.source) {
+    explicit member_iterator(const reader &container) noexcept: source(container.source) {
         if (container.type() != kind::object) return;
-        json_detail::cursor scan { this->source, container.first + 1 };
-        json_detail::skip_whitespace(scan);
+        scanner::cursor scan { this->source, container.first + 1 };
+        scanner::skip_whitespace(scan);
         if (!scan.available(1) || scan.peek() == '}') return;
         this->cursor = scan.position;
         this->exhausted = false;
     }
 
-    [[nodiscard]] json_key_value operator*() const noexcept {
+    [[nodiscard]] key_value operator*() const noexcept {
         if (this->exhausted) return {};
 
-        json_detail::cursor scan { this->source, this->cursor };
-        const auto key = json_detail::scan_string(scan);
-        json_detail::skip_whitespace(scan);
+        scanner::cursor scan { this->source, this->cursor };
+        const auto key = scanner::scan_string(scan);
+        scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ':') return {};
         scan.advance(1);
-        json_detail::skip_whitespace(scan);
+        scanner::skip_whitespace(scan);
         if (!scan.available(1)) return {};
-        return json_key_value { key, json_reader { this->source, scan.position } };
+        return key_value { key, reader { this->source, scan.position } };
     }
 
-    json_member_iterator &operator++() noexcept {
+    member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
-        json_detail::cursor scan { this->source, this->cursor };
-        (void) json_detail::scan_string(scan);
-        json_detail::skip_whitespace(scan);
+        scanner::cursor scan { this->source, this->cursor };
+        (void) scanner::scan_string(scan);
+        scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ':') {
             this->exhausted = true;
             return *this;
         }
         scan.advance(1);
-        json_detail::skip_value(scan, 1);
-        json_detail::skip_whitespace(scan);
+        scanner::skip_value(scan, 1);
+        scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
             this->exhausted = true;
             return *this;
         }
         scan.advance(1);
-        json_detail::skip_whitespace(scan);
+        scanner::skip_whitespace(scan);
         if (!scan.available(1)) {
             this->exhausted = true;
             return *this;
@@ -405,47 +408,47 @@ public:
         return *this;
     }
 
-    json_member_iterator operator++(int) noexcept {
+    member_iterator operator++(int) noexcept {
         auto previous = *this;
         ++(*this);
         return previous;
     }
 
-    [[nodiscard]] friend bool operator==(const json_member_iterator &left, const json_member_iterator &right) noexcept {
+    [[nodiscard]] friend bool operator==(const member_iterator &left, const member_iterator &right) noexcept {
         if (left.exhausted || right.exhausted) return left.exhausted == right.exhausted;
         return left.cursor == right.cursor;
     }
 };
 
-class json_array_range : public std::ranges::view_interface<json_array_range> {
-    json_array_iterator head;
+class array_range : public std::ranges::view_interface<array_range> {
+    array_iterator head;
 
 public:
-    json_array_range() = default;
-    explicit json_array_range(json_array_iterator head) noexcept: head(head) {}
-    [[nodiscard]] json_array_iterator begin() const noexcept { return this->head; }
-    [[nodiscard]] json_array_iterator end() const noexcept { return {}; }
+    array_range() = default;
+    explicit array_range(array_iterator head) noexcept: head(head) {}
+    [[nodiscard]] array_iterator begin() const noexcept { return this->head; }
+    [[nodiscard]] array_iterator end() const noexcept { return {}; }
 };
 
-class json_member_range : public std::ranges::view_interface<json_member_range> {
-    json_member_iterator head;
+class member_range : public std::ranges::view_interface<member_range> {
+    member_iterator head;
 
 public:
-    json_member_range() = default;
-    explicit json_member_range(json_member_iterator head) noexcept: head(head) {}
-    [[nodiscard]] json_member_iterator begin() const noexcept { return this->head; }
-    [[nodiscard]] json_member_iterator end() const noexcept { return {}; }
+    member_range() = default;
+    explicit member_range(member_iterator head) noexcept: head(head) {}
+    [[nodiscard]] member_iterator begin() const noexcept { return this->head; }
+    [[nodiscard]] member_iterator end() const noexcept { return {}; }
 };
 
-inline json_array_range json_reader::array() const noexcept {
-    return json_array_range { json_array_iterator { *this } };
+inline array_range reader::array() const noexcept {
+    return array_range { array_iterator { *this } };
 }
 
-inline json_member_range json_reader::items() const noexcept {
-    return json_member_range { json_member_iterator { *this } };
+inline member_range reader::items() const noexcept {
+    return member_range { member_iterator { *this } };
 }
 
-inline std::size_t json_reader::size() const noexcept {
+inline std::size_t reader::size() const noexcept {
     std::size_t total = 0;
     if (this->is_object()) {
         for ([[maybe_unused]] const auto entry : this->items()) ++total;
@@ -455,7 +458,7 @@ inline std::size_t json_reader::size() const noexcept {
     return total;
 }
 
-inline json_reader json_reader::operator[](std::size_t index) const noexcept {
+inline reader reader::operator[](std::size_t index) const noexcept {
     std::size_t position = 0;
     for (const auto element : this->array()) {
         if (position++ == index) return element;
@@ -463,7 +466,7 @@ inline json_reader json_reader::operator[](std::size_t index) const noexcept {
     return {};
 }
 
-inline json_reader json_reader::operator[](std::string_view key) const noexcept {
+inline reader reader::operator[](std::string_view key) const noexcept {
     for (const auto entry : this->items()) {
         if (entry.key_is(key)) return entry.value;
     }
@@ -472,14 +475,14 @@ inline json_reader json_reader::operator[](std::string_view key) const noexcept 
 
 /** Walks the whole document once, checking it is well formed and consumes the whole text. */
 [[nodiscard]] inline std::expected<void, error> validate_json(std::string_view text) noexcept {
-    json_detail::cursor scan { text, text.data() };
-    json_detail::skip_whitespace(scan);
+    scanner::cursor scan { text, text.data() };
+    scanner::skip_whitespace(scan);
     if (!scan.available(1)) return std::unexpected { error { errc::unexpected_end, 0 } };
 
-    json_detail::skip_value(scan, 0);
+    scanner::skip_value(scan, 0);
     if (!scan.ok()) return std::unexpected { scan.to_error() };
 
-    json_detail::skip_whitespace(scan);
+    scanner::skip_whitespace(scan);
     if (scan.position != scan.limit) {
         return std::unexpected { error { errc::trailing_data,
                                          static_cast<std::size_t>(scan.position - text.data()) } };
@@ -496,7 +499,7 @@ inline json_reader json_reader::operator[](std::string_view key) const noexcept 
  */
 template<typename T>
 [[nodiscard]] std::optional<T> from_json(std::string_view text) {
-    return json_reader::over(text).try_get<T>();
+    return reader::over(text).try_get<T>();
 }
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::json

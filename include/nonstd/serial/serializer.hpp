@@ -13,7 +13,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 /** A type that names its fields once, for both directions and every format. */
 template<typename T>
@@ -47,7 +47,7 @@ struct serializer {
             static_assert(always_false<Writer>,
                           "this type has no bjdata_convert, so it can only be written as BJData "
                           "through to_bjdata(writer &, const T &); give it a bjdata_convert to "
-                          "write any format, or specialize nonstd::bjdata::serializer<T>");
+                          "write any format, or specialize nonstd::serial::serializer<T>");
         }
     }
 
@@ -69,7 +69,7 @@ struct serializer {
             static_assert(always_false<Source>,
                           "this type has no bjdata_convert, so it can only be read from BJData "
                           "through from_bjdata(view, T &); give it a bjdata_convert to read any "
-                          "format, or specialize nonstd::bjdata::serializer<T>");
+                          "format, or specialize nonstd::serial::serializer<T>");
             return false;
         }
     }
@@ -149,7 +149,7 @@ bool read_into(Source source, T &value) {
     }
 }
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial
 
 // ---------------- member listing ----------------
 //

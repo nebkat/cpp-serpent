@@ -9,7 +9,7 @@
 
 #include <cstddef>
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 /** Writes straight to a std::ostream, which is what app::fs::save_json's ofstream needs. */
 class ostream_sink {
@@ -24,4 +24,4 @@ public:
     }
 };
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

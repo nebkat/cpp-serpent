@@ -22,6 +22,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 class array_iterator;
 class array_range;
 class member_iterator;

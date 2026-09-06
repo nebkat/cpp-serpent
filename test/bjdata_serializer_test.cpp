@@ -11,6 +11,10 @@
 #include <vector>
 
 using namespace nonstd::bjdata;
+namespace json = nonstd::json;
+using nonstd::json::to_json;
+using nonstd::json::from_json;
+using nonstd::json::validate_json;
 
 namespace {
 
@@ -216,7 +220,7 @@ void key_order_and_absence() {
  * ordinary constexpr code and is tested in full, so only the binding to std::meta is unproven.
  */
 void reflection_seam() {
-    using detail::convert_case;
+    using nonstd::serial::detail::convert_case;
     const auto converted = [](std::string_view identifier, naming_style style) {
         return std::string { convert_case(identifier, style).view() };
     };

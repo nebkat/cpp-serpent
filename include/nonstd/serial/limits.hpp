@@ -1,6 +1,6 @@
 #pragma once
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 /**
  * Maximum container nesting any reader or writer will follow.
@@ -10,4 +10,4 @@ namespace nonstd::bjdata {
  */
 inline constexpr int max_depth = 32;
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

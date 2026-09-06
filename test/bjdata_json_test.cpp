@@ -16,6 +16,10 @@
 #include <vector>
 
 using namespace nonstd::bjdata;
+namespace json = nonstd::json;
+using nonstd::json::to_json;
+using nonstd::json::from_json;
+using nonstd::json::validate_json;
 
 namespace {
 
@@ -141,18 +145,18 @@ void from_documents() {
 void sinks_and_failures() {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
-    const auto written = write_json(out, point { 1, 2 });
+    const auto written = json::write_json(out, point { 1, 2 });
     check(written.has_value(), "write_json reports success");
     check_equal(*written, buffer.size(), "and the byte count");
 
     counting_sink counter;
-    json_writer measuring { counter };
+    json::writer measuring { counter };
     measuring.value(point { 1, 2 });
     check(measuring.finish().has_value(), "counting a JSON document");
     check_equal(counter.size(), std::size_t { 13 }, "{\"x\":1,\"y\":2} is thirteen bytes");
 
     {
-        json_writer target { out };
+        json::writer target { out };
         target.key("orphan");
         check_equal(target.error_code(), errc::key_outside_object, "a key outside an object fails");
     }
@@ -160,7 +164,7 @@ void sinks_and_failures() {
         // A fixed buffer latches rather than truncating silently.
         std::array<std::byte, 4> tiny {};
         span_sink small { tiny };
-        json_writer target { small };
+        json::writer target { small };
         target.value(std::vector<int> { 1, 2, 3, 4, 5, 6 });
         check(!target.finish().has_value(), "a bounded sink fails");
         check(small.overflowed(), "and latches overflow");

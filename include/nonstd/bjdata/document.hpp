@@ -18,6 +18,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 /** Copies a value into a writer with no re-encoding: its marker, then its bytes. */
 inline void write_value(writer &out, view source) noexcept {
     const auto payload = source.payload_bytes();

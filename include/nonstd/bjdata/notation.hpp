@@ -16,6 +16,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 namespace detail {
 
 inline void write_block(std::string &out, std::string_view text) {
@@ -160,7 +162,7 @@ inline void notate_container(std::string &out, cursor &source, bool object, int 
             const auto value = element == marker::float16 ? decode_float16(load<std::uint16_t>(source.position))
                     : element == marker::float32          ? load<float>(source.position)
                                                           : static_cast<float>(load<double>(source.position));
-            write_block(out, format_real(value));
+            write_block(out, serial::detail::format_real(value));
         } else if (element == marker::character) {
             write_block(out, std::string_view { reinterpret_cast<const char *>(source.position), 1 });
         } else {
@@ -251,7 +253,7 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
             const double value = kind == marker::float16 ? decode_float16(load<std::uint16_t>(source.position))
                     : kind == marker::float32            ? load<float>(source.position)
                                                          : load<double>(source.position);
-            write_block(out, format_real(value));
+            write_block(out, serial::detail::format_real(value));
             source.advance(width);
             return;
         }

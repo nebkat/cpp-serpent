@@ -22,6 +22,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 class array_scope;
 class object_scope;
 
@@ -273,7 +275,7 @@ public:
     }
 
     /** A range of bytes: binary. Called by emit_value. */
-    template<detail::byte_range R>
+    template<serial::detail::byte_range R>
     void bytes(const R &items) noexcept {
         if constexpr (std::ranges::contiguous_range<R>) {
             this->binary(std::span<const std::byte> { std::ranges::data(items), std::ranges::size(items) });

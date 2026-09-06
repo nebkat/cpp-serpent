@@ -20,7 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 namespace detail {
 
@@ -197,4 +197,4 @@ void emit_value(Emitter &out, const T &item) {
     }
 }
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

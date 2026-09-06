@@ -11,6 +11,8 @@
 
 namespace nonstd::bjdata {
 
+using namespace serial;
+
 /**
  * @brief BJData type markers.
  *

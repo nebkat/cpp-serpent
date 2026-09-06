@@ -1,14 +1,11 @@
 #pragma once
 
-// Shared forward declarations, so view.hpp and writer.hpp can name each other's types and
-// the serializer without either having to include the other. Mirrors nonstd/json_fwd.hpp.
+// Forward declarations for the format-neutral core, so headers here can name the
+// customization point without pulling in its definition.
 
-namespace nonstd::bjdata {
-
-class view;
-class writer;
+namespace nonstd::serial {
 
 template<typename T, typename = void>
 struct serializer;
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial

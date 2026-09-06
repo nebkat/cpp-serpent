@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace nonstd::bjdata {
+namespace nonstd::serial {
 
 template<typename Writer>
 class write_visitor;
@@ -113,4 +113,4 @@ public:
     [[nodiscard]] bool ok() const noexcept { return this->complete; }
 };
 
-}// namespace nonstd::bjdata
+}// namespace nonstd::serial
