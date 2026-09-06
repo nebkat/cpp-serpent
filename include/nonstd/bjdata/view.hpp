@@ -1,8 +1,9 @@
 #pragma once
 
 #include <nonstd/bjdata/detail.hpp>
-#include <nonstd/bjdata/error.hpp>
-#include <nonstd/bjdata/fwd.hpp>
+#include <nonstd/serial/error.hpp>
+#include <nonstd/serial/kind.hpp>
+#include <nonstd/serial/fwd.hpp>
 #include <nonstd/bjdata/marker.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
@@ -20,18 +21,6 @@
 #include <cstdint>
 
 namespace nonstd::bjdata {
-
-/** The JSON-level shape of a value, as opposed to its exact wire marker. */
-enum class kind {
-    invalid,
-    null,
-    boolean,
-    integer,
-    real,
-    string,
-    array,
-    object,
-};
 
 class array_iterator;
 class array_range;

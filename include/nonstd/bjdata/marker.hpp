@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nonstd/serial/limits.hpp>
+
 #include <bit>
 #include <concepts>
 #include <type_traits>
@@ -274,9 +276,6 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
 [[nodiscard]] constexpr marker float_marker(double value) noexcept {
     return float_marker(fits_float16(value), fits_float32(value));
 }
-
-/** Maximum container nesting a document may use before it is rejected. */
-inline constexpr int max_depth = 32;
 
 /** Maximum rank of a dimension-array count. */
 inline constexpr std::size_t max_dimensions = 8;

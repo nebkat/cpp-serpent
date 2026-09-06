@@ -419,6 +419,28 @@ python3 test/generate_fixtures.py /tmp/bjdatacli
 
 ## Layout
 
+```
+include/nonstd/
+  serial.hpp   serial/    format-neutral: kind, errc, sinks, the emitter, the
+                          customization layer. Depends on nothing else here.
+  bjdata.hpp   bjdata/    markers, the view, the writer, N-D arrays, block notation
+  json.hpp     json/      the scanner, the reader, the writer
+               bjdata/json.hpp   the one header that knows both formats
+  unaligned.hpp, unaligned_ptr.hpp
+```
+
+`serial/` depends on neither format; `bjdata/` and `json/` each depend only on `serial/`.
+The single bridge is `bjdata/json.hpp`, which renders a BJData document as JSON — and is
+also how a `to_bjdata`-only type reaches JSON, by being encoded and then transcribed:
+
+```cpp
+const auto encoded = to_bytes(value);
+const auto text = to_json(view::over(encoded));
+```
+
+That is deliberately explicit. A hidden intermediate inside `to_json` would allocate a whole
+document behind the caller's back.
+
 The `nonstd/` include paths deliberately match sunrise-firmware's
 `lib/common/include/nonstd/`, so these headers can be dropped in there unchanged.
 `unaligned.hpp` is a verbatim copy of the firmware's and must not fork.

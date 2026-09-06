@@ -3,8 +3,7 @@
 #include "check.hpp"
 
 #include <nonstd/bjdata.hpp>
-#include <nonstd/bjdata/json.hpp>
-#include <nonstd/bjdata/json_reader.hpp>
+#include <nonstd/json.hpp>
 
 #include <map>
 #include <optional>

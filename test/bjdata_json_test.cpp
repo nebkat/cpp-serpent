@@ -4,6 +4,7 @@
 #include "check.hpp"
 
 #include <nonstd/bjdata.hpp>
+#include <nonstd/json.hpp>
 #include <nonstd/bjdata/json.hpp>
 
 #include <array>
@@ -82,8 +83,12 @@ void containers() {
                 "an empty optional is null");
 
     check_equal(to_json(point { 3, 4 }), std::string { "{\"x\":3,\"y\":4}" }, "the macro form writes JSON directly");
-    check_equal(to_json(legacy { 7, "x" }), std::string { "{\"code\":7,\"label\":\"x\"}" },
-                "a to_bjdata type reaches JSON through a document");
+    // A to_bjdata type names the BJData writer, so it cannot be written to JSON directly -
+    // the same limitation from_bjdata has on the way in. Transcribing is explicit, so the
+    // intermediate document is visible rather than hidden inside an accessor.
+    const auto encoded = to_bytes(legacy { 7, "x" });
+    check_equal(to_json(view::over(encoded)), std::string { "{\"code\":7,\"label\":\"x\"}" },
+                "a to_bjdata type reaches JSON by transcribing a document");
     // The same type still round-trips through BJData itself, which is the path JSON borrows.
     const auto restored = from_bytes<legacy>(to_bytes(legacy { 7, "x" }));
     check(restored.has_value() && restored->code == 7 && restored->label == "x",

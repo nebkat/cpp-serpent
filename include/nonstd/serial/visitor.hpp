@@ -3,8 +3,7 @@
 // The two direction-carrying visitors, split out so reflect.hpp can build on them without
 // depending on the serializer dispatch that in turn depends on it.
 
-#include <nonstd/bjdata/view.hpp>
-#include <nonstd/bjdata/writer.hpp>
+#include <nonstd/serial/fwd.hpp>
 
 #include <concepts>
 #include <string_view>
@@ -13,7 +12,9 @@
 
 namespace nonstd::bjdata {
 
+template<typename Writer>
 class write_visitor;
+
 template<typename Source>
 class read_visitor;
 
@@ -31,14 +32,20 @@ using conversion_object_t = std::conditional_t<std::remove_cvref_t<Visitor>::is_
 template<typename Source, typename T>
 bool read_into(Source source, T &value);
 
-/** Names each field on the way out: key, then value. */
+/**
+ * Names each field on the way out: key, then value.
+ *
+ * Generic over the writer, so one bjdata_convert serves every output format. That is the
+ * whole reason a type written once can be emitted as BJData and as JSON.
+ */
+template<typename Writer>
 class write_visitor {
-    writer *out = nullptr;
+    Writer *out = nullptr;
 
 public:
     static constexpr bool is_reading = false;
 
-    explicit write_visitor(writer &out) noexcept: out(&out) {}
+    explicit write_visitor(Writer &out) noexcept: out(&out) {}
 
     template<typename T>
     void member(std::string_view name, const T &value) noexcept {
@@ -46,8 +53,25 @@ public:
         this->out->value(value);
     }
 
-    [[nodiscard]] writer &target() const noexcept { return *this->out; }
+    [[nodiscard]] Writer &target() const noexcept { return *this->out; }
 };
+
+namespace detail {
+
+/**
+ * Stands in for a visitor when asking whether a type has a bjdata_convert.
+ *
+ * Using a real visitor would tie the question to one particular writer, which is exactly
+ * what the customization is supposed to be free of.
+ */
+struct convert_probe {
+    static constexpr bool is_reading = false;
+
+    template<typename T>
+    void member(std::string_view, const T &);
+};
+
+}// namespace detail
 
 /**
  * Names each field on the way in, keeping a cursor into the object.

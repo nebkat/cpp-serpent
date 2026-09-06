@@ -6,7 +6,7 @@
 
 #include <nonstd/bjdata.hpp>
 #include <nonstd/bjdata/json.hpp>
-#include <nonstd/bjdata/json_reader.hpp>
+#include <nonstd/json.hpp>
 #include <nonstd/bjdata/notation.hpp>
 
 #include <algorithm>

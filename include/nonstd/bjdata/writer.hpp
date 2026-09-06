@@ -1,10 +1,10 @@
 #pragma once
 
-#include <nonstd/bjdata/emitter.hpp>
-#include <nonstd/bjdata/error.hpp>
-#include <nonstd/bjdata/fwd.hpp>
+#include <nonstd/serial/emitter.hpp>
+#include <nonstd/serial/error.hpp>
+#include <nonstd/serial/fwd.hpp>
 #include <nonstd/bjdata/marker.hpp>
-#include <nonstd/bjdata/sink.hpp>
+#include <nonstd/serial/sink.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <algorithm>

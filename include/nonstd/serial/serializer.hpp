@@ -1,14 +1,13 @@
 #pragma once
 
-#include <nonstd/bjdata/reflect.hpp>
-#include <nonstd/bjdata/view.hpp>
-#include <nonstd/bjdata/visitor.hpp>
-#include <nonstd/bjdata/writer.hpp>
+#include <nonstd/serial/emitter.hpp>
+#include <nonstd/serial/fwd.hpp>
+#include <nonstd/serial/reflect.hpp>
+#include <nonstd/serial/visitor.hpp>
 
 #include <algorithm>
 #include <concepts>
 #include <optional>
-#include <vector>
 #include <ranges>
 #include <string_view>
 #include <type_traits>
@@ -16,17 +15,11 @@
 
 namespace nonstd::bjdata {
 
-/** A type that names its fields once, for both directions. */
+/** A type that names its fields once, for both directions and every format. */
 template<typename T>
-concept convertible_type = requires(write_visitor &visitor, const T &value) { bjdata_convert(visitor, value); };
-
-/** A type with a separate writer, for when the two directions genuinely differ. */
-template<typename T>
-concept writable_type = requires(writer &out, const T &value) { to_bjdata(out, value); };
-
-/** A type with a separate reader. Names `view`, so it reads BJData only. */
-template<typename T>
-concept readable_type = requires(view source, T &value) { from_bjdata(source, value); };
+concept convertible_type = requires(detail::convert_probe &visitor, const T &value) {
+    bjdata_convert(visitor, value);
+};
 
 /**
  * @brief The dispatch point for user types, specializable for types you cannot add
@@ -37,16 +30,24 @@ concept readable_type = requires(view source, T &value) { from_bjdata(source, va
  */
 template<typename T, typename>
 struct serializer {
-    static void write(writer &out, const T &value) {
+    /**
+     * Writes to any writer. A type using bjdata_convert is carried by every format; one
+     * using to_bjdata names `writer`, so it is BJData-only - the same limitation from() has,
+     * and deliberately symmetric with it.
+     */
+    template<typename Writer>
+    static void write(Writer &out, const T &value) {
         if constexpr (convertible_type<T>) {
-            write_visitor visitor { out };
+            write_visitor<Writer> visitor { out };
             const auto scope = out.object();
             bjdata_convert(visitor, value);
-        } else {
-            static_assert(writable_type<T>,
-                          "no to_bjdata(writer &, const T &) or bjdata_convert for this type; "
-                          "define one, or specialize nonstd::bjdata::serializer<T>");
+        } else if constexpr (requires { to_bjdata(out, value); }) {
             to_bjdata(out, value);
+        } else {
+            static_assert(always_false<Writer>,
+                          "this type has no bjdata_convert, so it can only be written as BJData "
+                          "through to_bjdata(writer &, const T &); give it a bjdata_convert to "
+                          "write any format, or specialize nonstd::bjdata::serializer<T>");
         }
     }
 
@@ -62,7 +63,7 @@ struct serializer {
             read_visitor<Source> visitor { source };
             bjdata_convert(visitor, value);
             return visitor.ok();
-        } else if constexpr (std::same_as<Source, view> && readable_type<T>) {
+        } else if constexpr (requires { from_bjdata(source, value); }) {
             return from_bjdata(source, value);
         } else {
             static_assert(always_false<Source>,
@@ -146,53 +147,6 @@ bool read_into(Source source, T &value) {
         value = std::move(*found);
         return true;
     }
-}
-
-// ---------------- document level ----------------
-
-/** Copies a value into a writer with no re-encoding: its marker, then its bytes. */
-inline void write_value(writer &out, view source) noexcept {
-    const auto payload = source.payload_bytes();
-    if (!payload) {
-        out.fail(errc::type_mismatch);
-        return;
-    }
-    out.put_marker(source.type_marker());
-    out.put(*payload);
-}
-
-/** Writes one value to a sink and reports the bytes produced, or the first failure. */
-template<sink S, typename T>
-std::expected<std::size_t, error> write(S &out, const T &value, writer_options options = {}) {
-    writer target { out, options };
-    target.value(value);
-    return target.finish();
-}
-
-/** Encodes a value into a fresh buffer. The allocating convenience over write(). */
-template<typename T>
-[[nodiscard]] std::vector<std::byte> to_bytes(const T &value, writer_options options = {}) {
-    std::vector<std::byte> buffer;
-    container_sink out { buffer };
-    writer target { out, options };
-    target.value(value);
-    if (!target.finish()) buffer.clear();
-    return buffer;
-}
-
-/** Decodes a value from a buffer, or nullopt when it does not parse. */
-template<typename T>
-[[nodiscard]] std::optional<T> from_bytes(std::span<const std::byte> buffer) {
-    return view::over(buffer).try_get<T>();
-}
-
-/** The exact byte length a value would occupy, with no allocation. */
-template<typename T>
-[[nodiscard]] std::size_t measure(const T &value, writer_options options = {}) {
-    counting_sink counter;
-    writer target { counter, options };
-    target.value(value);
-    return counter.size();
 }
 
 }// namespace nonstd::bjdata

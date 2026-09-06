@@ -2,7 +2,7 @@
 
 #include <nonstd/bjdata/detail.hpp>
 #include <nonstd/bjdata/marker.hpp>
-#include <nonstd/bjdata/real_format.hpp>
+#include <nonstd/serial/real_format.hpp>
 #include <nonstd/bjdata/view.hpp>
 
 #include <charconv>

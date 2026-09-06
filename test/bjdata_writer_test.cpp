@@ -4,7 +4,7 @@
 #include "check.hpp"
 
 #include <nonstd/bjdata.hpp>
-#include <nonstd/bjdata/ostream_sink.hpp>
+#include <nonstd/serial/ostream_sink.hpp>
 
 #include <array>
 #include <iterator>

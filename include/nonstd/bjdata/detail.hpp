@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nonstd/bjdata/error.hpp>
+#include <nonstd/serial/error.hpp>
 #include <nonstd/bjdata/marker.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 

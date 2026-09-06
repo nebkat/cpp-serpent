@@ -6,8 +6,8 @@
 // escape-aware string scan is the load-bearing part: mistake a \" for a closing quote and
 // the whole walk desynchronises, which is why it is separated out and tested on its own.
 
-#include <nonstd/bjdata/error.hpp>
-#include <nonstd/bjdata/marker.hpp>
+#include <nonstd/serial/error.hpp>
+#include <nonstd/serial/limits.hpp>
 
 #include <charconv>
 #include <span>

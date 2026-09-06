@@ -12,7 +12,7 @@
 // It rests on three C++26 papers: P2996 (reflection), P1306 (expansion statements, for
 // `template for`) and P3394 (annotations, for the `[[=value]]` syntax).
 
-#include <nonstd/bjdata/visitor.hpp>
+#include <nonstd/serial/visitor.hpp>
 
 #include <array>
 #include <optional>

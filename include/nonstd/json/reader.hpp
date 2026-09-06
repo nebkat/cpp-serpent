@@ -9,11 +9,11 @@
 // forward iterators holding all the traversal state, and no allocation anywhere except
 // where a decoded string is asked for.
 
-#include <nonstd/bjdata/error.hpp>
-#include <nonstd/bjdata/fwd.hpp>
-#include <nonstd/bjdata/json_scan.hpp>
-#include <nonstd/bjdata/serializer.hpp>
-#include <nonstd/bjdata/view.hpp>
+#include <nonstd/serial/error.hpp>
+#include <nonstd/serial/fwd.hpp>
+#include <nonstd/json/scan.hpp>
+#include <nonstd/serial/kind.hpp>
+#include <nonstd/serial/serializer.hpp>
 
 #include <charconv>
 #include <concepts>

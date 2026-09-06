@@ -2,7 +2,7 @@
 
 // Kept out of sink.hpp so that <ostream> stays out of firmware translation units.
 
-#include <nonstd/bjdata/sink.hpp>
+#include <nonstd/serial/sink.hpp>
 
 #include <ostream>
 #include <span>
