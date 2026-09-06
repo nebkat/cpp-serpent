@@ -14,7 +14,12 @@
 namespace nonstd::bjdata {
 
 class write_visitor;
+template<typename Source>
 class read_visitor;
+
+/** For a static_assert that only fires when its branch is actually taken. */
+template<typename>
+inline constexpr bool always_false = false;
 
 /**
  * Flips constness by direction, so one bjdata_convert can serve both.
@@ -23,8 +28,8 @@ class read_visitor;
 template<typename Visitor, typename T>
 using conversion_object_t = std::conditional_t<std::remove_cvref_t<Visitor>::is_reading, T &, const T &>;
 
-template<typename T>
-bool read_into(view source, T &value);
+template<typename Source, typename T>
+bool read_into(Source source, T &value);
 
 /** Names each field on the way out: key, then value. */
 class write_visitor {
@@ -53,21 +58,24 @@ public:
  * absent is left at whatever value it already held, which gives the firmware's
  * `j.value(key, default)` semantics for free.
  */
+template<typename Source>
 class read_visitor {
-    view source {};
-    member_iterator cursor {};
+    using iterator = decltype(std::declval<const Source &>().items().begin());
+
+    Source source {};
+    iterator cursor {};
     bool complete = true;
 
 public:
     static constexpr bool is_reading = true;
 
-    explicit read_visitor(view source) noexcept: source(source), cursor(source.items().begin()) {}
+    explicit read_visitor(Source source) noexcept: source(source), cursor(source.items().begin()) {}
 
     template<typename T>
     void member(std::string_view name, T &value) {
-        if (this->cursor != member_iterator {}) {
+        if (this->cursor != iterator {}) {
             const auto entry = *this->cursor;
-            if (entry.key == name) {
+            if (entry.key_is(name)) {
                 if (!read_into(entry.value, value)) this->complete = false;
                 ++this->cursor;
                 return;

@@ -14,6 +14,7 @@ set(TESTS
     bjdata_writer
     bjdata_serializer
     bjdata_json
+    bjdata_json_reader
     bjdata_fixture)
 
 foreach(TEST_NAME IN LISTS TESTS)
@@ -38,3 +39,21 @@ target_link_libraries(no_exceptions_test PRIVATE bjdata)
 target_include_directories(no_exceptions_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_options(no_exceptions_test PRIVATE -Wall -Wextra -fno-exceptions)
 add_test(NAME no_exceptions COMMAND no_exceptions_test)
+
+# Every header must compile on its own. A missing include is otherwise invisible, because
+# whichever header a test happened to include first supplied it.
+file(GLOB_RECURSE PUBLIC_HEADERS
+     RELATIVE "${CMAKE_CURRENT_LIST_DIR}/../include"
+     "${CMAKE_CURRENT_LIST_DIR}/../include/*.hpp")
+
+set(STANDALONE_SOURCES)
+foreach(HEADER IN LISTS PUBLIC_HEADERS)
+    string(REGEX REPLACE "[/.]" "_" STEM "${HEADER}")
+    set(GENERATED "${CMAKE_CURRENT_BINARY_DIR}/standalone_${STEM}.cpp")
+    file(WRITE "${GENERATED}" "#include <${HEADER}>\n")
+    list(APPEND STANDALONE_SOURCES "${GENERATED}")
+endforeach()
+
+add_library(standalone_headers OBJECT ${STANDALONE_SOURCES})
+target_link_libraries(standalone_headers PRIVATE bjdata)
+target_compile_options(standalone_headers PRIVATE -Wall -Wextra)

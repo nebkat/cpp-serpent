@@ -1,6 +1,7 @@
 # cpp-bjdata
 
-A zero-copy [BJData](https://github.com/NeuroJSON/bjdata) reader and writer for C++23, with JSON output.
+A zero-copy [BJData](https://github.com/NeuroJSON/bjdata) reader and writer for C++23, reading and
+writing JSON from the same type definitions.
 
 `nonstd::bjdata::view` is a cursor onto bytes you already have. It allocates nothing, copies
 nothing, and owns nothing: strings come back as `std::string_view` into the source buffer,
@@ -197,6 +198,12 @@ that is never mutated — the same convention as `std::string_view` and `std::sp
 
 For a type you cannot add functions to, specialize `serializer<T>`.
 
+**One definition covers all four paths.** `bjdata_convert` names neither reader nor writer, so
+a type using it — which is what `BJDATA_DEFINE_TYPE` writes — is read and written in both
+formats without being told about any of them. The `to_bjdata`/`from_bjdata` pair names
+`writer` and `view` explicitly, so those types are BJData-only in both directions; that
+limitation is symmetric, and deliberate.
+
 ## Reflection (C++26)
 
 `reflect.hpp` implements a fourth form in which the compiler enumerates the fields, so no
@@ -234,9 +241,9 @@ the visitor inlines away entirely either way.
 > unit-tested in every build, so the unproven surface is only the binding to `std::meta`.
 > Acronyms are a known limitation: `IPAddress` converts to `ipaddress`, not `ip_address`.
 
-## JSON output
+## JSON
 
-Write only — there is no JSON parser here, and BJData stays the format anything is read from.
+Both directions, from the same customizations.
 
 ```cpp
 #include <nonstd/bjdata/json.hpp>
@@ -254,6 +261,37 @@ being written as a document first and transcribed — correct, but it allocates.
 
 `write_json(sink, view)` transcribes a document that already exists, which is what you want
 for dumping a stored file, and it is what covers the `to_bjdata` form.
+
+### Reading
+
+```cpp
+#include <nonstd/bjdata/json_reader.hpp>
+
+auto config = from_json<ethernet_config>(text);       // the same type that reads BJData
+auto value  = json_reader::over(text);                // or walk it directly
+validate_json(text);                                  // std::expected<void, error>
+```
+
+**It is a reader, not a view — and that distinction is the format's, not a naming choice.**
+BJData values *are* the bytes, so `view` can hand out `string_view`s into the buffer. JSON
+values must be constructed: `"a\nb"` is six characters of source and three of value. So
+strings are **always decoded**, never handed back as a borrow that happens to work when the
+data contains no escapes — an API whose shape depends on its contents is one that passes
+testing and fails in the field.
+
+| | |
+|---|---|
+| `as_string()` | always decodes, returns `std::string` |
+| `decode_string_into(span<char>)` | decodes into caller storage; refuses to truncate |
+| `string_is("...")` | compares without materialising anything, escapes included |
+
+Numbers are validated against JSON's grammar rather than left to `std::from_chars`, which is
+more permissive: it would accept `inf`, `nan`, `.5` and `5.`, and read `01` as `1`. `1e400`
+parses as a real and then fails to convert, rather than quietly becoming infinity.
+
+Everything else carries over — the same `errc`, the same three accessor tiers, forward
+iterators holding all the traversal state, and no allocation except where a decoded string is
+asked for.
 
 Three things JSON cannot represent, and what happens:
 
@@ -311,6 +349,8 @@ orderings, and the noop rules (skipped in untyped arrays and in *all* objects, b
 `$`-typed arrays). `E` is explicitly rejected rather than skipped. `h` is decoded by bit
 manipulation rather than `_Float16`, which the xtensa backend cannot be relied on for.
 
+JSON is read and written in full, including surrogate-pair escapes.
+
 **Not implemented:** draft 4 Structure-of-Arrays, in either direction. The grammar is
 recorded in the plan and the design is unaffected — SoA adds container kinds, it does not
 reshape the view.
@@ -361,6 +401,12 @@ those exact bytes back, and then four things must hold:
 4. splicing the document with `write_value` reproduces it byte for byte;
 5. **the JSON output matches dart-bjdata's own JSON rendering of those bytes exactly** —
    number formatting, key order, escaping and indentation included.
+
+A sixth pass parses dart-bjdata's own JSON for every fixture and requires the JSON reader to
+produce the same values the BJData reader produces from the same document.
+
+Every header is also compiled on its own, since a missing include is otherwise hidden by
+whichever header a test happened to include first.
 
 The corpus deliberately straddles the packing decision (four elements versus five, a single
 large value that forces a wider marker, a size tie that must stay generic), since that is

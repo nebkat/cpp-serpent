@@ -30,6 +30,11 @@ enum class errc {
     type_mismatch,              ///< the value is not of the requested type
     out_of_range,               ///< no such key or index, or the value does not fit the requested type
 
+    unexpected_character,       ///< a character that cannot begin or continue a JSON value
+    invalid_number,             ///< not a JSON number: a leading zero, a bare '.', a missing exponent
+    invalid_string,             ///< an unescaped control character inside a string
+    invalid_escape,             ///< an unknown escape, a short \u, or an unpaired surrogate
+
     sink_failed,                ///< the destination refused a write, e.g. a full fixed buffer
     unbalanced_container,       ///< an end that does not match its begin
     key_outside_object,         ///< a key written where no object is open
@@ -54,6 +59,10 @@ enum class errc {
         case errc::object_dimension_count: return "an object may not be counted by a dimension array";
         case errc::type_mismatch:          return "type mismatch";
         case errc::out_of_range:           return "out of range";
+        case errc::unexpected_character:   return "unexpected character";
+        case errc::invalid_number:         return "invalid number";
+        case errc::invalid_string:         return "invalid string";
+        case errc::invalid_escape:         return "invalid escape sequence";
         case errc::sink_failed:            return "the destination refused a write";
         case errc::unbalanced_container:   return "unbalanced container";
         case errc::key_outside_object:     return "key written outside an object";

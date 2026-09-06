@@ -6,6 +6,7 @@
 
 #include <nonstd/bjdata.hpp>
 #include <nonstd/bjdata/json.hpp>
+#include <nonstd/bjdata/json_reader.hpp>
 #include <nonstd/bjdata/notation.hpp>
 
 #include <algorithm>
@@ -174,6 +175,53 @@ void reencode(writer &out, view source) {
     }
 }
 
+/** The same canonical rendering as digest(), over the JSON reader instead of the view. */
+std::string json_digest(const json_reader &source) {
+    switch (source.type()) {
+        case kind::null:
+            return "Z";
+        case kind::boolean:
+            return source.as_bool() == true ? "T" : "F";
+        case kind::integer: {
+            const auto signed_value = source.as_int<long long>();
+            if (signed_value) return "i:" + std::format("{}", *signed_value);
+            const auto unsigned_value = source.as_int<unsigned long long>();
+            return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
+        }
+        case kind::real: {
+            const auto real_value = source.as_float<double>();
+            return real_value ? "d:" + repr_real(*real_value) : "?";
+        }
+        case kind::string: {
+            const auto text = source.as_string();
+            if (!text) return "?";
+            return "s" + std::to_string(text->size()) + ":" + *text;
+        }
+        case kind::array: {
+            std::string out = "[";
+            bool first = true;
+            for (const auto element : source.array()) {
+                if (!std::exchange(first, false)) out += ',';
+                out += json_digest(element);
+            }
+            return out + "]";
+        }
+        case kind::object: {
+            std::string out = "{";
+            bool first = true;
+            for (const auto entry : source.items()) {
+                if (!std::exchange(first, false)) out += ',';
+                out += entry.key_string();
+                out += '=';
+                out += json_digest(entry.value);
+            }
+            return out + "}";
+        }
+        default:
+            return "?";
+    }
+}
+
 }// namespace
 
 int main(int argc, char **argv) {
@@ -228,6 +276,19 @@ int main(int argc, char **argv) {
         check_equal(std::string_view { to_json(view::over(bytes), { .indent = 2 }) },
                     std::string_view { read_text(directory / (name + ".json.expected")) },
                     name + ": JSON matches dart-bjdata");
+
+        // And read back: parsing dart-bjdata's own JSON must produce the same values the
+        // BJData reader produces from the same document.
+        {
+            const auto text = read_text(directory / (name + ".json.expected"));
+            const auto parsed = validate_json(text);
+            check(parsed.has_value(), name + ": dart's JSON validates");
+            if (parsed) {
+                check_equal(std::string_view { json_digest(json_reader::over(text)) },
+                            std::string_view { read_text(directory / (name + ".digest")) },
+                            name + ": the JSON reader agrees with the BJData reader");
+            }
+        }
 
         // Splicing copies the value verbatim: its marker, then its payload, no re-encoding.
         {

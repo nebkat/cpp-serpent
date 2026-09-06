@@ -24,7 +24,7 @@ concept convertible_type = requires(write_visitor &visitor, const T &value) { bj
 template<typename T>
 concept writable_type = requires(writer &out, const T &value) { to_bjdata(out, value); };
 
-/** A type with a separate reader. */
+/** A type with a separate reader. Names `view`, so it reads BJData only. */
 template<typename T>
 concept readable_type = requires(view source, T &value) { from_bjdata(source, value); };
 
@@ -50,24 +50,33 @@ struct serializer {
         }
     }
 
-    static bool read(view source, T &value) {
+    /**
+     * Reads from any source that offers the reader interface - a BJData view or a JSON
+     * reader. A type using bjdata_convert therefore reads both formats from one definition;
+     * one using from_bjdata names `view`, so it reads BJData only.
+     */
+    template<typename Source>
+    static bool read(Source source, T &value) {
         if constexpr (convertible_type<T>) {
             if (!source.is_object()) return false;
-            read_visitor visitor { source };
+            read_visitor<Source> visitor { source };
             bjdata_convert(visitor, value);
             return visitor.ok();
-        } else {
-            static_assert(readable_type<T>,
-                          "no from_bjdata(view, T &) or bjdata_convert for this type; "
-                          "define one, or specialize nonstd::bjdata::serializer<T>");
+        } else if constexpr (std::same_as<Source, view> && readable_type<T>) {
             return from_bjdata(source, value);
+        } else {
+            static_assert(always_false<Source>,
+                          "this type has no bjdata_convert, so it can only be read from BJData "
+                          "through from_bjdata(view, T &); give it a bjdata_convert to read any "
+                          "format, or specialize nonstd::bjdata::serializer<T>");
+            return false;
         }
     }
 };
 
 /** Reads one value into a destination, handling optionals and containers along the way. */
-template<typename T>
-bool read_into(view source, T &value) {
+template<typename Source, typename T>
+bool read_into(Source source, T &value) {
     if constexpr (detail::optional_like<T>) {
         if (!source.is_valid() || source.is_null()) {
             value.reset();
@@ -78,15 +87,37 @@ bool read_into(view source, T &value) {
         value = std::move(item);
         return true;
     } else if constexpr (detail::byte_range<T>) {
-        const auto bytes = source.as_binary();
-        if (!bytes) return false;
-        if constexpr (requires(T &target) { target.assign(bytes->begin(), bytes->end()); }) {
-            value.assign(bytes->begin(), bytes->end());
+        if constexpr (requires(T &target) { target.clear(); }) value.clear();
+        if constexpr (requires { source.as_binary(); }) {
+            const auto bytes = source.as_binary();
+            if (!bytes) return false;
+            if constexpr (requires(T &target) { target.assign(bytes->begin(), bytes->end()); }) {
+                value.assign(bytes->begin(), bytes->end());
+            } else {
+                if (bytes->size() != std::ranges::size(value)) return false;
+                std::ranges::copy(*bytes, std::ranges::begin(value));
+            }
+            return true;
         } else {
-            if (bytes->size() != std::ranges::size(value)) return false;
-            std::ranges::copy(*bytes, std::ranges::begin(value));
+            // JSON has no binary, and this library writes it as an array of integers.
+            if (!source.is_array()) return false;
+            std::size_t index = 0;
+            for (const auto element : source.array()) {
+                const auto octet = element.template as_int<std::uint8_t>();
+                if (!octet) return false;
+                if constexpr (requires(T &target) { target.push_back(std::byte {}); }) {
+                    value.push_back(static_cast<std::byte>(*octet));
+                } else {
+                    if (index >= std::ranges::size(value)) return false;
+                    *(std::ranges::begin(value) + static_cast<std::ptrdiff_t>(index)) = static_cast<std::byte>(*octet);
+                }
+                ++index;
+            }
+            if constexpr (!requires(T &target) { target.push_back(std::byte {}); }) {
+                return index == std::ranges::size(value);
+            }
+            return true;
         }
-        return true;
     } else if constexpr (requires(T &target) { target.clear(); target.emplace_back(); }) {
         if (!source.is_array()) return false;
         value.clear();
@@ -98,14 +129,19 @@ bool read_into(view source, T &value) {
     } else if constexpr (requires(T &target) { target.clear(); target.emplace(typename T::key_type {}, typename T::mapped_type {}); }) {
         if (!source.is_object()) return false;
         value.clear();
-        for (const auto [key, element] : source.items()) {
+        for (const auto entry : source.items()) {
             typename T::mapped_type slot {};
-            if (!read_into(element, slot)) return false;
-            value.emplace(typename T::key_type { key }, std::move(slot));
+            if (!read_into(entry.value, slot)) return false;
+            // A BJData key is already a view of the buffer; a JSON key has to be decoded.
+            if constexpr (std::constructible_from<typename T::key_type, decltype(entry.key)>) {
+                value.emplace(typename T::key_type { entry.key }, std::move(slot));
+            } else {
+                value.emplace(typename T::key_type { entry.key_string() }, std::move(slot));
+            }
         }
         return true;
     } else {
-        auto found = source.try_get<T>();
+        auto found = source.template try_get<T>();
         if (!found) return false;
         value = std::move(*found);
         return true;

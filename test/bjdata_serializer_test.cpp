@@ -3,6 +3,8 @@
 #include "check.hpp"
 
 #include <nonstd/bjdata.hpp>
+#include <nonstd/bjdata/json.hpp>
+#include <nonstd/bjdata/json_reader.hpp>
 
 #include <map>
 #include <optional>
@@ -255,6 +257,55 @@ void reflection_seam() {
     check(round_trip(point { 1, 2 }).has_value(), "the macro form still carries the type");
 }
 
+/**
+ * One definition, two formats, both directions.
+ *
+ * bjdata_convert never names either reader or either writer, so a type that uses it - which
+ * is what BJDATA_DEFINE_TYPE writes - is carried by all four paths without being told about
+ * any of them.
+ */
+void both_formats() {
+    const document original {
+        .points = { { 1, 2 }, { 3, 4 } },
+        .counts = { { "a", 1 }, { "b", 2 } },
+        .highlight = segment { { 0, 0 }, { 9, 9 }, "hot" },
+    };
+
+    const auto binary = to_bytes(original);
+    const auto text = to_json(original);
+    check(validate(binary).has_value(), "the BJData encoding is well formed");
+    check(validate_json(text).has_value(), "the JSON encoding is well formed");
+
+    const auto from_binary = from_bytes<document>(binary);
+    const auto from_text = from_json<document>(text);
+    check(from_binary.has_value(), "reads back from BJData");
+    check(from_text.has_value(), "reads back from JSON");
+    if (!from_binary || !from_text) return;
+
+    // The two paths must agree with each other, not merely each with itself.
+    check_equal(to_json(*from_binary), to_json(*from_text), "both formats decode to the same value");
+    check_equal(to_json(*from_text), text, "and JSON survives a full round trip unchanged");
+
+    check_equal(from_text->points.size(), std::size_t { 2 }, "vector member through JSON");
+    check_equal(from_text->points.at(1).y, 4, "nested struct through JSON");
+    check_equal(from_text->counts.at("b"), 2, "map member through JSON");
+    check(from_text->highlight.has_value() && from_text->highlight->label == "hot",
+          "optional struct member through JSON");
+
+    // A key absent from the JSON leaves the member at its default, exactly as for BJData.
+    const auto partial = from_json<point>(R"({"y":5})");
+    check(partial.has_value() && partial->x == 0 && partial->y == 5, "an absent key keeps its default");
+
+    // And key order still does not matter.
+    const auto reordered = from_json<point>(R"({ "y" : 2 , "x" : 1 })");
+    check(reordered.has_value() && reordered->x == 1 && reordered->y == 2, "reordered JSON keys");
+
+    // Non-intrusive and macro forms carry across too.
+    check(from_json<extent>(R"({"width":640,"height":480})")->width == 640, "non-intrusive form reads JSON");
+    check(from_json<segment>(to_json(segment { { 1, 1 }, { 2, 2 }, "s" }))->label == "s",
+          "the convert form round-trips through JSON");
+}
+
 void sizing() {
     const point value { 3, 4 };
     check_equal(measure(value), to_bytes(value).size(), "measure agrees with to_bytes");
@@ -271,6 +322,7 @@ int main() {
     containers_and_nesting();
     key_order_and_absence();
     reflection_seam();
+    both_formats();
     sizing();
     return report("bjdata_serializer");
 }

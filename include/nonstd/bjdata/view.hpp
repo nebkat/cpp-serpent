@@ -12,6 +12,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -305,6 +306,10 @@ private:
 struct key_value {
     std::string_view key;
     view value;
+
+    /** Present so this and json_key_value offer the same interface to generic code. */
+    [[nodiscard]] constexpr bool key_is(std::string_view other) const noexcept { return this->key == other; }
+    [[nodiscard]] std::string key_string() const { return std::string { this->key }; }
 };
 
 /**
