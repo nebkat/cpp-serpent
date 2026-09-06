@@ -4,10 +4,10 @@
 // failure, the container-nesting bookkeeping, and the dispatch that turns a C++ value into
 // calls on whichever of them you are holding.
 
-#include <nonstd/serial/error.hpp>
-#include <nonstd/serial/fwd.hpp>
-#include <nonstd/serial/limits.hpp>
-#include <nonstd/serial/sink.hpp>
+#include <serpent/error.hpp>
+#include <serpent/fwd.hpp>
+#include <serpent/limits.hpp>
+#include <serpent/sink.hpp>
 
 #include <concepts>
 #include <expected>
@@ -20,7 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::serial {
+namespace serpent {
 
 namespace detail {
 
@@ -197,4 +197,4 @@ void emit_value(Emitter &out, const T &item) {
     }
 }
 
-}// namespace nonstd::serial
+}// namespace serpent

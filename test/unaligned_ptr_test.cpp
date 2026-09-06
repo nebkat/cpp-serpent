@@ -166,7 +166,7 @@ void subranges() {
 
     using const_span = unaligned_little_span<const std::uint16_t>;
     const std::span<const std::byte> raw { scratch + 1, 17 };
-    check_equal(const_span::from_bytes(raw).size(), std::size_t { 8 }, "from_bytes truncates to whole elements");
+    check_equal(const_span::decode_TMP(raw).size(), std::size_t { 8 }, "decode_TMP truncates to whole elements");
     check(!const_span::try_from_bytes(raw).has_value(), "try_from_bytes rejects a partial element");
     check(const_span::try_from_bytes(raw.first(16)).has_value(), "try_from_bytes accepts an exact multiple");
 

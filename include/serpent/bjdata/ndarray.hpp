@@ -1,7 +1,7 @@
 #pragma once
 
-#include <nonstd/bjdata/detail.hpp>
-#include <nonstd/bjdata/view.hpp>
+#include <serpent/bjdata/detail.hpp>
+#include <serpent/bjdata/view.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <optional>
@@ -10,9 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 /**
  * @brief A multi-dimensional view over a typed array counted by a dimension array.
@@ -92,14 +90,14 @@ public:
 
     /** The whole payload in place, when the slice is contiguous and T matches exactly. */
     template<typename T>
-    [[nodiscard]] std::optional<unaligned_little_span<const T>> flat() const noexcept {
+    [[nodiscard]] std::optional<nonstd::unaligned_little_span<const T>> flat() const noexcept {
         static_assert(strong_type_for<T>() != marker::invalid, "T does not correspond to a BJData strong type");
         if (!this->is_valid() || this->element != strong_type_for<T>() || !this->is_contiguous()) return std::nullopt;
 
         const auto width = payload_width(this->element);
         const auto count = this->total();
         if (count > static_cast<std::uint64_t>(this->limit() - this->base) / width) return std::nullopt;
-        return unaligned_little_span<const T> { this->base, count };
+        return nonstd::unaligned_little_span<const T> { this->base, count };
     }
 
     friend std::optional<ndarray_view> as_ndarray(const view &value) noexcept;
@@ -149,4 +147,4 @@ public:
     return result;
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

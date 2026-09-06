@@ -1,10 +1,10 @@
 #pragma once
 
-#include <nonstd/serial/emitter.hpp>
-#include <nonstd/serial/error.hpp>
-#include <nonstd/serial/fwd.hpp>
-#include <nonstd/bjdata/marker.hpp>
-#include <nonstd/serial/sink.hpp>
+#include <serpent/emitter.hpp>
+#include <serpent/error.hpp>
+#include <serpent/fwd.hpp>
+#include <serpent/bjdata/marker.hpp>
+#include <serpent/sink.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <algorithm>
@@ -20,9 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 class array_scope;
 class object_scope;
@@ -114,8 +112,8 @@ public:
 
     template<typename T>
     void put_raw(T value) noexcept {
-        const unaligned_little<T> storage { value };
-        this->put(std::span<const std::byte> { storage.data(), unaligned_little<T>::storage_bytes });
+        const nonstd::unaligned_little<T> storage { value };
+        this->put(std::span<const std::byte> { storage.data(), nonstd::unaligned_little<T>::storage_bytes });
     }
 
     /** The payload of an integer marker, truncated to that marker's width. */
@@ -258,7 +256,7 @@ public:
     }
 
     template<typename T>
-    void typed_array(unaligned_little_span<const T> values) noexcept {
+    void typed_array(nonstd::unaligned_little_span<const T> values) noexcept {
         this->put_marker(marker::array_begin);
         this->put_marker(marker::strong_type);
         this->put_marker(strong_type_for<T>());
@@ -275,7 +273,7 @@ public:
     }
 
     /** A range of bytes: binary. Called by emit_value. */
-    template<serial::detail::byte_range R>
+    template<serpent::detail::byte_range R>
     void bytes(const R &items) noexcept {
         if constexpr (std::ranges::contiguous_range<R>) {
             this->binary(std::span<const std::byte> { std::ranges::data(items), std::ranges::size(items) });
@@ -449,4 +447,4 @@ void writer::range(const R &items) noexcept {
     for (const auto &item : items) this->value(item);
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

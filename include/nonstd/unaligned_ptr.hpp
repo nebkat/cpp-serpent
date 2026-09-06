@@ -225,7 +225,7 @@ public:
     }
 
     /** Truncates to whole elements; trailing bytes that cannot form one are ignored. */
-    [[nodiscard]] static constexpr unaligned_span from_bytes(std::span<byte_type> bytes) noexcept {
+    [[nodiscard]] static constexpr unaligned_span decode_TMP(std::span<byte_type> bytes) noexcept {
         return unaligned_span { bytes.data(), bytes.size() / stride };
     }
 

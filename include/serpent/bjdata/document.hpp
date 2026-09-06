@@ -4,10 +4,10 @@
 // document into another. These name the BJData writer and view, so they live here rather
 // than in serial/, which knows about neither.
 
-#include <nonstd/bjdata/view.hpp>
-#include <nonstd/bjdata/writer.hpp>
-#include <nonstd/serial/serializer.hpp>
-#include <nonstd/serial/sink.hpp>
+#include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/writer.hpp>
+#include <serpent/serializer.hpp>
+#include <serpent/sink.hpp>
 
 #include <expected>
 #include <optional>
@@ -16,9 +16,7 @@
 
 #include <cstddef>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 /** Copies a value into a writer with no re-encoding: its marker, then its bytes. */
 inline void write_value(writer &out, view source) noexcept {
@@ -41,7 +39,7 @@ std::expected<std::size_t, error> write(S &out, const T &value, writer_options o
 
 /** Encodes a value into a fresh buffer. The allocating convenience over write(). */
 template<typename T>
-[[nodiscard]] std::vector<std::byte> to_bytes(const T &value, writer_options options = {}) {
+[[nodiscard]] std::vector<std::byte> encode(const T &value, writer_options options = {}) {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
     writer target { out, options };
@@ -52,7 +50,7 @@ template<typename T>
 
 /** Decodes a value from a buffer, or nullopt when it does not parse. */
 template<typename T>
-[[nodiscard]] std::optional<T> from_bytes(std::span<const std::byte> buffer) {
+[[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
     return view::over(buffer).try_get<T>();
 }
 
@@ -65,4 +63,4 @@ template<typename T>
     return counter.size();
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

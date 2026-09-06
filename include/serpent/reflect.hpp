@@ -12,7 +12,7 @@
 // It rests on three C++26 papers: P2996 (reflection), P1306 (expansion statements, for
 // `template for`) and P3394 (annotations, for the `[[=value]]` syntax).
 
-#include <nonstd/serial/visitor.hpp>
+#include <serpent/visitor.hpp>
 
 #include <array>
 #include <optional>
@@ -22,16 +22,16 @@
 #include <cstddef>
 
 #if defined(__cpp_reflection) && __cpp_reflection >= 202411L && defined(__cpp_impl_reflection_annotations)
-#define NONSTD_SERIAL_HAS_REFLECTION 1
+#define SERPENT_HAS_REFLECTION 1
 #include <meta>
 #else
-#define NONSTD_SERIAL_HAS_REFLECTION 0
+#define SERPENT_HAS_REFLECTION 0
 #endif
 
-namespace nonstd::serial {
+namespace serpent {
 
 /** Whether this build can enumerate a type's fields for itself. */
-inline constexpr bool reflection_available = NONSTD_SERIAL_HAS_REFLECTION != 0;
+inline constexpr bool reflection_available = SERPENT_HAS_REFLECTION != 0;
 
 // ---------------- annotations ----------------
 //
@@ -178,7 +178,7 @@ struct name_buffer {
 
 // ---------------- the reflected conversion ----------------
 
-#if NONSTD_SERIAL_HAS_REFLECTION
+#if SERPENT_HAS_REFLECTION
 
 namespace detail {
 
@@ -223,21 +223,21 @@ consteval bool opted_in() {
 /**
  * A type whose fields this library may enumerate.
  *
- * Deliberately opt-in. Reflecting every aggregate that merely lacks a serial_convert would
+ * Deliberately opt-in. Reflecting every aggregate that merely lacks a json_convert would
  * turn any struct that happens to be serializable into a wire-format commitment, silently.
  */
 template<typename T>
 concept reflected_type = std::is_class_v<T> && detail::opted_in<T>();
 
 /**
- * Generates the same member() calls NONSTD_SERIAL_DEFINE_TYPE would, from the type itself.
+ * Generates the same member() calls SERPENT_DEFINE_TYPE would, from the type itself.
  *
  * Found by ordinary unqualified lookup from convertible_type in serializer.hpp, which is why
  * this header is included before it.
  */
 template<typename T>
     requires reflected_type<T>
-void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), T> value) {
+void json_convert(auto &visitor, conversion_object_t<decltype(visitor), T> value) {
     constexpr auto members = std::define_static_array(
             std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
 
@@ -256,4 +256,4 @@ concept reflected_type = false;
 
 #endif
 
-}// namespace nonstd::serial
+}// namespace serpent

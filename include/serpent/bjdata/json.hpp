@@ -5,37 +5,39 @@
 // The bridge between the two formats, so neither json/ nor bjdata/ has to know about the
 // other, and it is how an already-encoded document is rendered:
 //
-//     to_json(view::over(to_bytes(value)))
+//     json::encode(bjdata::view::over(bjdata::encode(value)))
 
-#include <nonstd/bjdata/document.hpp>
-#include <nonstd/bjdata/ndarray.hpp>
-#include <nonstd/bjdata/view.hpp>
-#include <nonstd/json/writer.hpp>
-#include <nonstd/serial/sink.hpp>
+#include <serpent/bjdata/document.hpp>
+#include <serpent/bjdata/ndarray.hpp>
+#include <serpent/bjdata/view.hpp>
+#include <serpent/json/writer.hpp>
+#include <serpent/sink.hpp>
 
 #include <expected>
 #include <string>
 
 #include <cstddef>
 
-namespace nonstd::bjdata {
+namespace serpent::json {
 
-using namespace serial;
+using bjdata::view;
+using bjdata::ndarray_view;
+using bjdata::as_ndarray;
 
-void write_json_value(json::writer &out, view source);
+void write_value(writer &out, view source);
 
 /** An N-D array is nested rather than flattened, which is what a JSON consumer expects. */
-inline void write_json_ndarray(json::writer &out, const ndarray_view &source) {
+inline void write_ndarray(writer &out, const ndarray_view &source) {
     if (source.rank() == 0) {
-        write_json_value(out, source.value());
+        write_value(out, source.value());
         return;
     }
     const auto scope = out.array();
-    for (std::size_t index = 0; index < source.size(); ++index) write_json_ndarray(out, source.at(index));
+    for (std::size_t index = 0; index < source.size(); ++index) write_ndarray(out, source.at(index));
 }
 
 /** Transcribes one BJData value, and everything under it, as JSON. */
-inline void write_json_value(json::writer &out, view source) {
+inline void write_value(writer &out, view source) {
     switch (source.type()) {
         case kind::null:
             out.null();
@@ -44,7 +46,7 @@ inline void write_json_value(json::writer &out, view source) {
             out.boolean(source.as_bool() == true);
             return;
         case kind::integer:
-            if (source.type_marker() == marker::uint64) out.integer(source.as_int<std::uint64_t>().value_or(0));
+            if (source.type_marker() == bjdata::marker::uint64) out.integer(source.as_int<std::uint64_t>().value_or(0));
             else out.integer(source.as_int<std::int64_t>().value_or(0));
             return;
         case kind::real:
@@ -52,24 +54,24 @@ inline void write_json_value(json::writer &out, view source) {
             return;
         case kind::string: {
             const auto text = source.as_string().value_or("");
-            if (source.type_marker() == marker::high_precision) out.high_precision(text);
+            if (source.type_marker() == bjdata::marker::high_precision) out.high_precision(text);
             else out.string(text);
             return;
         }
         case kind::array: {
             if (const auto shaped = as_ndarray(source); shaped && shaped->rank() > 1) {
-                write_json_ndarray(out, *shaped);
+                write_ndarray(out, *shaped);
                 return;
             }
             const auto scope = out.array();
-            for (const auto element : source.array()) write_json_value(out, element);
+            for (const auto element : source.array()) write_value(out, element);
             return;
         }
         case kind::object: {
             const auto scope = out.object();
             for (const auto [name, element] : source.items()) {
                 out.key(name);
-                write_json_value(out, element);
+                write_value(out, element);
             }
             return;
         }
@@ -87,22 +89,22 @@ inline void write_json_value(json::writer &out, view source) {
  * call it a success. payload_bytes() costs a single pass over the value.
  */
 template<sink S>
-std::expected<std::size_t, error> write_json(S &out, view source, json::writer_options options = {}) {
-    json::writer target { out, options };
+std::expected<std::size_t, error> write(S &out, view source, writer_options options = {}) {
+    writer target { out, options };
     if (!source.payload_bytes()) {
         target.fail(errc::unexpected_end);
         return target.finish();
     }
-    write_json_value(target, source);
+    write_value(target, source);
     return target.finish();
 }
 
-/** The allocating convenience over write_json. Empty when the document does not parse. */
-[[nodiscard]] inline std::string to_json(view source, json::writer_options options = {}) {
+/** The allocating convenience over write_TMP. Empty when the document does not parse. */
+[[nodiscard]] inline std::string encode(view source, writer_options options = {}) {
     std::string text;
     container_sink out { text };
-    if (!write_json(out, source, options)) text.clear();
+    if (!write(out, source, options)) text.clear();
     return text;
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::json

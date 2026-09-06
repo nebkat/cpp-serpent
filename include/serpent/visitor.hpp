@@ -3,14 +3,14 @@
 // The two direction-carrying visitors, split out so reflect.hpp can build on them without
 // depending on the serializer dispatch that in turn depends on it.
 
-#include <nonstd/serial/fwd.hpp>
+#include <serpent/fwd.hpp>
 
 #include <concepts>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
-namespace nonstd::serial {
+namespace serpent {
 
 template<typename Writer>
 class write_visitor;
@@ -23,7 +23,7 @@ template<typename>
 inline constexpr bool always_false = false;
 
 /**
- * Flips constness by direction, so one serial_convert can serve both.
+ * Flips constness by direction, so one json_convert can serve both.
  * Lifted from isobus's conversion_object_t<Direction, T>.
  */
 template<typename Visitor, typename T>
@@ -35,7 +35,7 @@ bool read_into(Source source, T &value);
 /**
  * Names each field on the way out: key, then value.
  *
- * Generic over the writer, so one serial_convert serves every output format. That is the
+ * Generic over the writer, so one json_convert serves every output format. That is the
  * whole reason a type written once can be emitted as BJData and as JSON.
  */
 template<typename Writer>
@@ -59,7 +59,7 @@ public:
 namespace detail {
 
 /**
- * Stands in for a visitor when asking whether a type has a serial_convert.
+ * Stands in for a visitor when asking whether a type has a json_convert.
  *
  * Using a real visitor would tie the question to one particular writer, which is exactly
  * what the customization is supposed to be free of.
@@ -113,4 +113,4 @@ public:
     [[nodiscard]] bool ok() const noexcept { return this->complete; }
 };
 
-}// namespace nonstd::serial
+}// namespace serpent

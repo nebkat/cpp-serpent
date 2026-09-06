@@ -1,7 +1,7 @@
 #pragma once
 
-#include <nonstd/serial/error.hpp>
-#include <nonstd/bjdata/marker.hpp>
+#include <serpent/error.hpp>
+#include <serpent/bjdata/marker.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <limits>
@@ -11,15 +11,13 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 namespace detail {
 
 template<typename T>
 [[nodiscard]] inline T load(const std::byte *position) noexcept {
-    return *unaligned_little_ptr<const T> { position };
+    return *nonstd::unaligned_little_ptr<const T> { position };
 }
 
 /** Reads a fixed-width integer payload, sign-extending the signed markers. */
@@ -432,4 +430,4 @@ inline void skip_value(cursor &source, marker kind, int depth) noexcept {
 
 }// namespace detail
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

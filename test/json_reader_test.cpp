@@ -3,14 +3,15 @@
 
 #include "check.hpp"
 
-#include <nonstd/json.hpp>
+#include <serpent/json.hpp>
 
 #include <array>
 #include <cmath>
 #include <string>
 #include <vector>
 
-using namespace nonstd::json;
+using namespace serpent;
+using namespace serpent::json;
 
 static_assert(std::forward_iterator<array_iterator>);
 static_assert(std::forward_iterator<member_iterator>);
@@ -106,13 +107,13 @@ void containers() {
 
 void malformed() {
     const auto rejected = [](std::string_view text, errc expected, std::string_view what) {
-        const auto result = validate_json(text);
+        const auto result = json::validate(text);
         check(!result.has_value(), what);
         if (!result) check_equal(result.error().code(), expected, what);
     };
 
-    check(validate_json("[1,2,3]").has_value(), "a well formed array validates");
-    check(validate_json("  {\"a\": [1, null, true]}  ").has_value(), "whitespace is allowed around it");
+    check(json::validate("[1,2,3]").has_value(), "a well formed array validates");
+    check(json::validate("  {\"a\": [1, null, true]}  ").has_value(), "whitespace is allowed around it");
 
     rejected("", errc::unexpected_end, "empty input");
     rejected("[1,2", errc::unterminated_container, "unterminated array");
@@ -155,7 +156,7 @@ void truncation() {
         const std::string_view whole { text };
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const auto prefix = whole.substr(0, length);
-            check(!validate_json(prefix).has_value(), "a truncated document fails validation");
+            check(!json::validate(prefix).has_value(), "a truncated document fails validation");
 
             // Traversal of an unvalidated truncated document must still be safe.
             const auto value = reader::over(prefix);

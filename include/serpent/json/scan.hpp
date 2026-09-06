@@ -6,8 +6,8 @@
 // escape-aware string scan is the load-bearing part: mistake a \" for a closing quote and
 // the whole walk desynchronises, which is why it is separated out and tested on its own.
 
-#include <nonstd/serial/error.hpp>
-#include <nonstd/serial/limits.hpp>
+#include <serpent/error.hpp>
+#include <serpent/limits.hpp>
 
 #include <charconv>
 #include <span>
@@ -16,9 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::json::scanner {
-
-using namespace serial;
+namespace serpent::json::scanner {
 
 
 [[nodiscard]] constexpr bool is_space(char value) noexcept {
@@ -405,4 +403,4 @@ inline void skip_value(cursor &scan, int depth) noexcept {
     }
 }
 
-}// namespace nonstd::json::scanner
+}// namespace serpent::json::scanner

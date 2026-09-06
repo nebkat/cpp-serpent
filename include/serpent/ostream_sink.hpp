@@ -2,14 +2,14 @@
 
 // Kept out of sink.hpp so that <ostream> stays out of firmware translation units.
 
-#include <nonstd/serial/sink.hpp>
+#include <serpent/sink.hpp>
 
 #include <ostream>
 #include <span>
 
 #include <cstddef>
 
-namespace nonstd::serial {
+namespace serpent {
 
 /** Writes straight to a std::ostream, which is what app::fs::save_json's ofstream needs. */
 class ostream_sink {
@@ -24,4 +24,4 @@ public:
     }
 };
 
-}// namespace nonstd::serial
+}// namespace serpent

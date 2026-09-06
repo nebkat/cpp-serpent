@@ -3,8 +3,8 @@
 
 #include "check.hpp"
 
-#include <nonstd/bjdata.hpp>
-#include <nonstd/serial/ostream_sink.hpp>
+#include <serpent/bjdata.hpp>
+#include <serpent/ostream_sink.hpp>
 
 #include <array>
 #include <iterator>
@@ -14,7 +14,8 @@
 #include <string>
 #include <vector>
 
-using namespace nonstd::bjdata;
+using namespace serpent;
+using namespace serpent::bjdata;
 
 namespace {
 

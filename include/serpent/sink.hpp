@@ -8,7 +8,7 @@
 
 #include <cstddef>
 
-namespace nonstd::serial {
+namespace serpent {
 
 /**
  * @brief Anything with a member write(std::span<const std::byte>).
@@ -128,4 +128,4 @@ public:
 template<typename Iterator>
 iterator_sink(Iterator) -> iterator_sink<Iterator>;
 
-}// namespace nonstd::serial
+}// namespace serpent

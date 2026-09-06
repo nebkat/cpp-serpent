@@ -4,9 +4,13 @@ A C++23 serialization library. Zero-copy [BJData](https://github.com/NeuroJSON/b
 and writing, JSON reading and writing, and one definition per type that serves all four.
 
 Named rather than described, because it is not a BJData library with JSON bolted on nor the
-reverse — and because a third format would not make the name wrong. The namespaces stay
-`nonstd::` regardless: the whole layout exists so these headers drop into a firmware's
-`lib/common/include/nonstd/` unchanged.
+reverse — and because a third format would not make the name wrong.
+
+**The point is what it does not do.** There is no DOM. Nothing is inflated from bytes into an
+intermediate object graph and then converted into your classes; the library hands you forward
+iterators into the bytes you already have, and decoders that go straight from those into your
+types. A freely-constructible nlohmann-style value object is a layer that could sit *on top*
+of this, not something it is built out of.
 
 `nonstd::bjdata::view` is a cursor onto bytes you already have. It allocates nothing, copies
 nothing, and owns nothing: strings come back as `std::string_view` into the source buffer,
@@ -18,7 +22,7 @@ value's extent follows from its marker plus a length prefix, so a document can b
 in place rather than inflated into a DOM.
 
 ```cpp
-#include <nonstd/bjdata.hpp>
+#include <serpent/bjdata.hpp>
 
 using namespace nonstd::bjdata;
 
@@ -121,7 +125,7 @@ stays out of embedded translation units). A bare lambda works too — `writer w 
 
 Failures **latch**: a full buffer, an unbalanced container or a key written outside an object
 records the first error and makes everything after it a no-op, so you check once at the end
-rather than after every field. Convenience wrappers: `to_bytes(value)`, `from_bytes<T>(bytes)`
+rather than after every field. Convenience wrappers: `encode_TMP(value)`, `decode_TMP<T>(bytes)`
 and `measure(value)`, the last of which computes an exact byte length with no allocation.
 
 The sink is type-erased inside `writer` — a function pointer and a context pointer — so
@@ -159,7 +163,7 @@ struct segment {
     point start, end;
     std::string label;
 
-    friend void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
+    friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
         visitor.member("start", value.start);
         visitor.member("end",   value.end);
         visitor.member("label", value.label);
@@ -182,10 +186,10 @@ than a truncated document.
 **A macro**, when the body would just be a list of members:
 
 ```cpp
-struct point { int x = 0; int y = 0; NONSTD_SERIAL_DEFINE_TYPE(point, x, y) };
+struct point { int x = 0; int y = 0; SERPENT_DEFINE_TYPE(point, x, y) };
 ```
 
-`NONSTD_SERIAL_DEFINE_TYPE_NON_INTRUSIVE(type, ...)` does the same from outside the type. Field
+`SERPENT_DEFINE_TYPE_NON_INTRUSIVE(type, ...)` does the same from outside the type. Field
 names cannot be recovered without reflection, so a macro is the only option; the shape
 deliberately matches nlohmann's `..._DEFINE_TYPE` family.
 
@@ -193,28 +197,47 @@ deliberately matches nlohmann's `..._DEFINE_TYPE` family.
 write, a value that is a string one way and a bool the other:
 
 ```cpp
-friend void serial_write(bjdata::writer &out, const connection &value);
-friend bool serial_read(bjdata::view source, connection &value);
+friend void to_json(auto &out, const connection &value);
+friend bool from_json(auto source, connection &value);
 ```
 
-These are resolved by ADL against whichever writer or reader is passed, so the escape hatch
-costs no format-neutrality: overload them per format when the bodies differ, or declare one
-`auto &` template when they don't.
+Templated on the writer and the reader, not overloaded per format — which means a body can
+ask what *this* writer can do:
 
 ```cpp
-friend void serial_write(json::writer &out, const connection &value);   // and JSON too
+friend void to_json(auto &out, const samples &value) {
+    const auto scope = out.object();
+    out.key("readings");
+    if constexpr (requires { out.typed_array(std::span<const std::uint16_t> { value.readings }); }) {
+        out.typed_array(std::span<const std::uint16_t> { value.readings });   // BJData: one memcpy
+    } else {
+        out.value(value.readings);                                            // JSON: numbers
+    }
+}
 ```
+
+That is capability detection rather than overloading, so a format that arrives later gets the
+general path for free instead of a missing overload. The names carry no format because the
+data model does not either — it is JSON's model, whichever bytes it ends up as.
 
 Note the asymmetry in how they are passed: the writer is a mutable reference because writing
 accumulates, while the reader goes **by value** because it is a small trivially copyable
 handle that is never mutated — the same convention as `std::string_view` and `std::span`.
 
-For a type you cannot add functions to, specialize `serializer<T>`.
+For a type you cannot add functions to, specialize `serpent::serializer<T>`.
 
-**One definition covers all four paths.** `serial_convert` names neither reader nor writer, so
-a type using it — which is what `NONSTD_SERIAL_DEFINE_TYPE` writes — is read and written in
-both formats without being told about any of them. Nothing in the customization layer names a
-format; the only names that do are the ones you write yourself, in the overloads you choose.
+**What templating costs.** One instantiation per type per format actually used, and only for
+types actually used with both — templates instantiate on use, so a BJData-only type pays
+once. Measured on arm64 at `-Os`, structs of five mixed fields, reading and writing:
+
+| | per type |
+|---|---|
+| BJData only | 1,234 B |
+| both formats | 2,376 B |
+
+So a second format costs about 1.1 KB of code for each type that genuinely needs both. The
+alternative — erasing the writer so there is one instantiation — would cost `typed_array`,
+which is the thing the fast path exists for.
 
 ## Reflection (C++26)
 
@@ -222,20 +245,20 @@ format; the only names that do are the ones you write yourself, in the overloads
 list is written at all:
 
 ```cpp
-struct [[=serial::serializable]] [[=serial::naming{serial::naming_style::snake_case}]] ethernet_config {
-    [[=serial::key("ip")]] std::string ip_address;
-    [[=serial::skip]]      int cache_generation;
+struct [[=serpent::serializable]] [[=serpent::naming{serpent::naming_style::snake_case}]] ethernet_config {
+    [[=serpent::key("ip")]] std::string ip_address;
+    [[=serpent::skip]]      int cache_generation;
                            ip_mode mode;          // key becomes "mode"
 };
 ```
 
-`[[=serial::key(...)]]` overrides one key, `[[=serial::naming{...}]]` derives all of them from the
+`[[=serpent::key(...)]]` overrides one key, `[[=serpent::naming{...}]]` derives all of them from the
 identifiers (`snake_case`, `camel_case`, `pascal_case`, `kebab_case`,
-`screaming_snake_case`), and `[[=serial::skip]]` leaves a field out. Annotations are ordinary
+`screaming_snake_case`), and `[[=serpent::skip]]` leaves a field out. Annotations are ordinary
 values, not parsed strings, and are always written qualified. It is **opt-in** — via
-`[[=serial::serializable]]` or by specializing
+`[[=serpent::serializable]]` or by specializing
 `enable_reflection<T>` — because reflecting every aggregate that merely lacks a
-`serial_convert` would turn any struct that happens to be serializable into a wire-format
+`json_convert` would turn any struct that happens to be serializable into a wire-format
 commitment, silently.
 
 It generates exactly the `visitor.member(key, value.field)` calls the macro does, so nothing
@@ -258,30 +281,30 @@ the visitor inlines away entirely either way.
 Both directions, from the same customizations.
 
 ```cpp
-#include <nonstd/bjdata/json.hpp>
+#include <serpent/bjdata/json.hpp>
 
-std::string text = to_json(config);                        // {"host":"example.com","port":8080}
-std::string pretty = to_json(document, { .indent = 2 });   // two-space indented
-write_json(sink, view::over(bytes));                       // transcribe a stored .bjd
+std::string text = json::encode(config);                        // {"host":"example.com","port":8080}
+std::string pretty = json::encode(document, { .indent = 2 });   // two-space indented
+write_TMP(sink, view::over(bytes));                       // transcribe a stored .bjd
 ```
 
 There are two routes in, and the split falls out of the customization design rather than
-being designed for. `serial_convert` and `NONSTD_SERIAL_DEFINE_TYPE` take `auto &visitor` and never
+being designed for. `json_convert` and `SERPENT_DEFINE_TYPE` take `auto &visitor` and never
 name the BJData writer, so **those types serialise straight to JSON with no intermediate at
 all**. A type using the `to_bjdata(writer &, …)` form names the writer, so it reaches JSON by
 being written as a document first and transcribed — correct, but it allocates.
 
-`write_json(sink, view)` transcribes a document that already exists, which is what you want
+`write_TMP(sink, view)` transcribes a document that already exists, which is what you want
 for dumping a stored file, and it is what covers the `to_bjdata` form.
 
 ### Reading
 
 ```cpp
-#include <nonstd/bjdata/json_reader.hpp>
+#include <serpent/bjdata/json_reader.hpp>
 
-auto config = from_json<ethernet_config>(text);       // the same type that reads BJData
-auto value  = json_reader::over(text);                // or walk it directly
-validate_json(text);                                  // std::expected<void, error>
+auto config = json::decode<ethernet_config>(text);       // the same type that reads BJData
+auto value  = json::reader::over(text);                // or walk it directly
+validate_TMP(text);                                  // std::expected<void, error>
 ```
 
 **It is a reader, not a view — and that distinction is the format's, not a naming choice.**
@@ -326,7 +349,7 @@ the test suite compare our JSON to dart-bjdata's own JSON byte for byte.
 another document with no re-encoding at all:
 
 ```cpp
-write_value(out, document["calibration"]);   // marker, then one memcpy
+bjdata::write_value(out, document["calibration"]);   // marker, then one memcpy
 ```
 
 ## N-dimensional arrays
@@ -337,7 +360,7 @@ set of strides over the same bytes, where a DOM reader has to permute them into 
 allocation.
 
 ```cpp
-#include <nonstd/bjdata/ndarray.hpp>
+#include <serpent/bjdata/ndarray.hpp>
 
 if (const auto grid = as_ndarray(document["image"])) {
     grid->shape();                              // {480, 640}
@@ -410,7 +433,7 @@ those exact bytes back, and then four things must hold:
    which, because the reference chose every marker from the value, proves the whole ladder at
    once: integer widths, float narrowing, the packing measurement, container shapes and key
    encoding;
-4. splicing the document with `write_value` reproduces it byte for byte;
+4. splicing the document with `bjdata::write_value` reproduces it byte for byte;
 5. **the JSON output matches dart-bjdata's own JSON rendering of those bytes exactly** —
    number formatting, key order, escaping and indentation included.
 
@@ -433,10 +456,10 @@ python3 test/generate_fixtures.py /tmp/bjdatacli
 
 | directory | namespace | contents |
 |---|---|---|
-| `serial/` | `nonstd::serial` | format-neutral: `kind`, `errc`, sinks, the emitter, the customization layer |
-| `bjdata/` | `nonstd::bjdata` | markers, `view`, `writer`, N-D arrays, block notation |
-| `json/` | `nonstd::json` | `scanner`, `reader`, `writer` |
-| `bjdata/json.hpp` | `nonstd::bjdata` | the one header that knows both formats |
+| `serial/` | `serpent` | format-neutral: `kind`, `errc`, sinks, the emitter, the customization layer |
+| `bjdata/` | `serpent::bjdata` | markers, `view`, `writer`, N-D arrays, block notation |
+| `json/` | `serpent::json` | `scanner`, `reader`, `writer` |
+| `bjdata/json.hpp` | `serpent::bjdata` | the one header that knows both formats |
 
 Each format namespace adopts the neutral one (`using namespace serial;`), so `bjdata::view`
 and `json::reader` both see `errc`, `kind` and `serializer` without qualification, and a
@@ -449,7 +472,7 @@ The single bridge is `bjdata/json.hpp`, which renders a BJData document as JSON 
 also how a `to_bjdata`-only type reaches JSON, by being encoded and then transcribed:
 
 ```cpp
-const auto encoded = to_bytes(value);
+const auto encoded = encode_TMP(value);
 const auto text = to_json(view::over(encoded));
 ```
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nonstd/serial/limits.hpp>
+#include <serpent/limits.hpp>
 
 #include <bit>
 #include <concepts>
@@ -9,9 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 /**
  * @brief BJData type markers.
@@ -301,4 +299,4 @@ template<typename T>
     else return marker::invalid;
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

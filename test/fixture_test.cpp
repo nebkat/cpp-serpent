@@ -4,10 +4,10 @@
 
 #include "check.hpp"
 
-#include <nonstd/bjdata.hpp>
-#include <nonstd/bjdata/json.hpp>
-#include <nonstd/json.hpp>
-#include <nonstd/bjdata/notation.hpp>
+#include <serpent/bjdata.hpp>
+#include <serpent/bjdata/json.hpp>
+#include <serpent/json.hpp>
+#include <serpent/bjdata/notation.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -21,11 +21,9 @@
 #define SERPENT_FIXTURE_DIR "fixtures"
 #endif
 
-using namespace nonstd::bjdata;
-namespace json = nonstd::json;
-using nonstd::json::to_json;
-using nonstd::json::from_json;
-using nonstd::json::validate_json;
+using namespace serpent;
+using namespace serpent::bjdata;
+namespace json = serpent::json;
 
 namespace {
 
@@ -277,7 +275,7 @@ int main(int argc, char **argv) {
         // JSON output is checked against the reference's own JSON rendering of the same
         // bytes, so the number formatting, key order, escaping and indentation all have to
         // agree - not just the structure.
-        check_equal(std::string_view { to_json(view::over(bytes), { .indent = 2 }) },
+        check_equal(std::string_view { json::encode(view::over(bytes), { .indent = 2 }) },
                     std::string_view { read_text(directory / (name + ".json.expected")) },
                     name + ": JSON matches dart-bjdata");
 
@@ -285,7 +283,7 @@ int main(int argc, char **argv) {
         // BJData reader produces from the same document.
         {
             const auto text = read_text(directory / (name + ".json.expected"));
-            const auto parsed = validate_json(text);
+            const auto parsed = json::validate(text);
             check(parsed.has_value(), name + ": dart's JSON validates");
             if (parsed) {
                 check_equal(std::string_view { json_digest(json::reader::over(text)) },

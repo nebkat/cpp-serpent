@@ -1,10 +1,10 @@
 #pragma once
 
-#include <nonstd/bjdata/detail.hpp>
-#include <nonstd/serial/error.hpp>
-#include <nonstd/serial/kind.hpp>
-#include <nonstd/serial/fwd.hpp>
-#include <nonstd/bjdata/marker.hpp>
+#include <serpent/bjdata/detail.hpp>
+#include <serpent/error.hpp>
+#include <serpent/kind.hpp>
+#include <serpent/fwd.hpp>
+#include <serpent/bjdata/marker.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <concepts>
@@ -20,9 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 class array_iterator;
 class array_range;
@@ -173,7 +171,7 @@ public:
      * element iterator instead.
      */
     template<typename T>
-    [[nodiscard]] std::optional<unaligned_little_span<const T>> as_span() const noexcept {
+    [[nodiscard]] std::optional<nonstd::unaligned_little_span<const T>> as_span() const noexcept {
         static_assert(strong_type_for<T>() != marker::invalid, "T does not correspond to a BJData strong type");
 
         const auto info = this->container_header();
@@ -182,7 +180,7 @@ public:
 
         const auto width = payload_width(info.element);
         if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body) / width) return std::nullopt;
-        return unaligned_little_span<const T> { info.body, static_cast<std::size_t>(info.count) };
+        return nonstd::unaligned_little_span<const T> { info.body, static_cast<std::size_t>(info.count) };
     }
 
     // ---------------- containers ----------------
@@ -245,7 +243,7 @@ public:
     }
 
     template<typename T>
-    [[nodiscard]] unaligned_little_span<const T> span() const {
+    [[nodiscard]] nonstd::unaligned_little_span<const T> span() const {
         const auto result = this->as_span<T>();
         if (!result) raise(errc::type_mismatch, this->offset());
         return *result;
@@ -620,4 +618,4 @@ inline view view::operator[](std::string_view key) const noexcept {
     return {};
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

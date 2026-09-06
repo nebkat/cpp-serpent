@@ -9,11 +9,11 @@
 // forward iterators holding all the traversal state, and no allocation anywhere except
 // where a decoded string is asked for.
 
-#include <nonstd/serial/error.hpp>
-#include <nonstd/serial/fwd.hpp>
-#include <nonstd/json/scan.hpp>
-#include <nonstd/serial/kind.hpp>
-#include <nonstd/serial/serializer.hpp>
+#include <serpent/error.hpp>
+#include <serpent/fwd.hpp>
+#include <serpent/json/scan.hpp>
+#include <serpent/kind.hpp>
+#include <serpent/serializer.hpp>
 
 #include <charconv>
 #include <concepts>
@@ -29,9 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::json {
-
-using namespace serial;
+namespace serpent::json {
 
 
 class reader;
@@ -474,7 +472,7 @@ inline reader reader::operator[](std::string_view key) const noexcept {
 }
 
 /** Walks the whole document once, checking it is well formed and consumes the whole text. */
-[[nodiscard]] inline std::expected<void, error> validate_json(std::string_view text) noexcept {
+[[nodiscard]] inline std::expected<void, error> validate(std::string_view text) noexcept {
     scanner::cursor scan { text, text.data() };
     scanner::skip_whitespace(scan);
     if (!scan.available(1)) return std::unexpected { error { errc::unexpected_end, 0 } };
@@ -493,13 +491,13 @@ inline reader reader::operator[](std::string_view key) const noexcept {
 /**
  * Decodes a value from JSON text.
  *
- * A type carrying a serial_convert - which NONSTD_SERIAL_DEFINE_TYPE writes for you - reads here and
+ * A type carrying a json_convert - which SERPENT_DEFINE_TYPE writes for you - reads here and
  * from BJData with one definition, because the visitor never names either reader. A type
- * A type using serial_read instead needs an overload accepting this reader.
+ * A type using from_json instead needs an overload accepting this reader.
  */
 template<typename T>
-[[nodiscard]] std::optional<T> from_json(std::string_view text) {
+[[nodiscard]] std::optional<T> decode(std::string_view text) {
     return reader::over(text).try_get<T>();
 }
 
-}// namespace nonstd::json
+}// namespace serpent::json

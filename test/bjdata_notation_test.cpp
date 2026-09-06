@@ -2,12 +2,13 @@
 
 #include "check.hpp"
 
-#include <nonstd/bjdata.hpp>
-#include <nonstd/bjdata/notation.hpp>
+#include <serpent/bjdata.hpp>
+#include <serpent/bjdata/notation.hpp>
 
 #include <string>
 
-using namespace nonstd::bjdata;
+using namespace serpent;
+using namespace serpent::bjdata;
 
 namespace {
 

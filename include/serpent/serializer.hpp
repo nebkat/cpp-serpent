@@ -1,9 +1,9 @@
 #pragma once
 
-#include <nonstd/serial/emitter.hpp>
-#include <nonstd/serial/fwd.hpp>
-#include <nonstd/serial/reflect.hpp>
-#include <nonstd/serial/visitor.hpp>
+#include <serpent/emitter.hpp>
+#include <serpent/fwd.hpp>
+#include <serpent/reflect.hpp>
+#include <serpent/visitor.hpp>
 
 #include <algorithm>
 #include <concepts>
@@ -13,27 +13,27 @@
 #include <type_traits>
 #include <utility>
 
-namespace nonstd::serial {
+namespace serpent {
 
 /** A type that names its fields once, for both directions and every format. */
 template<typename T>
 concept convertible_type = requires(detail::convert_probe &visitor, const T &value) {
-    serial_convert(visitor, value);
+    json_convert(visitor, value);
 };
 
 /**
  * @brief The dispatch point for user types, specializable for types you cannot add
  *        functions to.
  *
- * By default it prefers a single serial_convert and falls back to the serial_write /
- * serial_read pair, which is for types whose two directions genuinely differ.
+ * By default it prefers a single json_convert and falls back to the to_json /
+ * from_json pair, which is for types whose two directions genuinely differ.
  */
 template<typename T, typename>
 struct serializer {
     /**
      * Writes to any writer.
      *
-     * serial_convert carries a type through every format at once. serial_write is the
+     * json_convert carries a type through every format at once. to_json is the
      * fallback for a type whose two directions differ; it is found by ADL against whichever
      * writer is passed, so a type may overload it once per output - one taking the BJData
      * writer, another the JSON writer - or declare a single `auto &` template when the body
@@ -44,20 +44,20 @@ struct serializer {
         if constexpr (convertible_type<T>) {
             write_visitor<Writer> visitor { out };
             const auto scope = out.object();
-            serial_convert(visitor, value);
-        } else if constexpr (requires { serial_write(out, value); }) {
-            serial_write(out, value);
+            json_convert(visitor, value);
+        } else if constexpr (requires { to_json(out, value); }) {
+            to_json(out, value);
         } else {
             static_assert(always_false<Writer>,
-                          "no serial_convert for this type, and no serial_write overload accepting "
-                          "this writer; add one of those, or specialize nonstd::serial::serializer<T>");
+                          "no json_convert for this type, and no to_json overload accepting "
+                          "this writer; add one of those, or specialize serpent::serializer<T>");
         }
     }
 
     /**
      * Reads from any source offering the reader interface - a BJData view or a JSON reader.
      *
-     * As on the way out: serial_convert covers every format at once, while serial_read is
+     * As on the way out: json_convert covers every format at once, while from_json is
      * resolved by ADL against the source that was passed, so a type may overload it per
      * format or template it over one.
      */
@@ -66,14 +66,14 @@ struct serializer {
         if constexpr (convertible_type<T>) {
             if (!source.is_object()) return false;
             read_visitor<Source> visitor { source };
-            serial_convert(visitor, value);
+            json_convert(visitor, value);
             return visitor.ok();
-        } else if constexpr (requires { serial_read(source, value); }) {
-            return serial_read(source, value);
+        } else if constexpr (requires { from_json(source, value); }) {
+            return from_json(source, value);
         } else {
             static_assert(always_false<Source>,
-                          "no serial_convert for this type, and no serial_read overload accepting "
-                          "this source; add one of those, or specialize nonstd::serial::serializer<T>");
+                          "no json_convert for this type, and no from_json overload accepting "
+                          "this source; add one of those, or specialize serpent::serializer<T>");
             return false;
         }
     }
@@ -153,15 +153,15 @@ bool read_into(Source source, T &value) {
     }
 }
 
-}// namespace nonstd::serial
+}// namespace serpent
 
 // ---------------- member listing ----------------
 //
 // Field names cannot be recovered without reflection, so listing them in a macro is the only
 // option. The shape deliberately matches the firmware's NONSTD_JSON_DEFINE_TYPE family.
 
-#define NONSTD_SERIAL_EXPAND(x) x
-#define NONSTD_SERIAL_MEMBER(name) visitor.member(#name, value.name);
+#define SERPENT_EXPAND(x) x
+#define SERPENT_MEMBER(name) visitor.member(#name, value.name);
 
 #define BJDATA_PASTE1(step, v1) step(v1)
 #define BJDATA_PASTE2(step, v1, v2) step(v1) BJDATA_PASTE1(step, v2)
@@ -196,20 +196,20 @@ bool read_into(Source source, T &value) {
 #define BJDATA_PASTE31(step, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31) step(v1) BJDATA_PASTE30(step, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31)
 #define BJDATA_PASTE32(step, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32) step(v1) BJDATA_PASTE31(step, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32)
 
-#define NONSTD_SERIAL_SELECT(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, NAME, ...) NAME
-#define NONSTD_SERIAL_FOR_EACH(step, ...) \
-    NONSTD_SERIAL_EXPAND(NONSTD_SERIAL_SELECT(__VA_ARGS__, BJDATA_PASTE32, BJDATA_PASTE31, BJDATA_PASTE30, BJDATA_PASTE29, BJDATA_PASTE28, BJDATA_PASTE27, BJDATA_PASTE26, BJDATA_PASTE25, BJDATA_PASTE24, BJDATA_PASTE23, BJDATA_PASTE22, BJDATA_PASTE21, BJDATA_PASTE20, BJDATA_PASTE19, BJDATA_PASTE18, BJDATA_PASTE17, BJDATA_PASTE16, BJDATA_PASTE15, BJDATA_PASTE14, BJDATA_PASTE13, BJDATA_PASTE12, BJDATA_PASTE11, BJDATA_PASTE10, BJDATA_PASTE9, BJDATA_PASTE8, BJDATA_PASTE7, BJDATA_PASTE6, BJDATA_PASTE5, BJDATA_PASTE4, BJDATA_PASTE3, BJDATA_PASTE2, BJDATA_PASTE1)(step, __VA_ARGS__))
+#define SERPENT_SELECT(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, NAME, ...) NAME
+#define SERPENT_FOR_EACH(step, ...) \
+    SERPENT_EXPAND(SERPENT_SELECT(__VA_ARGS__, BJDATA_PASTE32, BJDATA_PASTE31, BJDATA_PASTE30, BJDATA_PASTE29, BJDATA_PASTE28, BJDATA_PASTE27, BJDATA_PASTE26, BJDATA_PASTE25, BJDATA_PASTE24, BJDATA_PASTE23, BJDATA_PASTE22, BJDATA_PASTE21, BJDATA_PASTE20, BJDATA_PASTE19, BJDATA_PASTE18, BJDATA_PASTE17, BJDATA_PASTE16, BJDATA_PASTE15, BJDATA_PASTE14, BJDATA_PASTE13, BJDATA_PASTE12, BJDATA_PASTE11, BJDATA_PASTE10, BJDATA_PASTE9, BJDATA_PASTE8, BJDATA_PASTE7, BJDATA_PASTE6, BJDATA_PASTE5, BJDATA_PASTE4, BJDATA_PASTE3, BJDATA_PASTE2, BJDATA_PASTE1)(step, __VA_ARGS__))
 
 /** Defines both directions as a hidden friend. Place inside the type. */
-#define NONSTD_SERIAL_DEFINE_TYPE(Type, ...)                                                              \
-    friend void serial_convert(auto &visitor,                                                      \
-                               ::nonstd::serial::conversion_object_t<decltype(visitor), Type> value) { \
-        NONSTD_SERIAL_FOR_EACH(NONSTD_SERIAL_MEMBER, __VA_ARGS__)                                                \
+#define SERPENT_DEFINE_TYPE(Type, ...)                                                              \
+    friend void json_convert(auto &visitor,                                                      \
+                               ::serpent::conversion_object_t<decltype(visitor), Type> value) { \
+        SERPENT_FOR_EACH(SERPENT_MEMBER, __VA_ARGS__)                                                \
     }
 
 /** Defines both directions as a free function. Place beside the type, in its namespace. */
-#define NONSTD_SERIAL_DEFINE_TYPE_NON_INTRUSIVE(Type, ...)                                                \
-    inline void serial_convert(auto &visitor,                                                      \
-                               ::nonstd::serial::conversion_object_t<decltype(visitor), Type> value) { \
-        NONSTD_SERIAL_FOR_EACH(NONSTD_SERIAL_MEMBER, __VA_ARGS__)                                                \
+#define SERPENT_DEFINE_TYPE_NON_INTRUSIVE(Type, ...)                                                \
+    inline void json_convert(auto &visitor,                                                      \
+                               ::serpent::conversion_object_t<decltype(visitor), Type> value) { \
+        SERPENT_FOR_EACH(SERPENT_MEMBER, __VA_ARGS__)                                                \
     }

@@ -3,14 +3,14 @@
 // JSON output. Write only - there is no JSON parser here, and BJData remains the format
 // anything is read from.
 //
-// Two ways in. A writer emits directly, so a type using serial_convert or
-// NONSTD_SERIAL_DEFINE_TYPE serialises to JSON with no intermediate at all: those take `auto
-// &visitor` and never name the BJData writer. And write_json(sink, view) walks a document
+// Two ways in. A writer emits directly, so a type using json_convert or
+// SERPENT_DEFINE_TYPE serialises to JSON with no intermediate at all: those take `auto
+// &visitor` and never name the BJData writer. And write_TMP(sink, view) walks a document
 // that already exists, which is what you want for dumping a stored .bjd.
 
-#include <nonstd/serial/emitter.hpp>
-#include <nonstd/serial/real_format.hpp>
-#include <nonstd/serial/serializer.hpp>
+#include <serpent/emitter.hpp>
+#include <serpent/real_format.hpp>
+#include <serpent/serializer.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -24,9 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace nonstd::json {
-
-using namespace serial;
+namespace serpent::json {
 
 
 struct writer_options {
@@ -300,23 +298,23 @@ void writer::range(const R &items) noexcept {
 
 template<typename T>
 void writer::emit_custom(const T &item) noexcept {
-    // serializer dispatches on the writer: serial_convert serves every format, and
-    // serial_write is resolved against this writer, so a type may have an overload for JSON
+    // serializer dispatches on the writer: json_convert serves every format, and
+    // to_json is resolved against this writer, so a type may have an overload for JSON
     // specifically. A type with neither is a compile error naming both options.
     serializer<std::remove_cvref_t<T>>::write(*this, item);
 }
 
 /** Writes a C++ value to a sink as JSON. */
 template<sink S, typename T>
-std::expected<std::size_t, error> write_json(S &out, const T &value, writer_options options = {}) {
+std::expected<std::size_t, error> write(S &out, const T &value, writer_options options = {}) {
     writer target { out, options };
     target.value(value);
     return target.finish();
 }
 
-/** The allocating convenience over write_json. */
+/** The allocating convenience over write(). */
 template<typename T>
-[[nodiscard]] std::string to_json(const T &value, writer_options options = {}) {
+[[nodiscard]] std::string encode(const T &value, writer_options options = {}) {
     std::string text;
     container_sink out { text };
     writer target { out, options };
@@ -325,4 +323,4 @@ template<typename T>
     return text;
 }
 
-}// namespace nonstd::json
+}// namespace serpent::json

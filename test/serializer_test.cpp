@@ -2,19 +2,17 @@
 
 #include "check.hpp"
 
-#include <nonstd/bjdata.hpp>
-#include <nonstd/json.hpp>
+#include <serpent/bjdata.hpp>
+#include <serpent/json.hpp>
 
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
-using namespace nonstd::bjdata;
-namespace json = nonstd::json;
-using nonstd::json::to_json;
-using nonstd::json::from_json;
-using nonstd::json::validate_json;
+using namespace serpent;
+using namespace serpent::bjdata;
+namespace json = serpent::json;
 
 namespace {
 
@@ -24,7 +22,7 @@ enum class mode : std::uint8_t { off, automatic, on };
 struct point {
     int x = 0;
     int y = 0;
-    NONSTD_SERIAL_DEFINE_TYPE(point, x, y)
+    SERPENT_DEFINE_TYPE(point, x, y)
 };
 
 // --- Form B: one function, both directions ---
@@ -33,7 +31,7 @@ struct segment {
     point end {};
     std::string label = "unnamed";
 
-    friend void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
+    friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
         visitor.member("start", value.start);
         visitor.member("end", value.end);
         visitor.member("label", value.label);
@@ -48,20 +46,20 @@ struct connection {
     std::optional<int> port {};
     mode fallback = mode::automatic;
 
-    friend void serial_write(writer &out, const connection &value) {
+    friend void to_json(auto &out, const connection &value) {
         const auto scope = out.object();
         scope.member("host", value.host);
         if (value.port) scope.member("port", *value.port);
         scope.member("fallback", value.fallback);
     }
 
-    friend bool serial_read(view source, connection &value) {
+    friend bool from_json(auto source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
         value.host = source["host"].as_string().value_or(defaults.host);
-        value.port = source["port"].as_int<int>();
+        value.port = source["port"].template as_int<int>();
         value.fallback = static_cast<mode>(
-                source["fallback"].as_int<std::uint8_t>().value_or(std::to_underlying(defaults.fallback)));
+                source["fallback"].template as_int<std::uint8_t>().value_or(std::to_underlying(defaults.fallback)));
         return true;
     }
 };
@@ -71,14 +69,14 @@ struct extent {
     int width = 0;
     int height = 0;
 };
-NONSTD_SERIAL_DEFINE_TYPE_NON_INTRUSIVE(extent, width, height)
+SERPENT_DEFINE_TYPE_NON_INTRUSIVE(extent, width, height)
 
 struct document {
     std::vector<point> points {};
     std::map<std::string, int> counts {};
     std::optional<segment> highlight {};
 
-    friend void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), document> value) {
+    friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), document> value) {
         visitor.member("points", value.points);
         visitor.member("counts", value.counts);
         visitor.member("highlight", value.highlight);
@@ -97,13 +95,13 @@ std::string hex(std::span<const std::byte> bytes) {
 
 template<typename T>
 std::optional<T> round_trip(const T &value) {
-    const auto bytes = to_bytes(value);
+    const auto bytes = encode(value);
     check(validate(bytes).has_value(), "the encoding is well formed");
-    return from_bytes<T>(bytes);
+    return decode<T>(bytes);
 }
 
 void macro_form() {
-    const auto bytes = to_bytes(point { 3, 4 });
+    const auto bytes = encode(point { 3, 4 });
     check_equal(std::string_view { hex(bytes) }, "7b550178550355017955047d", "point encodes as {x:3,y:4}");
 
     const auto back = round_trip(point { 3, 4 });
@@ -131,9 +129,9 @@ void separate_form() {
 
     // An absent optional is omitted from the document, not written as null.
     const connection absent { "h", std::nullopt, mode::off };
-    const auto bytes = to_bytes(absent);
+    const auto bytes = encode(absent);
     check(hex(bytes).find("706f7274") == std::string::npos, "an absent optional writes no key at all");
-    const auto restored = from_bytes<connection>(bytes);
+    const auto restored = decode<connection>(bytes);
     check(restored.has_value() && !restored->port.has_value(), "an absent key reads back as nullopt");
 }
 
@@ -177,7 +175,7 @@ void key_order_and_absence() {
     }
     check(target.finish().has_value(), "hand-built reordered object");
 
-    const auto back = from_bytes<point>(reordered);
+    const auto back = decode<point>(reordered);
     check(back.has_value(), "a reordered object still reads");
     check_equal(back->x, 10, "reordered x");
     check_equal(back->y, 20, "reordered y");
@@ -192,7 +190,7 @@ void key_order_and_absence() {
     }
     check(partial_target.finish().has_value(), "hand-built partial object");
 
-    const auto incomplete = from_bytes<point>(partial);
+    const auto incomplete = decode<point>(partial);
     check(incomplete.has_value(), "a partial object still reads");
     check_equal(incomplete->x, 7, "present member");
     check_equal(incomplete->y, 0, "absent member keeps its default");
@@ -208,11 +206,11 @@ void key_order_and_absence() {
         scope.member("y", 2);
     }
     check(extra_target.finish().has_value(), "hand-built object with an extra key");
-    const auto tolerated = from_bytes<point>(extra);
+    const auto tolerated = decode<point>(extra);
     check(tolerated.has_value() && tolerated->x == 1 && tolerated->y == 2, "an unknown key is ignored");
 
     // A value that is not an object at all is refused.
-    check(!from_bytes<point>(from_hex("5501")).has_value(), "a scalar does not read as a struct");
+    check(!decode<point>(from_hex("5501")).has_value(), "a scalar does not read as a struct");
 }
 
 /**
@@ -220,7 +218,7 @@ void key_order_and_absence() {
  * ordinary constexpr code and is tested in full, so only the binding to std::meta is unproven.
  */
 void reflection_seam() {
-    using nonstd::serial::detail::convert_case;
+    using serpent::detail::convert_case;
     const auto converted = [](std::string_view identifier, naming_style style) {
         return std::string { convert_case(identifier, style).view() };
     };
@@ -263,8 +261,8 @@ void reflection_seam() {
 /**
  * One definition, two formats, both directions.
  *
- * serial_convert never names either reader or either writer, so a type that uses it - which
- * is what NONSTD_SERIAL_DEFINE_TYPE writes - is carried by all four paths without being told about
+ * json_convert never names either reader or either writer, so a type that uses it - which
+ * is what SERPENT_DEFINE_TYPE writes - is carried by all four paths without being told about
  * any of them.
  */
 void both_formats() {
@@ -274,20 +272,20 @@ void both_formats() {
         .highlight = segment { { 0, 0 }, { 9, 9 }, "hot" },
     };
 
-    const auto binary = to_bytes(original);
-    const auto text = to_json(original);
+    const auto binary = encode(original);
+    const auto text = json::encode(original);
     check(validate(binary).has_value(), "the BJData encoding is well formed");
-    check(validate_json(text).has_value(), "the JSON encoding is well formed");
+    check(json::validate(text).has_value(), "the JSON encoding is well formed");
 
-    const auto from_binary = from_bytes<document>(binary);
-    const auto from_text = from_json<document>(text);
+    const auto from_binary = decode<document>(binary);
+    const auto from_text = json::decode<document>(text);
     check(from_binary.has_value(), "reads back from BJData");
     check(from_text.has_value(), "reads back from JSON");
     if (!from_binary || !from_text) return;
 
     // The two paths must agree with each other, not merely each with itself.
-    check_equal(to_json(*from_binary), to_json(*from_text), "both formats decode to the same value");
-    check_equal(to_json(*from_text), text, "and JSON survives a full round trip unchanged");
+    check_equal(json::encode(*from_binary), json::encode(*from_text), "both formats decode to the same value");
+    check_equal(json::encode(*from_text), text, "and JSON survives a full round trip unchanged");
 
     check_equal(from_text->points.size(), std::size_t { 2 }, "vector member through JSON");
     check_equal(from_text->points.at(1).y, 4, "nested struct through JSON");
@@ -296,23 +294,23 @@ void both_formats() {
           "optional struct member through JSON");
 
     // A key absent from the JSON leaves the member at its default, exactly as for BJData.
-    const auto partial = from_json<point>(R"({"y":5})");
+    const auto partial = json::decode<point>(R"({"y":5})");
     check(partial.has_value() && partial->x == 0 && partial->y == 5, "an absent key keeps its default");
 
     // And key order still does not matter.
-    const auto reordered = from_json<point>(R"({ "y" : 2 , "x" : 1 })");
+    const auto reordered = json::decode<point>(R"({ "y" : 2 , "x" : 1 })");
     check(reordered.has_value() && reordered->x == 1 && reordered->y == 2, "reordered JSON keys");
 
     // Non-intrusive and macro forms carry across too.
-    check(from_json<extent>(R"({"width":640,"height":480})")->width == 640, "non-intrusive form reads JSON");
-    check(from_json<segment>(to_json(segment { { 1, 1 }, { 2, 2 }, "s" }))->label == "s",
+    check(json::decode<extent>(R"({"width":640,"height":480})")->width == 640, "non-intrusive form reads JSON");
+    check(json::decode<segment>(json::encode(segment { { 1, 1 }, { 2, 2 }, "s" }))->label == "s",
           "the convert form round-trips through JSON");
 }
 
 void sizing() {
     const point value { 3, 4 };
-    check_equal(measure(value), to_bytes(value).size(), "measure agrees with to_bytes");
-    check_equal(measure(document {}), to_bytes(document {}).size(), "measure agrees for a nested type");
+    check_equal(measure(value), encode(value).size(), "measure agrees with encode_TMP");
+    check_equal(measure(document {}), encode(document {}).size(), "measure agrees for a nested type");
 }
 
 }// namespace

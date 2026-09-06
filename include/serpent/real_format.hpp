@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace nonstd::serial::detail {
+namespace serpent::detail {
 
 /**
  * Renders a double the way Dart's toString does - ECMAScript's rules, plus a trailing .0
@@ -55,4 +55,4 @@ inline std::string format_real(double value) {
     return negative ? "-" + out : out;
 }
 
-}// namespace nonstd::serial::detail
+}// namespace serpent::detail

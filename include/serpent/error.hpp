@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdlib>
 
-namespace nonstd::serial {
+namespace serpent {
 
 enum class errc {
     ok = 0,
@@ -104,4 +104,4 @@ public:
 #endif
 }
 
-}// namespace nonstd::serial
+}// namespace serpent

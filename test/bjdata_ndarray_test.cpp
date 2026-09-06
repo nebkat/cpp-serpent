@@ -2,13 +2,14 @@
 
 #include "check.hpp"
 
-#include <nonstd/bjdata.hpp>
-#include <nonstd/bjdata/ndarray.hpp>
+#include <serpent/bjdata.hpp>
+#include <serpent/bjdata/ndarray.hpp>
 
 #include <string>
 #include <vector>
 
-using namespace nonstd::bjdata;
+using namespace serpent;
+using namespace serpent::bjdata;
 
 namespace {
 

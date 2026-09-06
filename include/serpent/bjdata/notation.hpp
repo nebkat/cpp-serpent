@@ -1,9 +1,9 @@
 #pragma once
 
-#include <nonstd/bjdata/detail.hpp>
-#include <nonstd/bjdata/marker.hpp>
-#include <nonstd/serial/real_format.hpp>
-#include <nonstd/bjdata/view.hpp>
+#include <serpent/bjdata/detail.hpp>
+#include <serpent/bjdata/marker.hpp>
+#include <serpent/real_format.hpp>
+#include <serpent/bjdata/view.hpp>
 
 #include <charconv>
 #include <cmath>
@@ -14,9 +14,7 @@
 
 #include <cstddef>
 
-namespace nonstd::bjdata {
-
-using namespace serial;
+namespace serpent::bjdata {
 
 namespace detail {
 
@@ -162,7 +160,7 @@ inline void notate_container(std::string &out, cursor &source, bool object, int 
             const auto value = element == marker::float16 ? decode_float16(load<std::uint16_t>(source.position))
                     : element == marker::float32          ? load<float>(source.position)
                                                           : static_cast<float>(load<double>(source.position));
-            write_block(out, serial::detail::format_real(value));
+            write_block(out, serpent::detail::format_real(value));
         } else if (element == marker::character) {
             write_block(out, std::string_view { reinterpret_cast<const char *>(source.position), 1 });
         } else {
@@ -253,7 +251,7 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
             const double value = kind == marker::float16 ? decode_float16(load<std::uint16_t>(source.position))
                     : kind == marker::float32            ? load<float>(source.position)
                                                          : load<double>(source.position);
-            write_block(out, serial::detail::format_real(value));
+            write_block(out, serpent::detail::format_real(value));
             source.advance(width);
             return;
         }
@@ -307,4 +305,4 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
     return block_notation(value.buffer());
 }
 
-}// namespace nonstd::bjdata
+}// namespace serpent::bjdata

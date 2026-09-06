@@ -4,15 +4,16 @@
 
 #include "check.hpp"
 
-#include <nonstd/bjdata.hpp>
+#include <serpent/bjdata.hpp>
 
 #include <algorithm>
 #include <array>
 #include <vector>
-#include <nonstd/bjdata/ndarray.hpp>
-#include <nonstd/bjdata/notation.hpp>
+#include <serpent/bjdata/ndarray.hpp>
+#include <serpent/bjdata/notation.hpp>
 
-using namespace nonstd::bjdata;
+using namespace serpent;
+using namespace serpent::bjdata;
 
 int main() {
     const auto bytes = from_hex("7b55016153550568656c6c6f5501625b2455235503010203550163547d");
@@ -50,7 +51,7 @@ int main() {
     check_equal(reread["b"].size(), std::size_t { 3 }, "round-trips the array");
     check_equal(reread["c"].as_bool().value_or(false), true, "round-trips the boolean");
 
-    check_equal(measure(std::vector<int> { 1, 2, 3 }), to_bytes(std::vector<int> { 1, 2, 3 }).size(),
+    check_equal(measure(std::vector<int> { 1, 2, 3 }), encode(std::vector<int> { 1, 2, 3 }).size(),
                 "measure without exceptions");
 
     // A fixed buffer latches rather than throwing when it runs out.

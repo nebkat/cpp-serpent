@@ -1,6 +1,6 @@
 #pragma once
 
-namespace nonstd::serial {
+namespace serpent {
 
 /**
  * Maximum container nesting any reader or writer will follow.
@@ -10,4 +10,4 @@ namespace nonstd::serial {
  */
 inline constexpr int max_depth = 32;
 
-}// namespace nonstd::serial
+}// namespace serpent
