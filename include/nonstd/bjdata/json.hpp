@@ -3,8 +3,7 @@
 // Rendering a BJData document as JSON.
 //
 // The bridge between the two formats, so neither json/ nor bjdata/ has to know about the
-// other. This is also what covers a type using to_bjdata, which names the BJData writer and
-// therefore cannot be written to JSON directly: encode it, then transcribe it.
+// other, and it is how an already-encoded document is rendered:
 //
 //     to_json(view::over(to_bytes(value)))
 

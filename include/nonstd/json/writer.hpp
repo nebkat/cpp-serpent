@@ -3,11 +3,10 @@
 // JSON output. Write only - there is no JSON parser here, and BJData remains the format
 // anything is read from.
 //
-// Two ways in. A writer emits directly, so a type using bjdata_convert or
-// BJDATA_DEFINE_TYPE serialises to JSON with no intermediate at all: those take `auto
+// Two ways in. A writer emits directly, so a type using serial_convert or
+// NONSTD_SERIAL_DEFINE_TYPE serialises to JSON with no intermediate at all: those take `auto
 // &visitor` and never name the BJData writer. And write_json(sink, view) walks a document
-// that already exists, which covers the to_bjdata form and is what you want for dumping a
-// stored .bjd.
+// that already exists, which is what you want for dumping a stored .bjd.
 
 #include <nonstd/serial/emitter.hpp>
 #include <nonstd/serial/real_format.hpp>
@@ -301,10 +300,9 @@ void writer::range(const R &items) noexcept {
 
 template<typename T>
 void writer::emit_custom(const T &item) noexcept {
-    // serializer dispatches on the writer: a bjdata_convert serves every format, while a
-    // to_bjdata names the BJData writer and so is rejected here - the same limitation
-    // from_bjdata has on the way in. Transcribe such a type explicitly instead, with
-    // to_json(view::over(to_bytes(value))) from <nonstd/bjdata/json.hpp>.
+    // serializer dispatches on the writer: serial_convert serves every format, and
+    // serial_write is resolved against this writer, so a type may have an overload for JSON
+    // specifically. A type with neither is a compile error naming both options.
     serializer<std::remove_cvref_t<T>>::write(*this, item);
 }
 

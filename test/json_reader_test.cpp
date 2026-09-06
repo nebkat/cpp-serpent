@@ -186,5 +186,5 @@ int main() {
     containers();
     malformed();
     truncation();
-    return report("bjdata_json_reader");
+    return report("json_reader");
 }

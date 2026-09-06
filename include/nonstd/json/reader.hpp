@@ -493,9 +493,9 @@ inline reader reader::operator[](std::string_view key) const noexcept {
 /**
  * Decodes a value from JSON text.
  *
- * A type carrying a bjdata_convert - which BJDATA_DEFINE_TYPE writes for you - reads here and
+ * A type carrying a serial_convert - which NONSTD_SERIAL_DEFINE_TYPE writes for you - reads here and
  * from BJData with one definition, because the visitor never names either reader. A type
- * using from_bjdata names `view`, so it reads BJData only.
+ * A type using serial_read instead needs an overload accepting this reader.
  */
 template<typename T>
 [[nodiscard]] std::optional<T> from_json(std::string_view text) {

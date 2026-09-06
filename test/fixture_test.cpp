@@ -17,8 +17,8 @@
 #include <string>
 #include <vector>
 
-#ifndef BJDATA_FIXTURE_DIR
-#define BJDATA_FIXTURE_DIR "fixtures"
+#ifndef SERPENT_FIXTURE_DIR
+#define SERPENT_FIXTURE_DIR "fixtures"
 #endif
 
 using namespace nonstd::bjdata;
@@ -229,10 +229,10 @@ std::string json_digest(const json::reader &source) {
 }// namespace
 
 int main(int argc, char **argv) {
-    const std::filesystem::path directory = argc > 1 ? argv[1] : BJDATA_FIXTURE_DIR;
+    const std::filesystem::path directory = argc > 1 ? argv[1] : SERPENT_FIXTURE_DIR;
 
     if (!std::filesystem::is_directory(directory)) {
-        std::printf("bjdata_fixture: no fixtures at %s\n", directory.c_str());
+        std::printf("fixture: no fixtures at %s\n", directory.c_str());
         return 1;
     }
 
@@ -314,6 +314,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    std::printf("bjdata_fixture: %zu documents\n", documents.size());
-    return report("bjdata_fixture");
+    std::printf("fixture: %zu documents\n", documents.size());
+    return report("fixture");
 }

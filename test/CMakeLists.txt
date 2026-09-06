@@ -12,18 +12,18 @@ set(TESTS
     bjdata_ndarray
     bjdata_notation
     bjdata_writer
-    bjdata_serializer
-    bjdata_json
-    bjdata_json_reader
-    bjdata_fixture)
+    json_reader
+    json_writer
+    serializer
+    fixture)
 
 foreach(TEST_NAME IN LISTS TESTS)
     add_executable(${TEST_NAME}_test "${TEST_NAME}_test.cpp")
-    target_link_libraries(${TEST_NAME}_test PRIVATE bjdata)
+    target_link_libraries(${TEST_NAME}_test PRIVATE serpent)
     target_include_directories(${TEST_NAME}_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
     target_compile_options(${TEST_NAME}_test PRIVATE -Wall -Wextra)
     target_compile_definitions(${TEST_NAME}_test PRIVATE
-        BJDATA_FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures")
+        SERPENT_FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures")
 
     if(BJDATA_TEST_SANITIZE)
         target_compile_options(${TEST_NAME}_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -35,7 +35,7 @@ endforeach()
 
 # The library must also compile with exceptions off, where only the total accessors exist.
 add_executable(no_exceptions_test no_exceptions_test.cpp)
-target_link_libraries(no_exceptions_test PRIVATE bjdata)
+target_link_libraries(no_exceptions_test PRIVATE serpent)
 target_include_directories(no_exceptions_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_options(no_exceptions_test PRIVATE -Wall -Wextra -fno-exceptions)
 add_test(NAME no_exceptions COMMAND no_exceptions_test)
@@ -55,5 +55,5 @@ foreach(HEADER IN LISTS PUBLIC_HEADERS)
 endforeach()
 
 add_library(standalone_headers OBJECT ${STANDALONE_SOURCES})
-target_link_libraries(standalone_headers PRIVATE bjdata)
+target_link_libraries(standalone_headers PRIVATE serpent)
 target_compile_options(standalone_headers PRIVATE -Wall -Wextra)

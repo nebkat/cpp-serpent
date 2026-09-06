@@ -16,6 +16,7 @@
 #include <vector>
 
 using namespace nonstd::bjdata;
+namespace bjdata = nonstd::bjdata;
 namespace json = nonstd::json;
 using nonstd::json::to_json;
 using nonstd::json::from_json;
@@ -26,20 +27,37 @@ namespace {
 struct point {
     int x = 0;
     int y = 0;
-    BJDATA_DEFINE_TYPE(point, x, y)
+    NONSTD_SERIAL_DEFINE_TYPE(point, x, y)
 };
 
-/** A to_bjdata-only type, which reaches JSON through the transcoding fallback. */
+/**
+ * A type whose directions differ, so it uses serial_write/serial_read rather than
+ * serial_convert - and overloads them per format, which is what keeps it working in both.
+ *
+ * The BJData reader hands back a string_view into the buffer; the JSON reader has to decode,
+ * so the two bodies genuinely differ and a single serial_convert would not do.
+ */
 struct legacy {
     int code = 0;
     std::string label;
 
-    friend void to_bjdata(writer &out, const legacy &value) {
+    friend void serial_write(bjdata::writer &out, const legacy &value) {
         const auto scope = out.object();
         scope.member("code", value.code);
         scope.member("label", value.label);
     }
-    friend bool from_bjdata(view source, legacy &value) {
+    friend bool serial_read(bjdata::view source, legacy &value) {
+        value.code = source["code"].as_int<int>().value_or(0);
+        value.label = source["label"].as_string().value_or("");
+        return source.is_object();
+    }
+
+    friend void serial_write(json::writer &out, const legacy &value) {
+        const auto scope = out.object();
+        scope.member("code", value.code);
+        scope.member("label", value.label);
+    }
+    friend bool serial_read(json::reader source, legacy &value) {
         value.code = source["code"].as_int<int>().value_or(0);
         value.label = source["label"].as_string().value_or("");
         return source.is_object();
@@ -87,12 +105,19 @@ void containers() {
                 "an empty optional is null");
 
     check_equal(to_json(point { 3, 4 }), std::string { "{\"x\":3,\"y\":4}" }, "the macro form writes JSON directly");
-    // A to_bjdata type names the BJData writer, so it cannot be written to JSON directly -
-    // the same limitation from_bjdata has on the way in. Transcribing is explicit, so the
-    // intermediate document is visible rather than hidden inside an accessor.
+    // An overload per format means the escape hatch costs no format-neutrality: this writes
+    // JSON directly, with no intermediate document.
+    check_equal(to_json(legacy { 7, "x" }), std::string { "{\"code\":7,\"label\":\"x\"}" },
+                "a per-format serial_write writes JSON directly");
+    const auto from_text = json::from_json<legacy>(R"({"code":9,"label":"y"})");
+    check(from_text.has_value() && from_text->code == 9 && from_text->label == "y",
+          "and the matching serial_read reads it back");
+
+    // Transcribing an already-encoded document still works, and is the route for a type that
+    // only ever wrote the one overload.
     const auto encoded = to_bytes(legacy { 7, "x" });
     check_equal(to_json(view::over(encoded)), std::string { "{\"code\":7,\"label\":\"x\"}" },
-                "a to_bjdata type reaches JSON by transcribing a document");
+                "and transcribing a document agrees with it");
     // The same type still round-trips through BJData itself, which is the path JSON borrows.
     const auto restored = from_bytes<legacy>(to_bytes(legacy { 7, "x" }));
     check(restored.has_value() && restored->code == 7 && restored->label == "x",
@@ -179,5 +204,5 @@ int main() {
     indentation();
     from_documents();
     sinks_and_failures();
-    return report("bjdata_json");
+    return report("json_writer");
 }

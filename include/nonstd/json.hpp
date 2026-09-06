@@ -11,3 +11,9 @@
 #include <nonstd/serial/kind.hpp>
 #include <nonstd/serial/serializer.hpp>
 #include <nonstd/serial/sink.hpp>
+
+/**
+ * The package is named serpent; the namespace is nonstd, so these headers drop into a
+ * firmware's lib/common/include/nonstd unchanged. The alias lets you write either.
+ */
+namespace serpent = nonstd;

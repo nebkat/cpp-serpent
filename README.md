@@ -1,7 +1,12 @@
-# cpp-bjdata
+# serpent
 
-A zero-copy [BJData](https://github.com/NeuroJSON/bjdata) reader and writer for C++23, reading and
-writing JSON from the same type definitions.
+A C++23 serialization library. Zero-copy [BJData](https://github.com/NeuroJSON/bjdata) reading
+and writing, JSON reading and writing, and one definition per type that serves all four.
+
+Named rather than described, because it is not a BJData library with JSON bolted on nor the
+reverse — and because a third format would not make the name wrong. The namespaces stay
+`nonstd::` regardless: the whole layout exists so these headers drop into a firmware's
+`lib/common/include/nonstd/` unchanged.
 
 `nonstd::bjdata::view` is a cursor onto bytes you already have. It allocates nothing, copies
 nothing, and owns nothing: strings come back as `std::string_view` into the source buffer,
@@ -154,7 +159,7 @@ struct segment {
     point start, end;
     std::string label;
 
-    friend void bjdata_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
+    friend void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
         visitor.member("start", value.start);
         visitor.member("end",   value.end);
         visitor.member("label", value.label);
@@ -177,10 +182,10 @@ than a truncated document.
 **A macro**, when the body would just be a list of members:
 
 ```cpp
-struct point { int x = 0; int y = 0; BJDATA_DEFINE_TYPE(point, x, y) };
+struct point { int x = 0; int y = 0; NONSTD_SERIAL_DEFINE_TYPE(point, x, y) };
 ```
 
-`BJDATA_DEFINE_TYPE_NON_INTRUSIVE(type, ...)` does the same from outside the type. Field
+`NONSTD_SERIAL_DEFINE_TYPE_NON_INTRUSIVE(type, ...)` does the same from outside the type. Field
 names cannot be recovered without reflection, so a macro is the only option; the shape
 deliberately matches nlohmann's `..._DEFINE_TYPE` family.
 
@@ -188,21 +193,28 @@ deliberately matches nlohmann's `..._DEFINE_TYPE` family.
 write, a value that is a string one way and a bool the other:
 
 ```cpp
-friend void to_bjdata(writer &out, const connection &value);
-friend bool from_bjdata(view source, connection &value);
+friend void serial_write(bjdata::writer &out, const connection &value);
+friend bool serial_read(bjdata::view source, connection &value);
 ```
 
-Note the asymmetry in how they are passed: `writer &` is a mutable reference because writing
-accumulates, while `view` goes **by value** because it is a small trivially copyable handle
-that is never mutated — the same convention as `std::string_view` and `std::span`.
+These are resolved by ADL against whichever writer or reader is passed, so the escape hatch
+costs no format-neutrality: overload them per format when the bodies differ, or declare one
+`auto &` template when they don't.
+
+```cpp
+friend void serial_write(json::writer &out, const connection &value);   // and JSON too
+```
+
+Note the asymmetry in how they are passed: the writer is a mutable reference because writing
+accumulates, while the reader goes **by value** because it is a small trivially copyable
+handle that is never mutated — the same convention as `std::string_view` and `std::span`.
 
 For a type you cannot add functions to, specialize `serializer<T>`.
 
-**One definition covers all four paths.** `bjdata_convert` names neither reader nor writer, so
-a type using it — which is what `BJDATA_DEFINE_TYPE` writes — is read and written in both
-formats without being told about any of them. The `to_bjdata`/`from_bjdata` pair names
-`writer` and `view` explicitly, so those types are BJData-only in both directions; that
-limitation is symmetric, and deliberate.
+**One definition covers all four paths.** `serial_convert` names neither reader nor writer, so
+a type using it — which is what `NONSTD_SERIAL_DEFINE_TYPE` writes — is read and written in
+both formats without being told about any of them. Nothing in the customization layer names a
+format; the only names that do are the ones you write yourself, in the overloads you choose.
 
 ## Reflection (C++26)
 
@@ -210,20 +222,20 @@ limitation is symmetric, and deliberate.
 list is written at all:
 
 ```cpp
-struct [[=bjdata::serializable]] [[=bjdata::naming{bjdata::naming_style::snake_case}]] ethernet_config {
-    [[=bjdata::key("ip")]] std::string ip_address;
-    [[=bjdata::skip]]      int cache_generation;
+struct [[=serial::serializable]] [[=serial::naming{serial::naming_style::snake_case}]] ethernet_config {
+    [[=serial::key("ip")]] std::string ip_address;
+    [[=serial::skip]]      int cache_generation;
                            ip_mode mode;          // key becomes "mode"
 };
 ```
 
-`[[=bjdata::key(...)]]` overrides one key, `[[=bjdata::naming{...}]]` derives all of them from the
+`[[=serial::key(...)]]` overrides one key, `[[=serial::naming{...}]]` derives all of them from the
 identifiers (`snake_case`, `camel_case`, `pascal_case`, `kebab_case`,
-`screaming_snake_case`), and `[[=bjdata::skip]]` leaves a field out. Annotations are ordinary
+`screaming_snake_case`), and `[[=serial::skip]]` leaves a field out. Annotations are ordinary
 values, not parsed strings, and are always written qualified. It is **opt-in** — via
-`[[=bjdata::serializable]]` or by specializing
+`[[=serial::serializable]]` or by specializing
 `enable_reflection<T>` — because reflecting every aggregate that merely lacks a
-`bjdata_convert` would turn any struct that happens to be serializable into a wire-format
+`serial_convert` would turn any struct that happens to be serializable into a wire-format
 commitment, silently.
 
 It generates exactly the `visitor.member(key, value.field)` calls the macro does, so nothing
@@ -254,7 +266,7 @@ write_json(sink, view::over(bytes));                       // transcribe a store
 ```
 
 There are two routes in, and the split falls out of the customization design rather than
-being designed for. `bjdata_convert` and `BJDATA_DEFINE_TYPE` take `auto &visitor` and never
+being designed for. `serial_convert` and `NONSTD_SERIAL_DEFINE_TYPE` take `auto &visitor` and never
 name the BJData writer, so **those types serialise straight to JSON with no intermediate at
 all**. A type using the `to_bjdata(writer &, …)` form names the writer, so it reaches JSON by
 being written as a document first and transcribed — correct, but it allocates.

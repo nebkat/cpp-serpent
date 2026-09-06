@@ -24,7 +24,7 @@ enum class mode : std::uint8_t { off, automatic, on };
 struct point {
     int x = 0;
     int y = 0;
-    BJDATA_DEFINE_TYPE(point, x, y)
+    NONSTD_SERIAL_DEFINE_TYPE(point, x, y)
 };
 
 // --- Form B: one function, both directions ---
@@ -33,7 +33,7 @@ struct segment {
     point end {};
     std::string label = "unnamed";
 
-    friend void bjdata_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
+    friend void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), segment> value) {
         visitor.member("start", value.start);
         visitor.member("end", value.end);
         visitor.member("label", value.label);
@@ -48,14 +48,14 @@ struct connection {
     std::optional<int> port {};
     mode fallback = mode::automatic;
 
-    friend void to_bjdata(writer &out, const connection &value) {
+    friend void serial_write(writer &out, const connection &value) {
         const auto scope = out.object();
         scope.member("host", value.host);
         if (value.port) scope.member("port", *value.port);
         scope.member("fallback", value.fallback);
     }
 
-    friend bool from_bjdata(view source, connection &value) {
+    friend bool serial_read(view source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
         value.host = source["host"].as_string().value_or(defaults.host);
@@ -71,14 +71,14 @@ struct extent {
     int width = 0;
     int height = 0;
 };
-BJDATA_DEFINE_TYPE_NON_INTRUSIVE(extent, width, height)
+NONSTD_SERIAL_DEFINE_TYPE_NON_INTRUSIVE(extent, width, height)
 
 struct document {
     std::vector<point> points {};
     std::map<std::string, int> counts {};
     std::optional<segment> highlight {};
 
-    friend void bjdata_convert(auto &visitor, conversion_object_t<decltype(visitor), document> value) {
+    friend void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), document> value) {
         visitor.member("points", value.points);
         visitor.member("counts", value.counts);
         visitor.member("highlight", value.highlight);
@@ -263,8 +263,8 @@ void reflection_seam() {
 /**
  * One definition, two formats, both directions.
  *
- * bjdata_convert never names either reader or either writer, so a type that uses it - which
- * is what BJDATA_DEFINE_TYPE writes - is carried by all four paths without being told about
+ * serial_convert never names either reader or either writer, so a type that uses it - which
+ * is what NONSTD_SERIAL_DEFINE_TYPE writes - is carried by all four paths without being told about
  * any of them.
  */
 void both_formats() {
@@ -327,5 +327,5 @@ int main() {
     reflection_seam();
     both_formats();
     sizing();
-    return report("bjdata_serializer");
+    return report("serializer");
 }

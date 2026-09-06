@@ -22,16 +22,16 @@
 #include <cstddef>
 
 #if defined(__cpp_reflection) && __cpp_reflection >= 202411L && defined(__cpp_impl_reflection_annotations)
-#define BJDATA_HAS_REFLECTION 1
+#define NONSTD_SERIAL_HAS_REFLECTION 1
 #include <meta>
 #else
-#define BJDATA_HAS_REFLECTION 0
+#define NONSTD_SERIAL_HAS_REFLECTION 0
 #endif
 
 namespace nonstd::serial {
 
 /** Whether this build can enumerate a type's fields for itself. */
-inline constexpr bool reflection_available = BJDATA_HAS_REFLECTION != 0;
+inline constexpr bool reflection_available = NONSTD_SERIAL_HAS_REFLECTION != 0;
 
 // ---------------- annotations ----------------
 //
@@ -39,7 +39,7 @@ inline constexpr bool reflection_available = BJDATA_HAS_REFLECTION != 0;
 // unconditionally: a build without reflection can still name them, it just cannot attach
 // them, since the [[=value]] syntax itself needs P3394.
 //
-// Always write these qualified - [[=bjdata::key("dt")]], not [[=key("dt")]]. That is what
+// Always write these qualified - [[=serial::key("dt")]], not [[=key("dt")]]. That is what
 // keeps them short enough to be readable, and it keeps names like key and skip out of a
 // user's unqualified scope, where several of them would collide with something (::rename in
 // <cstdio> being the obvious one).
@@ -178,7 +178,7 @@ struct name_buffer {
 
 // ---------------- the reflected conversion ----------------
 
-#if BJDATA_HAS_REFLECTION
+#if NONSTD_SERIAL_HAS_REFLECTION
 
 namespace detail {
 
@@ -223,21 +223,21 @@ consteval bool opted_in() {
 /**
  * A type whose fields this library may enumerate.
  *
- * Deliberately opt-in. Reflecting every aggregate that merely lacks a bjdata_convert would
+ * Deliberately opt-in. Reflecting every aggregate that merely lacks a serial_convert would
  * turn any struct that happens to be serializable into a wire-format commitment, silently.
  */
 template<typename T>
 concept reflected_type = std::is_class_v<T> && detail::opted_in<T>();
 
 /**
- * Generates the same member() calls BJDATA_DEFINE_TYPE would, from the type itself.
+ * Generates the same member() calls NONSTD_SERIAL_DEFINE_TYPE would, from the type itself.
  *
  * Found by ordinary unqualified lookup from convertible_type in serializer.hpp, which is why
  * this header is included before it.
  */
 template<typename T>
     requires reflected_type<T>
-void bjdata_convert(auto &visitor, conversion_object_t<decltype(visitor), T> value) {
+void serial_convert(auto &visitor, conversion_object_t<decltype(visitor), T> value) {
     constexpr auto members = std::define_static_array(
             std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
 

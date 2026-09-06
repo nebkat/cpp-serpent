@@ -23,7 +23,7 @@ template<typename>
 inline constexpr bool always_false = false;
 
 /**
- * Flips constness by direction, so one bjdata_convert can serve both.
+ * Flips constness by direction, so one serial_convert can serve both.
  * Lifted from isobus's conversion_object_t<Direction, T>.
  */
 template<typename Visitor, typename T>
@@ -35,7 +35,7 @@ bool read_into(Source source, T &value);
 /**
  * Names each field on the way out: key, then value.
  *
- * Generic over the writer, so one bjdata_convert serves every output format. That is the
+ * Generic over the writer, so one serial_convert serves every output format. That is the
  * whole reason a type written once can be emitted as BJData and as JSON.
  */
 template<typename Writer>
@@ -59,7 +59,7 @@ public:
 namespace detail {
 
 /**
- * Stands in for a visitor when asking whether a type has a bjdata_convert.
+ * Stands in for a visitor when asking whether a type has a serial_convert.
  *
  * Using a real visitor would tie the question to one particular writer, which is exactly
  * what the customization is supposed to be free of.
