@@ -25,19 +25,16 @@ concept convertible_type = requires(detail::convert_probe &visitor, const T &val
  * @brief The dispatch point for user types, specializable for types you cannot add
  *        functions to.
  *
- * By default it prefers a single json_convert and falls back to the to_json /
- * from_json pair, which is for types whose two directions genuinely differ.
+ * Prefers a single json_convert, and falls back to the to_json / from_json pair for types
+ * whose two directions genuinely differ.
  */
 template<typename T, typename>
 struct serializer {
     /**
      * Writes to any writer.
      *
-     * json_convert carries a type through every format at once. to_json is the
-     * fallback for a type whose two directions differ; it is found by ADL against whichever
-     * writer is passed, so a type may overload it once per output - one taking the BJData
-     * writer, another the JSON writer - or declare a single `auto &` template when the body
-     * does not care which.
+     * to_json is found by ADL against whichever writer is passed, so a type may overload it
+     * per writer or declare one `auto &` template.
      */
     template<typename Writer>
     static void write(Writer &out, const T &value) {
@@ -54,13 +51,7 @@ struct serializer {
         }
     }
 
-    /**
-     * Reads from any source offering the reader interface - a BJData view or a JSON reader.
-     *
-     * As on the way out: json_convert covers every format at once, while from_json is
-     * resolved by ADL against the source that was passed, so a type may overload it per
-     * format or template it over one.
-     */
+    /** Reads from any source offering the reader interface. Resolved as to_json is. */
     template<typename Source>
     static bool read(Source source, T &value) {
         if constexpr (convertible_type<T>) {
@@ -104,7 +95,7 @@ bool read_into(Source source, T &value) {
             }
             return true;
         } else {
-            // JSON has no binary, and this library writes it as an array of integers.
+            // A source with no binary type of its own carries it as an array of integers.
             if (!source.is_array()) return false;
             std::size_t index = 0;
             for (const auto element : source.array()) {
@@ -137,7 +128,8 @@ bool read_into(Source source, T &value) {
         for (const auto entry : source.items()) {
             typename T::mapped_type slot {};
             if (!read_into(entry.value, slot)) return false;
-            // A BJData key is already a view of the buffer; a JSON key has to be decoded.
+            // A key that is already a view of the source is used as-is; one that has to be
+            // decoded is materialised.
             if constexpr (std::constructible_from<typename T::key_type, decltype(entry.key)>) {
                 value.emplace(typename T::key_type { entry.key }, std::move(slot));
             } else {
@@ -158,7 +150,7 @@ bool read_into(Source source, T &value) {
 // ---------------- member listing ----------------
 //
 // Field names cannot be recovered without reflection, so listing them in a macro is the only
-// option. The shape deliberately matches the firmware's NONSTD_JSON_DEFINE_TYPE family.
+// option.
 
 #define SERPENT_EXPAND(x) x
 #define SERPENT_MEMBER(name) visitor.member(#name, value.name);

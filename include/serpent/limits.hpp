@@ -2,12 +2,7 @@
 
 namespace serpent {
 
-/**
- * Maximum container nesting any reader or writer will follow.
- *
- * Bounds recursion so a hostile document cannot exhaust the stack, and is also exactly the
- * number of bits in the emitter's container mask.
- */
+/** Maximum nesting any reader or writer will follow: bounds recursion, and fits the mask. */
 inline constexpr int max_depth = 32;
 
 }// namespace serpent

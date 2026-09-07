@@ -1,9 +1,5 @@
 #pragma once
 
-// What the BJData writer and the JSON writer have in common: an erased sink, a latched
-// failure, the container-nesting bookkeeping, and the dispatch that turns a C++ value into
-// calls on whichever of them you are holding.
-
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
 #include <serpent/limits.hpp>
@@ -48,16 +44,13 @@ concept optional_like = requires(const T &value) {
 }// namespace detail
 
 /**
- * @brief The output half shared by every emitter: where bytes go and whether it went wrong.
+ * @brief Where bytes go, whether it went wrong, and how deep the nesting is.
  *
- * The sink is type-erased into a function pointer and a context pointer, so an emitter is a
- * concrete class rather than a template over its destination. That is what lets a user's
- * customization be a plain function taking `writer &`, and it means one instantiation rather
- * than one per sink.
+ * The sink is erased into a function pointer and a context pointer, so an emitter is a
+ * concrete class rather than a template over its destination.
  *
- * Failures latch: the first error is kept and every later call becomes a no-op, so callers
- * check once at the end rather than after each field. This is the policy
- * lib/gnss/src/gnss/rtcm/message_builder.hpp:31-33 states for the same reason.
+ * Failures latch: the first is kept and every later call is a no-op, so a caller checks once
+ * at the end rather than after each field.
  */
 class byte_emitter {
     using write_function = bool (*)(void *, std::span<const std::byte>);
@@ -156,10 +149,9 @@ public:
 /**
  * Turns a C++ value into calls on an emitter.
  *
- * Shared by the BJData and JSON writers so the two can never disagree about what a
- * std::optional, a std::map or a range of bytes means. Where they genuinely differ - typed
- * arrays, how binary is spelled, what a user type falls back to - the emitter supplies the
- * member and decides for itself.
+ * One definition of what an optional, a map or a range of bytes means. Where formats differ -
+ * how binary is spelled, what an unknown type falls back to - the emitter supplies the member
+ * and decides for itself.
  */
 template<typename Emitter, typename T>
 void emit_value(Emitter &out, const T &item) {

@@ -13,11 +13,8 @@ namespace serpent {
 /**
  * @brief Anything with a member write(std::span<const std::byte>).
  *
- * The return type is deliberately unconstrained. The firmware already has around twenty
- * classes shaped like this - bip_buffer, evlp::stream_buffer, storage::norse,
- * storage::nandseq, bsd::socket, http::client, ntrip::server, the OTA writers,
- * peripheral::uart - and they variously return void, bool, std::size_t or std::expected.
- * Accepting all of them as they stand is the point; see put() for how a result is read.
+ * The return type is unconstrained on purpose: classes shaped like this variously return
+ * void, bool, a byte count or an expected, and all of them should qualify unmodified.
  */
 template<typename S>
 concept sink = requires(S &out, std::span<const std::byte> bytes) { out.write(bytes); };
@@ -69,9 +66,8 @@ container_sink(Container &) -> container_sink<Container>;
 /**
  * Writes into a caller-supplied buffer, latching overflow rather than throwing.
  *
- * The policy is the one lib/gnss/src/gnss/rtcm/message_builder.hpp:31-33 states: writes that
- * do not fit are dropped and set overflowed(), which the caller checks once at the end. This
- * is the sink for the no-heap paths, where a document must land inside a fixed byte budget.
+ * For the paths that may not allocate. A write that does not fit is dropped and sets
+ * overflowed(), which the caller checks once at the end.
  */
 class span_sink {
     std::span<std::byte> target {};
@@ -97,13 +93,7 @@ public:
     [[nodiscard]] std::span<const std::byte> written() const noexcept { return this->target.first(this->used); }
 };
 
-/**
- * Counts bytes without storing any.
- *
- * Two uses: sizing a buffer before filling it, and hashing. app/src/app/function/trx/
- * recorder.cpp:285-286 currently serialises a whole metadata document into a fresh vector
- * purely to CRC it and discard it, which this replaces with no allocation at all.
- */
+/** Counts bytes without storing any: for sizing a buffer, or hashing in one pass. */
 class counting_sink {
     std::size_t total = 0;
 

@@ -1,8 +1,5 @@
 #pragma once
 
-// The two direction-carrying visitors, split out so reflect.hpp can build on them without
-// depending on the serializer dispatch that in turn depends on it.
-
 #include <serpent/fwd.hpp>
 
 #include <concepts>
@@ -22,22 +19,14 @@ class read_visitor;
 template<typename>
 inline constexpr bool always_false = false;
 
-/**
- * Flips constness by direction, so one json_convert can serve both.
- * Lifted from isobus's conversion_object_t<Direction, T>.
- */
+/** Flips constness by direction, so one json_convert can serve both. */
 template<typename Visitor, typename T>
 using conversion_object_t = std::conditional_t<std::remove_cvref_t<Visitor>::is_reading, T &, const T &>;
 
 template<typename Source, typename T>
 bool read_into(Source source, T &value);
 
-/**
- * Names each field on the way out: key, then value.
- *
- * Generic over the writer, so one json_convert serves every output format. That is the
- * whole reason a type written once can be emitted as BJData and as JSON.
- */
+/** Names each field on the way out: key, then value. Generic over the writer. */
 template<typename Writer>
 class write_visitor {
     Writer *out = nullptr;
@@ -58,12 +47,7 @@ public:
 
 namespace detail {
 
-/**
- * Stands in for a visitor when asking whether a type has a json_convert.
- *
- * Using a real visitor would tie the question to one particular writer, which is exactly
- * what the customization is supposed to be free of.
- */
+/** Stands in for a visitor when asking whether a type has a json_convert. */
 struct convert_probe {
     static constexpr bool is_reading = false;
 
@@ -77,10 +61,8 @@ struct convert_probe {
  * Names each field on the way in, keeping a cursor into the object.
  *
  * A field is looked for at the cursor first and only scanned for when that misses, so a
- * document whose keys are in declaration order - which is what this writer, dart-bjdata and
- * nlohmann all produce - costs one pass rather than one scan per field. A field whose key is
- * absent is left at whatever value it already held, which gives the firmware's
- * `j.value(key, default)` semantics for free.
+ * document written in declaration order costs one pass rather than a scan per field. A field
+ * whose key is absent keeps whatever value it already held.
  */
 template<typename Source>
 class read_visitor {

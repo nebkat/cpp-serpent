@@ -1,6 +1,6 @@
 #pragma once
 
-// Kept out of sink.hpp so that <ostream> stays out of firmware translation units.
+// Separate from sink.hpp so <ostream> is included only where it is wanted.
 
 #include <serpent/sink.hpp>
 

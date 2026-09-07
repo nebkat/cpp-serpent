@@ -1,8 +1,5 @@
 #pragma once
 
-// Shared by the block-notation writer and the JSON writer, which both need to render a
-// double the way the reference implementation does.
-
 #include <charconv>
 #include <cmath>
 #include <string>
@@ -10,10 +7,7 @@
 
 namespace serpent::detail {
 
-/**
- * Renders a double the way Dart's toString does - ECMAScript's rules, plus a trailing .0
- * on a whole number - so a trace diffs cleanly against the reference implementation.
- */
+/** ECMAScript's number-to-string rules, plus a trailing .0 on a whole number. */
 inline std::string format_real(double value) {
     if (std::isnan(value)) return "NaN";
     if (std::isinf(value)) return value < 0 ? "-Infinity" : "Infinity";

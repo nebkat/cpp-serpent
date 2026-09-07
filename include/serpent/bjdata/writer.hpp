@@ -38,16 +38,11 @@ struct writer_options {
     /**
      * How much larger the output may be to gain a single-copy payload, in percent.
      *
-     * Packing a contiguous range at the element's own width means the payload is already in
-     * wire order and goes out in one copy; narrowing it, or writing it generically, means a
-     * store per element. Which is better is not a size question alone, and the reference
-     * encoder - being Dart, where the copy is not available - only ever asks the size one.
-     *
-     * Zero reproduces its choices exactly. Small values buy the copy where it is nearly
-     * free: a thousand real-valued doubles pack generically at 7802 bytes but copy at 8007,
-     * so 5 is enough. Large values buy it where it is not: the same count of doubles that
-     * all fit a float16 narrows to 2007 bytes, so taking the copy there costs four times the
-     * space.
+     * A contiguous range packed at the element's own width is already in wire order and goes
+     * out in one copy; narrowed or generic costs a store per element. Zero reproduces the
+     * reference encoder, which only asks which is smaller. Five buys the copy where it is
+     * nearly free - a thousand real doubles are 7802 bytes generic against 8007 copied - and
+     * still refuses it where it costs four times the space.
      */
     unsigned copy_tolerance_percent = 0;
 };

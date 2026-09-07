@@ -1,16 +1,11 @@
 #pragma once
 
-// Reflected serialization: a type opts in and its fields are enumerated by the compiler
-// instead of being listed in a macro.
+// A type opts in and the compiler enumerates its fields, instead of a macro listing them.
 //
-// Everything that does not need reflection - the annotation types and the identifier-to-key
-// case conversion - is compiled and tested unconditionally, so only the thin binding to
-// std::meta sits behind the gate. That binding cannot be compiled here: no toolchain
-// available has P2996, and the spellings below follow the papers rather than a working
-// implementation, so expect to adjust names when one ships.
-//
-// It rests on three C++26 papers: P2996 (reflection), P1306 (expansion statements, for
-// `template for`) and P3394 (annotations, for the `[[=value]]` syntax).
+// UNVERIFIED: the binding to std::meta needs P2996, P1306 and P3394, which no available
+// toolchain implements, so it follows the papers rather than a working compiler - expect to
+// adjust spellings. Everything that does not need reflection, meaning the annotations and the
+// identifier-to-key conversion, sits outside the gate and is tested.
 
 #include <serpent/visitor.hpp>
 
@@ -33,16 +28,8 @@ namespace serpent {
 /** Whether this build can enumerate a type's fields for itself. */
 inline constexpr bool reflection_available = SERPENT_HAS_REFLECTION != 0;
 
-// ---------------- annotations ----------------
-//
-// Ordinary types, so an annotation is a value rather than a string to be parsed. Declared
-// unconditionally: a build without reflection can still name them, it just cannot attach
-// them, since the [[=value]] syntax itself needs P3394.
-//
-// Always write these qualified - [[=serial::key("dt")]], not [[=key("dt")]]. That is what
-// keeps them short enough to be readable, and it keeps names like key and skip out of a
-// user's unqualified scope, where several of them would collide with something (::rename in
-// <cstdio> being the obvious one).
+// Annotations are ordinary values, not parsed strings. Write them qualified -
+// [[=serpent::key("dt")]] - which is what lets them be this short.
 
 /** On a field: use this key instead of the identifier. */
 struct key {
@@ -77,13 +64,7 @@ struct enable_reflection : std::false_type {};
 
 namespace detail {
 
-/**
- * A compile-time key, built by convert_case.
- *
- * Fixed capacity rather than a computed length, because this only ever runs during constant
- * evaluation, where a generous bound costs nothing. A longer identifier is truncated, which
- * would be a visible wrong key rather than a silent one.
- */
+/** A key built during constant evaluation. Fixed capacity; a longer identifier truncates. */
 struct name_buffer {
     std::array<char, 96> storage {};
     std::size_t length = 0;
