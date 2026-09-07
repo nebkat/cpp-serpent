@@ -157,6 +157,18 @@ void numeric_packing() {
     check_equal(std::string_view { hex(emit([](auto &w) { w.value(std::vector<double> { 1.5, 2.5, -0.25 }); })) },
             "5b68003e6800416800b45d", "three halves stay generic");
 
+    // The generic form a packed one is measured against has to be the form that would actually
+    // be written. Counting sized containers made the generic array two bytes dearer, and
+    // measuring against the old unbounded framing left arrays generic that are smaller typed.
+    check_equal(std::string_view { hex(
+                        emit<writer_options {}>([](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); })) },
+            "5b2455235504"
+            "01020304",
+            "four small ints pack once the generic form carries a count");
+    check_equal(
+            std::string_view { hex(emit<reference_parity>([](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); })) },
+            "5b55015502550355045d", "and stay generic when it does not");
+
     // Packing off falls back to the generic form whatever the measurement says.
     check_equal(std::string_view { hex(
                         emit<writer_options { .numeric_packing = false, .counted_containers_from = never_counted }>(

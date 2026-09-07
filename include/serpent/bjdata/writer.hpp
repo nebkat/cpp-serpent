@@ -442,7 +442,16 @@ void basic_writer<Options>::range(const R &items) noexcept {
         if constexpr (Options.numeric_packing && Options.compact_types)
             if (!std::ranges::empty(items)) {
                 const auto count = static_cast<std::size_t>(std::ranges::distance(items));
-                std::size_t generic = 2; // '[' and ']'
+
+                // What the generic form would frame this with. An unbounded array is '[' and
+                // ']'; a counted one is '[' '#' and the count, and comparing against the wrong
+                // one of those would leave a typed array unpacked when it is in fact smaller.
+                const bool generic_is_counted =
+                        Options.counted_containers_from != never_counted && count >= Options.counted_containers_from;
+                const auto generic_count_marker =
+                        integer_marker(static_cast<std::int64_t>(count), static_cast<std::int64_t>(count));
+                std::size_t generic = generic_is_counted ? 3 + payload_width(generic_count_marker) : 2;
+
                 marker element_marker = marker::invalid;
 
                 if constexpr (std::floating_point<element>) {
