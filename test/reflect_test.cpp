@@ -43,6 +43,62 @@ struct site {
 template<>
 struct serpent::enable_reflection<site> : std::true_type {};
 
+// Annotated and hand-written at once, which is what migrating a type looks like midway.
+struct[[= serpent::serializable {}]] both_forms {
+    int x = 1;
+    int y = 2;
+
+    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), both_forms> value) {
+        visitor.member("only_x", value.x);
+    }
+};
+
+// A type from elsewhere: never annotated, opted in and given a naming rule from outside.
+struct foreign_reading {
+    int sensorId = 4;
+    double degreesCelsius = 21.5;
+};
+template<>
+struct serpent::enable_reflection<foreign_reading> : std::true_type {
+    static constexpr serpent::naming_style style = serpent::naming_style::snake_case;
+};
+
+// A type whose conversion is supplied wholesale, which must also outrank reflection.
+struct[[= serpent::serializable {}]] specialized {
+    int value = 5;
+};
+template<>
+struct serpent::serializer<specialized, void> {
+    template<typename Writer>
+    static void write(Writer &out, const specialized &object) {
+        out.value(object.value);
+    }
+    template<typename Source>
+    static bool read(Source source, specialized &object) {
+        const auto number = source.template try_get<int>();
+        if (!number) return false;
+        object.value = *number;
+        return true;
+    }
+};
+
+void a_hand_written_conversion_outranks_reflection() {
+    check(json::encode(both_forms {}) == R"({"only_x":1})", "the hand-written json_convert wins");
+    const auto back = json::decode<both_forms>(R"({"only_x":9})");
+    check(back && back->x == 9 && back->y == 2, "and is what reads, so y keeps its default");
+
+    check(json::encode(specialized {}) == "5", "a serializer specialization wins too");
+    const auto scalar = json::decode<specialized>("7");
+    check(scalar && scalar->value == 7, "in both directions");
+}
+
+void a_type_you_do_not_own() {
+    check(json::encode(foreign_reading {}) == R"({"sensor_id":4,"degrees_celsius":21.5})",
+            "enable_reflection opts it in and carries the naming rule");
+    const auto back = json::decode<foreign_reading>(R"({"sensor_id":9,"degrees_celsius":1.5})");
+    check(back && back->sensorId == 9 && back->degreesCelsius == 1.5, "and it reads back");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -110,6 +166,8 @@ void naming_styles() {
 
 int main() {
     identifiers_become_keys();
+    a_hand_written_conversion_outranks_reflection();
+    a_type_you_do_not_own();
     annotations_adjust_keys();
     an_absent_optional_is_still_written_null();
     reflection_composes_with_containers();

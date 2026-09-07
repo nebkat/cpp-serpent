@@ -23,8 +23,10 @@ concept convertible_type = requires(detail::convert_probe &visitor, const T &val
  * @brief The dispatch point for user types, specializable for types you cannot add
  *        functions to.
  *
- * Prefers a single json_convert, and falls back to the to_json / from_json pair for types
- * whose two directions genuinely differ.
+ * Resolved in order: a single json_convert, then the to_json / from_json pair for types whose
+ * two directions genuinely differ, then reflection. A hand-written conversion therefore always
+ * wins over the reflected one, which is what makes annotating a type that already has one a
+ * safe intermediate step rather than an ambiguity.
  */
 template<typename T, typename>
 struct serializer {
@@ -42,10 +44,15 @@ struct serializer {
             json_convert(visitor, value);
         } else if constexpr (requires { to_json(out, value); }) {
             to_json(out, value);
+        } else if constexpr (reflected_type<T>) {
+            write_visitor<Writer> visitor { out };
+            const auto scope = out.object();
+            detail::reflect_convert(visitor, value);
         } else {
             static_assert(always_false<Writer>,
-                    "no json_convert for this type, and no to_json overload accepting "
-                    "this writer; add one of those, or specialize serpent::serializer<T>");
+                    "no json_convert for this type, no to_json overload accepting this writer, "
+                    "and it is not opted in to reflection; add one of those, or specialize "
+                    "serpent::serializer<T>");
         }
     }
 
@@ -59,10 +66,16 @@ struct serializer {
             return visitor.ok();
         } else if constexpr (requires { from_json(source, value); }) {
             return from_json(source, value);
+        } else if constexpr (reflected_type<T>) {
+            if (!source.is_object()) return false;
+            read_visitor<Source> visitor { source };
+            detail::reflect_convert(visitor, value);
+            return visitor.ok();
         } else {
             static_assert(always_false<Source>,
-                    "no json_convert for this type, and no from_json overload accepting "
-                    "this source; add one of those, or specialize serpent::serializer<T>");
+                    "no json_convert for this type, no from_json overload accepting this source, "
+                    "and it is not opted in to reflection; add one of those, or specialize "
+                    "serpent::serializer<T>");
             return false;
         }
     }

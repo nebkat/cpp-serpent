@@ -75,7 +75,17 @@ struct naming {
     naming_style style = naming_style::as_written;
 };
 
-/** The opt-in for a type you cannot annotate. Specialize to true_type. */
+/**
+ * The opt-in for a type you cannot annotate. Specialize to true_type.
+ *
+ * A specialization may also carry a naming style, which is the only way to set one on a type
+ * whose definition you do not control:
+ *
+ *     template<>
+ *     struct serpent::enable_reflection<foreign> : std::true_type {
+ *         static constexpr naming_style style = naming_style::snake_case;
+ *     };
+ */
 template<typename T>
 struct enable_reflection : std::false_type {};
 
@@ -188,13 +198,28 @@ consteval bool has_annotation(std::meta::info entity) {
     return !std::meta::annotations_of_with_type(entity, ^^A).empty();
 }
 
+/**
+ * The naming rule for a type: an external opt-in that names one, else the type's own
+ * annotation.
+ *
+ * The trait wins because it is the consumer's deliberate override of a type they do not own,
+ * and a type that carries both is being adapted by someone other than its author.
+ */
+template<typename T>
+consteval naming_style naming_for() {
+    if constexpr (requires { enable_reflection<T>::style; })
+        return enable_reflection<T>::style;
+    else
+        return annotation_of<naming>(^^T).value_or(naming {}).style;
+}
+
 /** The wire key for one field: an explicit key, else the type's naming rule. */
 template<typename T, std::meta::info Member>
 consteval std::string_view field_key() {
     if constexpr (constexpr auto explicit_name = annotation_of<key>(Member); explicit_name.has_value()) {
         return std::define_static_string(explicit_name->view());
     } else {
-        constexpr auto style = annotation_of<naming>(^^T).value_or(naming {}).style;
+        constexpr auto style = naming_for<T>();
         if constexpr (style == naming_style::as_written) {
             return std::define_static_string(std::meta::identifier_of(Member));
         } else {
@@ -221,15 +246,19 @@ consteval bool opted_in() {
 template<typename T>
 concept reflected_type = std::is_class_v<T> && detail::opted_in<T>();
 
+namespace detail {
+
 /**
  * Generates the same member() calls SERPENT_DEFINE_TYPE would, from the type itself.
  *
- * Found by ordinary unqualified lookup from convertible_type in serializer.hpp, which is why
- * this header is included before it.
+ * Deliberately not spelled json_convert. As an overload it would tie with a hand-written one
+ * on a type that has both, and an ambiguous call makes the convertible_type probe silently
+ * false - reporting no conversion at all rather than two. serializer<T> calls this by name
+ * instead, after it has looked for the hand-written forms.
  */
 template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
     requires reflected_type<T>
-void json_convert(Visitor &visitor, Object &value) {
+void reflect_convert(Visitor &visitor, Object &value) {
     template for (constexpr auto member :
             std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
         if constexpr (!detail::has_annotation<skip>(member)) {
@@ -240,11 +269,21 @@ void json_convert(Visitor &visitor, Object &value) {
     }
 }
 
+} // namespace detail
+
 #else
 
-/** Without reflection nothing is reflected, and the macro forms remain the way in. */
+/** Without reflection nothing is reflected, and the manual forms remain the way in. */
 template<typename T>
 concept reflected_type = false;
+
+namespace detail {
+
+/** Never defined: reflected_type is false, so every call to it is discarded. */
+template<typename Visitor, typename Object>
+void reflect_convert(Visitor &visitor, Object &value);
+
+} // namespace detail
 
 #endif
 
