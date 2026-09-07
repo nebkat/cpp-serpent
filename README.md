@@ -164,6 +164,28 @@ JSON's `writer_options { indent }` stays a runtime value, deliberately — inden
 presentation choice that varies per call, whereas which compactions you want is a property of
 the build.
 
+### Paying size for a copy
+
+A contiguous range packed at the element's own width is already in wire order, so its payload
+goes out in **one copy**. Narrowed, or written generically, it costs a store per element. Which
+is better is not a size question alone — and the reference encoder, being Dart, where the copy
+is not available, only ever asks the size one.
+
+`copy_tolerance_percent` is how much size you will pay for the copy:
+
+| 1,000 doubles | at tolerance 0 | with the copy |
+|---|---|---|
+| real values | 7,802 B generic | 8,007 B — **+2.6%** |
+| all float16-exact | 2,007 B as `h` | 8,007 B — +299% |
+
+So `{ .copy_tolerance_percent = 5 }` buys the copy in the first row and correctly refuses it
+in the second. **Zero is the default and reproduces the reference encoder byte for byte**,
+which is what the fixture suite holds it to.
+
+One case needs no tolerance at all: when the chosen marker already stores each element at the
+width it occupies, the copy is free. A positive `int32` range packs as `uint32` — different
+marker, identical bytes — and is copied whole at tolerance 0.
+
 `typed_array<T>(span)` is the write counterpart to `as_span<T>()`: header, then the payload
 in a single copy.
 

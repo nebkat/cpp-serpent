@@ -145,6 +145,44 @@ void numeric_packing() {
                 "5b550155025503550455055d", "numeric_packing off keeps the generic form");
 }
 
+/**
+ * A contiguous range packed at the element's own width goes out in one copy; narrowed or
+ * written generically it costs a store per element. That is not a size question alone, and
+ * the reference encoder - being Dart, where the copy is not available - only ever asks the
+ * size one. copy_tolerance_percent is how much size you will pay for the copy.
+ */
+void contiguous_copy() {
+    std::vector<double> real;
+    for (int index = 0; index < 200; ++index) real.push_back(index * 0.1);
+    std::vector<double> halves;
+    for (int index = 0; index < 200; ++index) halves.push_back(index * 0.5);
+    std::vector<std::int32_t> positive;
+    for (int index = 0; index < 200; ++index) positive.push_back(index * 100000);
+
+    constexpr writer_options slack { .copy_tolerance_percent = 5 };
+    constexpr writer_options generous { .copy_tolerance_percent = 400 };
+
+    const auto marker_of = [](std::span<const std::byte> bytes) {
+        return bytes.size() > 2 && static_cast<char>(bytes[1]) == '$' ? static_cast<char>(bytes[2]) : '-';
+    };
+
+    // Doubles that do not narrow: generic is barely smaller, so a little slack buys the copy.
+    check_equal(marker_of(encode(real)), '-', "real doubles are generic at zero tolerance");
+    check_equal(marker_of(encode<slack>(real)), 'D', "and copied whole once a little slack is allowed");
+    check(encode<slack>(real).size() > encode(real).size(), "which does cost a few bytes");
+
+    // Doubles that all fit a float16: the copy would cost four times the space, so slack of
+    // this size must not buy it.
+    check_equal(marker_of(encode(halves)), 'h', "half-exact doubles narrow at zero tolerance");
+    check_equal(marker_of(encode<slack>(halves)), 'h', "and small slack does not undo that");
+    check_equal(marker_of(encode<generous>(halves)), 'D', "only generous slack takes the copy");
+
+    // Already copyable at the chosen marker: positive int32 packs as uint32, whose bytes are
+    // identical, so this is a copy at zero tolerance and the marker must not drift.
+    check_equal(marker_of(encode(positive)), 'm', "positive int32 packs as uint32");
+    check_equal(marker_of(encode<slack>(positive)), 'm', "and tolerance does not change that");
+}
+
 void typed_arrays() {
     const std::array<std::uint8_t, 4> bytes { 0xde, 0xad, 0xbe, 0xef };
     check_equal(std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint8_t> { bytes }); })) },
@@ -272,6 +310,7 @@ int main() {
     scalars();
     containers();
     numeric_packing();
+    contiguous_copy();
     typed_arrays();
     sinks();
     error_latching();

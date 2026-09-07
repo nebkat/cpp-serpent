@@ -35,6 +35,21 @@ struct writer_options {
     bool compact_types = true;
     /** Rewrite a uniform numeric list as [$T#n when that is strictly smaller. */
     bool numeric_packing = true;
+    /**
+     * How much larger the output may be to gain a single-copy payload, in percent.
+     *
+     * Packing a contiguous range at the element's own width means the payload is already in
+     * wire order and goes out in one copy; narrowing it, or writing it generically, means a
+     * store per element. Which is better is not a size question alone, and the reference
+     * encoder - being Dart, where the copy is not available - only ever asks the size one.
+     *
+     * Zero reproduces its choices exactly. Small values buy the copy where it is nearly
+     * free: a thousand real-valued doubles pack generically at 7802 bytes but copy at 8007,
+     * so 5 is enough. Large values buy it where it is not: the same count of doubles that
+     * all fit a float16 narrows to 2007 bytes, so taking the copy there costs four times the
+     * space.
+     */
+    unsigned copy_tolerance_percent = 0;
 };
 
 template<writer_options Options>
@@ -440,7 +455,25 @@ void basic_writer<Options>::range(const R &items) noexcept {
 
             const auto count_marker = integer_marker(static_cast<std::int64_t>(count), static_cast<std::int64_t>(count));
             // '[' '$' type '#', then the count with its own marker, then the payload.
-            const std::size_t packed = 4 + (1 + payload_width(count_marker)) + count * payload_width(element_marker);
+            const std::size_t header = 4 + (1 + payload_width(count_marker));
+            std::size_t packed = header + count * payload_width(element_marker);
+
+            // A contiguous range packed at the element's own width copies in one go. Consider
+            // it whenever the chosen marker would not, and take it if the size it costs is
+            // within what the caller allows.
+            if constexpr (std::ranges::contiguous_range<R> && strong_type_for<element>() != marker::invalid) {
+                const std::size_t copyable = header + count * sizeof(element);
+                const std::size_t best = std::min(packed, generic);
+                if (copyable * 100 <= best * (100 + std::size_t { Options.copy_tolerance_percent })) {
+                    // Keep the chosen marker when it is already the element's width, so a
+                    // positive int32 range stays uint32 as the reference writes it.
+                    if (payload_width(element_marker) != sizeof(element)) {
+                        element_marker = strong_type_for<element>();
+                    }
+                    packed = copyable;
+                    generic = copyable + 1;   // force the packed branch below
+                }
+            }
 
             if (packed < generic) {
                 this->put_marker(marker::array_begin);
@@ -449,12 +482,16 @@ void basic_writer<Options>::range(const R &items) noexcept {
                 this->put_marker(marker::count);
                 this->put_length(count);
 
-                // When the chosen marker is exactly what this element type packs as, and the
-                // range is contiguous, the payload is already in wire order: one copy rather
-                // than a store per element. A caller never asks for this - it is the writer's
-                // business, which is the point of value() taking whatever range you have.
-                if constexpr (std::ranges::contiguous_range<R> && strong_type_for<element>() != marker::invalid) {
-                    if (element_marker == strong_type_for<element>()) {
+                // When the chosen marker stores each element at exactly the width it already
+                // occupies, the payload is in wire order and goes out in one copy rather than
+                // a store per element. The marker need not be the element's own: a positive
+                // int32 range packs as uint32, and two's complement makes those bytes
+                // identical. A caller never asks for this - it is the writer's business, which
+                // is the point of value() taking whatever range you have.
+                if constexpr (std::ranges::contiguous_range<R>) {
+                    const bool same_width = payload_width(element_marker) == sizeof(element);
+                    const bool same_family = is_float(element_marker) == std::floating_point<element>;
+                    if (same_width && same_family) {
                         this->put(std::as_bytes(std::span<const element> { std::ranges::data(items), count }));
                         return;
                     }
