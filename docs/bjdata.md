@@ -3,6 +3,25 @@
 [BJData](https://github.com/NeuroJSON/bjdata) is little-endian and self-delimiting, which is
 what makes reading it in place possible.
 
+## Counted arrays
+
+By default an array of objects is written unbounded, `[ … ]`, which is what the reference
+encoder does. A reader then has no idea how many elements are coming and grows its container as
+it goes — fifteen allocations for ten thousand records.
+
+```cpp
+constexpr serpent::bjdata::writer_options counted { .counted_containers = true };
+const auto bytes = bjdata::encode<counted>(values);
+```
+
+Now a sized range writes its length, `[#n`, and decoding sizes the container once: **one
+allocation instead of fifteen, and faster for it**. On a 845 KB document the count costs three
+bytes.
+
+It is off by default because it departs from the reference encoder, which only writes a count
+beside a type marker. A packed numeric array already carries one, so `std::vector<int>` and
+friends are sized on read with no option at all.
+
 ## Zero copy, concretely
 
 ```cpp

@@ -144,6 +144,10 @@ bool read_into(Source source, T &value) {
                          }) {
         if (!source.is_array()) return false;
         value.clear();
+        // A document that states its length lets the container be sized once rather than grown.
+        if constexpr (requires { source.size_hint(); } && requires(T &target) { target.reserve(std::size_t {}); }) {
+            if (const auto hint = source.size_hint()) value.reserve(*hint);
+        }
         for (const auto element : source.array()) {
             auto &slot = value.emplace_back();
             if (!read_into(element, slot)) return false;

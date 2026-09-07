@@ -214,6 +214,15 @@ public:
     }
 
     [[nodiscard]] std::size_t size() const noexcept;
+
+    /**
+     * How many elements are coming, when the document says so without being walked.
+     *
+     * Nothing for an unbounded container: size() would have to count them, and a caller asking
+     * for a hint wants to avoid exactly that.
+     */
+    [[nodiscard]] std::optional<std::size_t> size_hint() const noexcept;
+
     [[nodiscard]] array_range array() const noexcept;
     [[nodiscard]] member_range items() const noexcept;
 
@@ -338,6 +347,7 @@ private:
     std::uint64_t remaining = 0;
     bool counted = false;
     bool exhausted = true;
+    key_value current {};
 
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
         return this->source.data() + this->source.size();
@@ -444,14 +454,32 @@ private:
     std::uint64_t remaining = 0;
     bool counted = false;
     bool exhausted = true;
+    key_value current {};
 
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
         return this->source.data() + this->source.size();
     }
 
+    /** Parses the entry at the cursor. Called once per position, by normalise(). */
+    [[nodiscard]] key_value parse_here() const noexcept {
+        detail::cursor scanner { this->source, this->cursor };
+        const auto key = detail::read_key(scanner);
+        if (!scanner.ok()) return {};
+
+        if (this->element != marker::invalid) {
+            return key_value { key, view { this->element, this->source, scanner.position } };
+        }
+        if (!scanner.need(1)) return {};
+
+        const auto kind = to_marker(scanner.peek());
+        if (!is_value(kind)) return {};
+        return key_value { key, view { kind, this->source, scanner.position + 1 } };
+    }
+
     void normalise() noexcept {
         if (this->cursor == nullptr) {
             this->exhausted = true;
+            this->current = {};
             return;
         }
         // Unlike a typed array, an object skips noops whether or not it has a strong type.
@@ -460,9 +488,13 @@ private:
 
         if (this->counted) {
             this->exhausted = this->remaining == 0 || this->cursor >= this->limit();
-            return;
+        } else {
+            this->exhausted = this->cursor >= this->limit() || to_marker(*this->cursor) == marker::object_end;
         }
-        this->exhausted = this->cursor >= this->limit() || to_marker(*this->cursor) == marker::object_end;
+
+        // The key and the value marker are read here rather than in operator*, so that
+        // advancing can resume from the value instead of parsing the key a second time.
+        this->current = this->exhausted ? key_value {} : this->parse_here();
     }
 
 public:
@@ -478,33 +510,18 @@ public:
         this->normalise();
     }
 
-    [[nodiscard]] key_value operator*() const noexcept {
-        if (this->exhausted) return {};
-
-        detail::cursor scanner { this->source, this->cursor };
-        const auto key = detail::read_key(scanner);
-        if (!scanner.ok()) return {};
-
-        if (this->element != marker::invalid) {
-            return key_value { key, view { this->element, this->source, scanner.position } };
-        }
-        if (!scanner.need(1)) return {};
-
-        const auto kind = to_marker(scanner.peek());
-        if (!is_value(kind)) return {};
-        return key_value { key, view { kind, this->source, scanner.position + 1 } };
-    }
+    [[nodiscard]] key_value operator*() const noexcept { return this->current; }
 
     member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
-        detail::cursor scanner { this->source, this->cursor };
-        detail::skip_key(scanner);
-        if (!scanner.ok()) {
+        // The key and the value's marker were consumed by normalise(), so resume at the value.
+        if (!this->current.value.is_valid()) {
             this->exhausted = true;
             return *this;
         }
 
+        detail::cursor scanner { this->source, this->current.value.data() };
         if (this->element != marker::invalid) {
             if (!scanner.need(payload_width(this->element))) {
                 this->exhausted = true;
@@ -512,17 +529,7 @@ public:
             }
             scanner.advance(payload_width(this->element));
         } else {
-            if (!scanner.need(1)) {
-                this->exhausted = true;
-                return *this;
-            }
-            const auto kind = to_marker(scanner.peek());
-            if (!is_value(kind)) {
-                this->exhausted = true;
-                return *this;
-            }
-            scanner.advance(1);
-            detail::skip_value(scanner, kind, 1);
+            detail::skip_value(scanner, this->current.value.type_marker(), 1);
             if (!scanner.ok()) {
                 this->exhausted = true;
                 return *this;
@@ -577,6 +584,12 @@ inline array_range view::array() const noexcept {
 inline member_range view::items() const noexcept {
     if (this->element != marker::object_begin) return {};
     return member_range { member_iterator { this->source, this->container_header() } };
+}
+
+inline std::optional<std::size_t> view::size_hint() const noexcept {
+    const auto info = this->container_header();
+    if (info.body == nullptr || info.unbounded) return std::nullopt;
+    return static_cast<std::size_t>(info.count);
 }
 
 inline std::size_t view::size() const noexcept {

@@ -374,6 +374,40 @@ void containers_need_no_customization() {
     check(json::decode<std::optional<int>>(json::encode(engaged)) == engaged, "optional through JSON");
 }
 
+/**
+ * A counted array lets the reader size its container once instead of growing it.
+ *
+ * Off by default, because the reference encoder only writes a count beside a type marker, and
+ * the fixture suite holds the default output to that byte for byte.
+ */
+void counted_containers() {
+    constexpr serpent::bjdata::writer_options counted { .counted_containers = true };
+
+    const std::vector<point> points { { 1, 2 }, { 3, 4 }, { 5, 6 } };
+    const auto unbounded = encode(points);
+    const auto with_count = encode<counted>(points);
+
+    check(with_count.size() > unbounded.size(), "the count costs a few bytes");
+    check(hex(unbounded).find("5b7b") == 0, "the default is still an unbounded array of objects");
+    check(hex(with_count).find("5b23") == 0, "the counted form writes [# before the elements");
+
+    const auto back = decode<std::vector<point>>(with_count);
+    check(back && back->size() == 3 && back->at(2).y == 6, "and it round-trips");
+
+    // The point of the count: it is readable without walking the elements.
+    const auto counted_view = view::over(with_count);
+    const auto hint = counted_view.size_hint();
+    check(hint && *hint == 3, "a counted array states its length");
+    check(!view::over(unbounded).size_hint(), "an unbounded one does not, rather than counting");
+    check(counted_view.size() == 3, "and size() agrees either way");
+    check(view::over(unbounded).size() == 3, "including when it has to walk");
+
+    // A typed array already carried a count, so it needs no option to be sized on read.
+    const auto typed = encode(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });
+    const auto typed_hint = view::over(typed).size_hint();
+    check(typed_hint && *typed_hint == 5, "a packed numeric array states its length already");
+}
+
 void sizing() {
     const point value { 3, 4 };
     check_equal(measure(value), encode(value).size(), "measure agrees with encode_TMP");
@@ -392,6 +426,7 @@ int main() {
     reflection_seam();
     aggregates_are_not_strings();
     containers_need_no_customization();
+    counted_containers();
     both_formats();
     sizing();
     return report("serializer");

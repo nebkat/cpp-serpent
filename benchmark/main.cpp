@@ -440,6 +440,13 @@ static void binary_formats(const std::vector<reading> &values) {
 
     bench::measure("binary decode 10k records", "serpent", bjdata_bytes.size(),
             [&] { return bjdata::decode<std::vector<reading>>(bjdata_bytes)->size(); });
+    // The same document written with element counts, which is what lets the container be
+    // sized once on the way in.
+    constexpr bjdata::writer_options counted { .counted_containers = true };
+    const auto counted_bytes = bjdata::encode<counted>(values);
+    bench::measure("binary decode 10k records", "serpent+n", counted_bytes.size(),
+            [&] { return bjdata::decode<std::vector<reading>>(counted_bytes)->size(); });
+
     bench::measure("binary decode 10k records", "glaze", beve.size(), [&] {
         std::vector<reading> out;
         return glz::read_beve(out, beve) ? 0 : out.size();

@@ -45,6 +45,15 @@ struct writer_options {
      * still refuses it where it costs four times the space.
      */
     unsigned copy_tolerance_percent = 0;
+    /**
+     * Give a sized array its element count, as [#n rather than an unbounded [.
+     *
+     * Costs a few bytes and departs from the reference encoder, which only writes a count
+     * beside a type marker. In exchange a reader knows how many elements are coming and sizes
+     * its container once instead of growing it, which is the difference between one allocation
+     * and one per doubling.
+     */
+    bool counted_containers = false;
 };
 
 template<writer_options Options>
@@ -81,6 +90,15 @@ class basic_writer : public byte_emitter {
         if (!this->push(false)) return;
         this->put_marker(marker::array_begin);
     }
+    /** A count with no type marker: the elements still carry their own. */
+    void begin_counted_array(std::uint64_t count) noexcept {
+        if (!this->push(false)) return;
+        this->put_marker(marker::array_begin);
+        this->put_marker(marker::count);
+        this->put_length(count);
+    }
+    /** A counted container ends when its count runs out, so nothing closes it. */
+    void end_counted_array() noexcept { this->pop(false); }
     void end_array() noexcept {
         if (!this->pop(false)) return;
         this->put_marker(marker::array_end);
@@ -516,6 +534,17 @@ void basic_writer<Options>::range(const R &items) noexcept {
                     return;
                 }
             }
+    }
+
+    if constexpr (Options.counted_containers) {
+        if constexpr (std::ranges::sized_range<R>) {
+            const auto count = static_cast<std::uint64_t>(std::ranges::size(items));
+            this->begin_counted_array(count);
+            for (const auto &item : items)
+                this->value(item);
+            this->end_counted_array();
+            return;
+        }
     }
 
     const auto scope = this->array();
