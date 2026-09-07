@@ -4,15 +4,19 @@ project(serpent CXX)
 
 option(SERPENT_TEST_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
 
-# Enabled before the subdirectory, so its tests register with this project's ctest.
+# Reading and writing unaligned values has nothing to do with serialization, so it is its own
+# library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
+include(FetchContent)
+FetchContent_Declare(unaligned
+        GIT_REPOSITORY git@github.com:nebkat/cpp-unaligned.git
+        GIT_TAG v0.1.0
+        GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(unaligned)
+
 if(PROJECT_IS_TOP_LEVEL)
     enable_testing()
     set(BUILD_TESTING ON)
 endif()
-
-# Reading and writing unaligned values is useful with no serialization anywhere near it, so
-# it is its own library and can be lifted out as a directory move.
-add_subdirectory(unaligned)
 
 # Header only.
 add_library(serpent INTERFACE)

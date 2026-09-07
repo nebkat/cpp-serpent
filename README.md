@@ -455,6 +455,9 @@ cmake -S . -B build && cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Configuring fetches `cpp-unaligned` at its pinned tag, so the first configure needs network
+access.
+
 Tests build with AddressSanitizer and UndefinedBehaviorSanitizer by default
 (`-DBJDATA_TEST_SANITIZE=OFF` to disable). Every suite truncates its documents at each byte
 offset and requires a clean rejection, so out-of-bounds reads fail the build rather than
@@ -517,9 +520,10 @@ const auto text = to_json(view::over(encoded));
 That is deliberately explicit. A hidden intermediate inside `to_json` would allocate a whole
 document behind the caller's back.
 
-`unaligned/` is a separate library with its own target, `unaligned::unaligned`, because
-reading and writing unaligned values is useful with no serialization anywhere near it.
-Extracting it into its own repository is a directory move.
+[`cpp-unaligned`](https://github.com/nebkat/cpp-unaligned) is a separate library, fetched at a
+pinned tag, because reading and writing unaligned values has nothing to do with
+serialization. It supplies the `unaligned::unaligned` target and the `nonstd::unaligned_ptr`
+that the zero-copy spans are built on.
 
 ## Examples
 
