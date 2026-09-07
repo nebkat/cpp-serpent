@@ -29,20 +29,25 @@ inline void write_value(writer &out, view source) noexcept {
     out.put(*payload);
 }
 
-/** Writes one value to a sink and reports the bytes produced, or the first failure. */
-template<sink S, typename T>
-std::expected<std::size_t, error> write(S &out, const T &value, writer_options options = {}) {
-    writer target { out, options };
+/**
+ * Writes one value to a sink and reports the bytes produced, or the first failure.
+ *
+ * The compaction options are a template argument, so a build that turns one off does not
+ * carry its code: bjdata::write<no_compaction>(sink, value).
+ */
+template<writer_options Options = writer_options {}, sink S, typename T>
+std::expected<std::size_t, error> write(S &out, const T &value) {
+    basic_writer<Options> target { out };
     target.value(value);
     return target.finish();
 }
 
 /** Encodes a value into a fresh buffer. The allocating convenience over write(). */
-template<typename T>
-[[nodiscard]] std::vector<std::byte> encode(const T &value, writer_options options = {}) {
+template<writer_options Options = writer_options {}, typename T>
+[[nodiscard]] std::vector<std::byte> encode(const T &value) {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
-    writer target { out, options };
+    basic_writer<Options> target { out };
     target.value(value);
     if (!target.finish()) buffer.clear();
     return buffer;
@@ -55,12 +60,15 @@ template<typename T>
 }
 
 /** The exact byte length a value would occupy, with no allocation. */
-template<typename T>
-[[nodiscard]] std::size_t measure(const T &value, writer_options options = {}) {
+template<writer_options Options = writer_options {}, typename T>
+[[nodiscard]] std::size_t measure(const T &value) {
     counting_sink counter;
-    writer target { counter, options };
+    basic_writer<Options> target { counter };
     target.value(value);
     return counter.size();
 }
+
+/** Shorthand for the policy that does no compaction at all. */
+inline constexpr writer_options no_compaction { .compact_types = false, .numeric_packing = false };
 
 }// namespace serpent::bjdata

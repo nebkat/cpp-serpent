@@ -29,11 +29,11 @@ std::string hex(std::span<const std::byte> bytes) {
     return out;
 }
 
-template<typename Body>
-std::vector<std::byte> emit(Body body, writer_options options = {}) {
+template<writer_options Options = writer_options {}, typename Body>
+std::vector<std::byte> emit(Body body) {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
-    writer target { out, options };
+    basic_writer<Options> target { out };
     body(target);
     const auto result = target.finish();
     check(result.has_value(), "the writer finished cleanly");
@@ -75,9 +75,9 @@ void scalars() {
     produces("4855022d31", [](writer &w) { w.high_precision("-1"); }, "H -1");
 
     // compact_types off pins every integer to int64 and every real to float64.
-    check_equal(std::string_view { hex(emit([](writer &w) { w.value(1); }, { .compact_types = false })) },
+    check_equal(std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1); })) },
                 "4c0100000000000000", "compact_types off widens an integer");
-    check_equal(std::string_view { hex(emit([](writer &w) { w.value(1.0); }, { .compact_types = false })) },
+    check_equal(std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1.0); })) },
                 "44000000000000f03f", "compact_types off widens a real");
 }
 
@@ -140,8 +140,8 @@ void numeric_packing() {
                 "5b68003e6800416800b45d", "three halves stay generic");
 
     // Packing off falls back to the generic form whatever the measurement says.
-    check_equal(std::string_view { hex(emit([](writer &w) { w.value(std::vector<int> { 1, 2, 3, 4, 5 }); },
-                                            { .numeric_packing = false })) },
+    check_equal(std::string_view { hex(emit<writer_options { .numeric_packing = false }>(
+                        [](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4, 5 }); })) },
                 "5b550155025503550455055d", "numeric_packing off keeps the generic form");
 }
 
@@ -226,7 +226,7 @@ void error_latching() {
         // and it closes itself. It can still be held open deliberately, and finish() catches
         // that.
         writer target { out };
-        auto held = std::optional<array_scope> { target.array() };
+        auto held = std::optional { target.array() };
         check_equal(target.finish().error().code(), errc::unterminated_container,
                     "a deliberately held-open container fails at finish");
         held.reset();

@@ -22,16 +22,25 @@
 
 namespace serpent::bjdata {
 
-class array_scope;
-class object_scope;
-
-/** What the writer is allowed to do to shrink the output. Mirrors dart-bjdata's BjdataConfig. */
+/**
+ * What the writer is allowed to do to shrink the output. Mirrors dart-bjdata's BjdataConfig.
+ *
+ * A template argument rather than a member, so a build that does not want an optimization
+ * does not carry its code. The measuring and marker-selection routines themselves stay
+ * ordinary free functions in marker.hpp - this decides whether to call them, it does not
+ * reimplement anything.
+ */
 struct writer_options {
     /** Choose the narrowest marker that holds a value exactly. */
     bool compact_types = true;
     /** Rewrite a uniform numeric list as [$T#n when that is strictly smaller. */
     bool numeric_packing = true;
 };
+
+template<writer_options Options>
+class array_scope;
+template<writer_options Options>
+class object_scope;
 
 namespace detail {
 
@@ -53,11 +62,10 @@ template<typename T>
 }// namespace detail
 
 /** @brief Emits BJData into a sink, holding no buffer of its own. */
-class writer : public byte_emitter {
-    writer_options options {};
-
-    friend class array_scope;
-    friend class object_scope;
+template<writer_options Options = writer_options {}>
+class basic_writer : public byte_emitter {
+    friend class array_scope<Options>;
+    friend class object_scope<Options>;
 
     void begin_array() noexcept {
         if (!this->push(false)) return;
@@ -95,13 +103,13 @@ class writer : public byte_emitter {
 
 public:
     template<sink S>
-    explicit writer(S &out, writer_options options = {}) noexcept: byte_emitter(out), options(options) {}
+    explicit basic_writer(S &out) noexcept: byte_emitter(out) {}
 
     template<typename F>
         requires (!sink<F> && std::invocable<F &, std::span<const std::byte>>)
-    explicit writer(F &callable, writer_options options = {}) noexcept: byte_emitter(callable), options(options) {}
+    explicit basic_writer(F &callable) noexcept: byte_emitter(callable) {}
 
-    [[nodiscard]] const writer_options &configuration() const noexcept { return this->options; }
+    static constexpr writer_options configuration = Options;
 
     // ---------------- raw output ----------------
 
@@ -163,13 +171,13 @@ public:
     }
 
     void integer(std::int64_t value) noexcept {
-        const auto kind = this->options.compact_types ? integer_marker(value, value) : marker::int64;
+        const auto kind = Options.compact_types ? integer_marker(value, value) : marker::int64;
         this->put_marker(kind);
         this->put_integer_payload(kind, static_cast<std::uint64_t>(value));
     }
 
     void integer(std::uint64_t value) noexcept {
-        const auto kind = !this->options.compact_types ? marker::uint64
+        const auto kind = !Options.compact_types ? marker::uint64
                 : value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
                 ? integer_marker(value)
                 : integer_marker(static_cast<std::int64_t>(value), static_cast<std::int64_t>(value));
@@ -178,7 +186,7 @@ public:
     }
 
     void real(double value) noexcept {
-        const auto kind = this->options.compact_types ? float_marker(value) : marker::float64;
+        const auto kind = Options.compact_types ? float_marker(value) : marker::float64;
         this->put_marker(kind);
         this->put_float_payload(kind, value);
     }
@@ -218,8 +226,8 @@ public:
         this->put_text(name);
     }
 
-    [[nodiscard]] array_scope array() noexcept;
-    [[nodiscard]] object_scope object() noexcept;
+    [[nodiscard]] array_scope<Options> array() noexcept;
+    [[nodiscard]] object_scope<Options> object() noexcept;
 
     /**
      * A strongly typed array written in place: header, then the payload in one copy.
@@ -235,8 +243,8 @@ public:
 
         marker element = declared;
         if constexpr (std::integral<T> && !std::same_as<T, char>) {
-            if (this->options.compact_types && !values.empty()) {
-                const auto narrowed = writer::narrowest_marker(values);
+            if constexpr (Options.compact_types) if (!values.empty()) {
+                const auto narrowed = basic_writer::narrowest_marker(values);
                 if (payload_width(narrowed) < payload_width(declared)) element = narrowed;
             }
         }
@@ -300,11 +308,12 @@ public:
  * std::optional to open in one place and close in another, which a state machine or a
  * chunked encoder needs. A moved-from scope closes nothing.
  */
+template<writer_options Options>
 class array_scope {
-    writer *out = nullptr;
+    basic_writer<Options> *out = nullptr;
 
 public:
-    explicit array_scope(writer &out) noexcept: out(&out) { this->out->begin_array(); }
+    explicit array_scope(basic_writer<Options> &out) noexcept: out(&out) { this->out->begin_array(); }
 
     array_scope(const array_scope &) = delete;
     array_scope &operator=(const array_scope &) = delete;
@@ -326,11 +335,12 @@ public:
     void value(const T &item) const noexcept { this->out->value(item); }
 };
 
+template<writer_options Options>
 class object_scope {
-    writer *out = nullptr;
+    basic_writer<Options> *out = nullptr;
 
 public:
-    explicit object_scope(writer &out) noexcept: out(&out) { this->out->begin_object(); }
+    explicit object_scope(basic_writer<Options> &out) noexcept: out(&out) { this->out->begin_object(); }
 
     object_scope(const object_scope &) = delete;
     object_scope &operator=(const object_scope &) = delete;
@@ -355,8 +365,17 @@ public:
     }
 };
 
-inline array_scope writer::array() noexcept { return array_scope { *this }; }
-inline object_scope writer::object() noexcept { return object_scope { *this }; }
+template<writer_options Options>
+array_scope<Options> basic_writer<Options>::array() noexcept { return array_scope<Options> { *this }; }
+
+template<writer_options Options>
+object_scope<Options> basic_writer<Options>::object() noexcept { return object_scope<Options> { *this }; }
+
+/** The default: everything the reference encoder does. */
+using writer = basic_writer<>;
+
+/** Every value at its declared width, with no measuring - and none of that code emitted. */
+using plain_writer = basic_writer<writer_options { .compact_types = false, .numeric_packing = false }>;
 
 /**
  * A list, written the way the reference encoder writes one.
@@ -366,15 +385,16 @@ inline object_scope writer::object() noexcept { return object_scope { *this }; }
  * throughout. Which wins depends entirely on the spread of the values, so both are measured
  * - in closed form, with no buffering. A tie keeps the generic form.
  */
+template<writer_options Options>
 template<std::ranges::input_range R>
-void writer::range(const R &items) noexcept {
+void basic_writer<Options>::range(const R &items) noexcept {
     using element = std::remove_cvref_t<std::ranges::range_value_t<R>>;
     constexpr bool packable = std::ranges::forward_range<R>
             && ((std::integral<element> && !std::same_as<element, bool> && !std::same_as<element, char>)
                 || std::floating_point<element>);
 
     if constexpr (packable) {
-        if (this->options.numeric_packing && this->options.compact_types && !std::ranges::empty(items)) {
+        if constexpr (Options.numeric_packing && Options.compact_types) if (!std::ranges::empty(items)) {
             const auto count = static_cast<std::size_t>(std::ranges::distance(items));
             std::size_t generic = 2;   // '[' and ']'
             marker element_marker = marker::invalid;

@@ -147,7 +147,22 @@ Output is **byte-identical to dart-bjdata's** by default. That means:
   are measured. A tie keeps the generic form. In practice a uniform-width list packs at five
   elements, and one large value that forces a wider marker can keep a list generic.
 
-`writer_options { compact_types, numeric_packing }` turns either heuristic off.
+Both heuristics are **compile-time**, not runtime flags:
+
+```cpp
+bjdata::encode(value);                        // everything the reference encoder does
+bjdata::encode<bjdata::no_compaction>(value); // every value at its declared width
+```
+
+A build that turns one off does not carry its code — measured at 17,044 → 16,088 bytes of
+`__text` for a three-type translation unit at `-Os`, so about 1 KB. Nothing is duplicated to
+achieve that: `integer_marker`, `float_marker`, `fits_float16` and the packing measurement
+stay ordinary free functions in `marker.hpp`, and the policy is a bag of booleans deciding
+whether to call them.
+
+JSON's `writer_options { indent }` stays a runtime value, deliberately — indentation is a
+presentation choice that varies per call, whereas which compactions you want is a property of
+the build.
 
 `typed_array<T>(span)` is the write counterpart to `as_span<T>()`: header, then the payload
 in a single copy.
