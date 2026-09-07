@@ -14,8 +14,8 @@ this. It is not what this is built out of.
 | Namespace | Knows about | Holds |
 |---|---|---|
 | `serpent` | no format | `kind`, `errc`, sinks, the emitter, the customization layer |
-| `serpent::bjdata` | BJData | markers, `view`, `writer`, N-D, block notation |
 | `serpent::json` | JSON | scanner, `reader`, `writer` |
+| `serpent::bjdata` | BJData | markers, `view`, `writer`, N-D, block notation |
 
 `serpent` depends on neither format. Each format depends only on `serpent`. One header,
 `serpent/bjdata/json.hpp`, knows both — it renders a BJData document as JSON.

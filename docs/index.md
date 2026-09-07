@@ -1,6 +1,6 @@
 # serpent
 
-Zero-copy **BJData** and **JSON** for C++23. One definition per type serves both formats, in
+Zero-copy **JSON** and **BJData** for C++23. One definition per type serves both formats, in
 both directions.
 
 ```cpp
@@ -11,11 +11,11 @@ struct reading {
     SERPENT_DEFINE_TYPE(reading, at, celsius)
 };
 
-auto bytes = bjdata::encode(value);   // std::vector<std::byte>
 auto text  = json::encode(value);     // std::string
+auto bytes = bjdata::encode(value);   // std::vector<std::byte>
 
-auto a = bjdata::decode<reading>(bytes);
-auto b = json::decode<reading>(text);
+auto a = json::decode<reading>(text);
+auto b = bjdata::decode<reading>(bytes);
 ```
 
 ## What makes it different
@@ -24,20 +24,32 @@ auto b = json::decode<reading>(text);
 converted into your classes. You get forward iterators into the bytes you already have, and
 decoders that go straight from those into your types.
 
-=== "Reading a document"
+=== "Reading JSON"
+
+    ```cpp
+    auto document = json::reader::over(text);
+
+    document["port"].as_int<int>();                      // parsed on demand
+    for (auto host : document["hosts"].array()) { }      // walked in place
+    ```
+
+=== "Reading BJData"
 
     ```cpp
     auto document = bjdata::view::over(bytes);
 
-    document["name"].as_string();              // string_view INTO bytes
-    document["samples"].as_span<std::uint16_t>();   // span INTO bytes
+    document["name"].as_string();                        // string_view INTO bytes
+    document["samples"].as_span<std::uint16_t>();        // span INTO bytes
     ```
 
-=== "Reading into your type"
+=== "Into your type"
 
     ```cpp
-    auto config = bjdata::decode<link_config>(bytes);
+    auto config = json::decode<link_config>(text);
     ```
+
+BJData borrows strings outright, because the value *is* the bytes. JSON decodes them, because
+an escape means it is not — see [Reading](reading.md#strings).
 
 ## At a glance
 
@@ -46,8 +58,8 @@ decoders that go straight from those into your types.
 | Header only | C++23, no dependencies beyond [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
 | Allocates | only where you ask it to |
 | Works without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
-| BJData output | byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata) |
 | JSON output | byte-identical to dart-bjdata's own JSON |
+| BJData output | byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata) |
 
 ## Where to go
 

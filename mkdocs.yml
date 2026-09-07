@@ -1,5 +1,5 @@
 site_name: serpent
-site_description: Zero-copy BJData and JSON for C++23
+site_description: Zero-copy JSON and BJData for C++23
 site_url: https://nebkat.github.io/cpp-serpent/
 repo_url: https://github.com/nebkat/cpp-serpent
 repo_name: nebkat/cpp-serpent
@@ -57,6 +57,6 @@ nav:
       - Writing: writing.md
       - Reflection: reflection.md
   - Formats:
-      - BJData: bjdata.md
       - JSON: json.md
+      - BJData: bjdata.md
   - Design: design.md

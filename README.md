@@ -1,6 +1,6 @@
 # serpent
 
-Zero-copy **BJData** and **JSON** for C++23. One definition per type serves both formats, in
+Zero-copy **JSON** and **BJData** for C++23. One definition per type serves both formats, in
 both directions.
 
 📖 **Documentation** — built from `docs/`; run `mkdocs serve` to read it locally.
@@ -19,11 +19,11 @@ struct reading {
     SERPENT_DEFINE_TYPE(reading, at, celsius)
 };
 
-const auto bytes = bjdata::encode(value);   // compact binary
 const auto text = json::encode(value);      // {"at":1700000000,"celsius":4.5}
+const auto bytes = bjdata::encode(value);   // the same value, compact binary
 
-const auto a = bjdata::decode<reading>(bytes);
-const auto b = json::decode<reading>(text);
+const auto a = json::decode<reading>(text);
+const auto b = bjdata::decode<reading>(bytes);
 ```
 
 ## Why
@@ -33,19 +33,24 @@ converted into your classes — you get forward iterators into the bytes you alr
 decoders that go straight from those into your types.
 
 ```cpp
-auto document = bjdata::view::over(bytes);
+auto document = json::reader::over(text);
+document["port"].as_int<int>();                // parsed on demand, nothing built
 
-document["name"].as_string();                  // string_view INTO bytes
-document["samples"].as_span<std::uint16_t>();  // span INTO bytes
+auto stored = bjdata::view::over(bytes);
+stored["name"].as_string();                    // string_view INTO bytes
+stored["samples"].as_span<std::uint16_t>();    // span INTO bytes
 ```
+
+BJData borrows strings outright, because the value *is* the bytes. JSON decodes them, because
+an escape means it is not.
 
 | | |
 |---|---|
 | Header only | C++23, one dependency: [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
 | Allocates | only where you ask it to |
 | Without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
-| BJData output | byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata) |
 | JSON output | byte-identical to dart-bjdata's own JSON |
+| BJData output | byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata) |
 
 ## Install
 
@@ -76,7 +81,7 @@ access. Tests build with ASan and UBSan by default.
 | [Getting started](docs/getting-started.md) | build it, run something |
 | [Your types](docs/types.md) | three ways to opt a type in |
 | [Reading](docs/reading.md) · [Writing](docs/writing.md) | the API |
-| [BJData](docs/bjdata.md) · [JSON](docs/json.md) | format specifics |
+| [JSON](docs/json.md) · [BJData](docs/bjdata.md) | format specifics |
 | [Design](docs/design.md) | why it is shaped this way |
 
 ```sh
