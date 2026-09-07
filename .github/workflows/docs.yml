@@ -30,8 +30,12 @@ jobs:
           path: site
 
   deploy:
-    # Needs Pages enabled on the repository, with the source set to GitHub Actions.
-    if: github.ref == 'refs/heads/main'
+    # Pages is not available for a private repository on a free plan, so deploying is opt-in:
+    # set the PAGES_ENABLED repository variable to true once Pages is enabled with its source
+    # set to GitHub Actions. Until then the build above still runs, so the docs cannot rot.
+    #
+    #   gh variable set PAGES_ENABLED --body true
+    if: github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:

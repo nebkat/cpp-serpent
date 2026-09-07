@@ -3,7 +3,7 @@
 Zero-copy **BJData** and **JSON** for C++23. One definition per type serves both formats, in
 both directions.
 
-📖 **[Documentation](https://nebkat.github.io/cpp-serpent/)**
+📖 **Documentation** — built from `docs/`; run `mkdocs serve` to read it locally.
 
 ```cpp
 #include <serpent/bjdata.hpp>
@@ -73,10 +73,16 @@ access. Tests build with ASan and UBSan by default.
 
 | | |
 |---|---|
-| [Getting started](https://nebkat.github.io/cpp-serpent/getting-started/) | build it, run something |
-| [Your types](https://nebkat.github.io/cpp-serpent/types/) | three ways to opt a type in |
-| [Reading](https://nebkat.github.io/cpp-serpent/reading/) · [Writing](https://nebkat.github.io/cpp-serpent/writing/) | the API |
-| [BJData](https://nebkat.github.io/cpp-serpent/bjdata/) · [JSON](https://nebkat.github.io/cpp-serpent/json/) | format specifics |
-| [Design](https://nebkat.github.io/cpp-serpent/design/) | why it is shaped this way |
+| [Getting started](docs/getting-started.md) | build it, run something |
+| [Your types](docs/types.md) | three ways to opt a type in |
+| [Reading](docs/reading.md) · [Writing](docs/writing.md) | the API |
+| [BJData](docs/bjdata.md) · [JSON](docs/json.md) | format specifics |
+| [Design](docs/design.md) | why it is shaped this way |
 
-Docs live in `docs/`; `mkdocs serve` to preview.
+```sh
+pip install -r docs/requirements.txt
+mkdocs serve
+```
+
+Publishing to GitHub Pages needs a plan that allows it for a private repository. The workflow
+builds the site on every push and deploys once the `PAGES_ENABLED` repository variable is set.
