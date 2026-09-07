@@ -318,6 +318,20 @@ static void check_results(const std::vector<reading> &values, const std::string 
                     .station,
             values.at(4321).station);
 
+    {
+        std::string beve;
+        (void)glz::write_beve(values, beve);
+        std::vector<reading> out;
+        const bool read = !glz::read_beve(out, beve);
+        agree("BEVE round-trips the same records", read && out.size() == values.size() ? out.at(777).station : "",
+                values.at(777).station);
+    }
+    {
+        const auto cbor = other::to_cbor(other(values));
+        agree("CBOR round-trips the same records", other::from_cbor(cbor).get<std::vector<reading>>().at(777).station,
+                values.at(777).station);
+    }
+
     simdjson::ondemand::parser parser;
     const simdjson::padded_string canada_padded { canada }, twitter_padded { twitter }, citm_padded { citm };
 
@@ -395,6 +409,43 @@ static void your_types(const std::vector<reading> &values) {
             "encode 10k records (BJData)", "serpent", bytes.size(), [&] { return bjdata::encode(values).size(); });
     bench::measure("encode 10k records (BJData)", "nlohmann", other_bytes.size(),
             [&] { return other::to_bjdata(other(values)).size(); });
+}
+
+/**
+ * Binary against binary.
+ *
+ * This is also the comparison with no lookup tables in it. The struct-mapping library's tables
+ * - digit classification, escape decoding, integer digit pairs - are all in its JSON text path;
+ * its binary format touches none of them, and neither does BJData.
+ */
+static void binary_formats(const std::vector<reading> &values) {
+    std::string beve;
+    (void)glz::write_beve(values, beve);
+    const auto bjdata_bytes = bjdata::encode(values);
+    const auto cbor = other::to_cbor(other(values));
+    const auto msgpack = other::to_msgpack(other(values));
+
+    std::printf("\nbinary sizes for the same 10k records: BJData %zu B, BEVE %zu B, CBOR %zu B, MessagePack %zu B\n",
+            bjdata_bytes.size(), beve.size(), cbor.size(), msgpack.size());
+
+    bench::measure(
+            "binary encode 10k records", "serpent", bjdata_bytes.size(), [&] { return bjdata::encode(values).size(); });
+    bench::measure("binary encode 10k records", "glaze", beve.size(), [&] {
+        std::string buffer;
+        (void)glz::write_beve(values, buffer);
+        return buffer.size();
+    });
+    bench::measure(
+            "binary encode 10k records", "nlohmann", cbor.size(), [&] { return other::to_cbor(other(values)).size(); });
+
+    bench::measure("binary decode 10k records", "serpent", bjdata_bytes.size(),
+            [&] { return bjdata::decode<std::vector<reading>>(bjdata_bytes)->size(); });
+    bench::measure("binary decode 10k records", "glaze", beve.size(), [&] {
+        std::vector<reading> out;
+        return glz::read_beve(out, beve) ? 0 : out.size();
+    });
+    bench::measure("binary decode 10k records", "nlohmann", cbor.size(),
+            [&] { return other::from_cbor(cbor).get<std::vector<reading>>().size(); });
 }
 
 static void whole_document_scan(const std::string &canada, const std::string &twitter) {
@@ -552,6 +603,7 @@ int main(int argc, char **argv) {
     check_results(values, canada, citm, twitter);
 
     your_types(values);
+    binary_formats(values);
     whole_document_scan(canada, twitter);
     targeted_extraction(citm);
     full_read(citm);
