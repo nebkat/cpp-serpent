@@ -38,12 +38,37 @@ struct [[= serpent::serializable {},
 | `naming {style}` | a type | derives every key from the identifiers |
 | `key("...")` | a field | overrides one key |
 | `skip {}` | a field | leaves it out of the document, both directions |
+| `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
 
 Styles: `as_written`, `snake_case`, `screaming_snake_case`, `kebab_case`, `camel_case`,
 `pascal_case`.
 
 Annotations are ordinary values rather than parsed strings, which is why they are written with
 `=` and braces, and always qualified.
+
+## Naming a type on the wire
+
+A `std::variant` is read by asking each alternative whether the value fits, which cannot
+separate two types that have the same members. A discriminant gives the type a name instead:
+
+```cpp
+struct [[= serpent::discriminant("unit")]] celsius    { double value; };
+struct [[= serpent::discriminant("unit")]] fahrenheit { double value; };
+struct [[= serpent::discriminant("unit", "K")]] kelvin { double value; };
+
+using temperature = std::variant<celsius, fahrenheit, kelvin>;
+```
+
+```json
+{"unit":"fahrenheit","value":70.7}
+```
+
+The name defaults to the type's own identifier, which reflection already knows; the second
+argument overrides it. It is **not a member** — nothing declares it, reading a type on its own
+ignores it, and it is written before the fields.
+
+Decoding a variant then reads that key and picks the alternative it names. A name that matches
+nothing fails, rather than falling back to a guess.
 
 ## A type you cannot annotate
 

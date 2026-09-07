@@ -61,6 +61,40 @@ struct skip {};
 /** On a type: opt in to reflected serialization. */
 struct serializable {};
 
+/**
+ * On a type: name it on the wire, under a key that is not one of its members.
+ *
+ * The key is written before the members and read back as a selector, so alternatives of a
+ * variant are told apart by what the document says they are rather than by trying each in turn
+ * and seeing which sticks. Without a name the type's own identifier is used.
+ *
+ *     struct [[= serpent::discriminant("kind")]] circle { int radius; };   // {"kind":"circle",...}
+ */
+struct discriminant {
+    char storage[64] {};
+    std::size_t key_length = 0;
+    char named[64] {};
+    std::size_t name_length = 0;
+
+    consteval discriminant(std::string_view key) { this->copy_key(key); }
+    consteval discriminant(std::string_view key, std::string_view name) {
+        this->copy_key(key);
+        for (std::size_t index = 0; index < name.size() && index < sizeof(this->named) - 1; ++index)
+            this->named[index] = name[index];
+        this->name_length = name.size();
+    }
+
+    [[nodiscard]] constexpr std::string_view key() const { return { this->storage, this->key_length }; }
+    [[nodiscard]] constexpr std::string_view name() const { return { this->named, this->name_length }; }
+
+private:
+    consteval void copy_key(std::string_view key) {
+        for (std::size_t index = 0; index < key.size() && index < sizeof(this->storage) - 1; ++index)
+            this->storage[index] = key[index];
+        this->key_length = key.size();
+    }
+};
+
 enum class naming_style {
     as_written,
     snake_case,
@@ -233,7 +267,28 @@ consteval std::string_view field_key() {
 
 template<typename T>
 consteval bool opted_in() {
-    return has_annotation<serializable>(^^T) || enable_reflection<T>::value;
+    return has_annotation<serializable>(^^T) || enable_reflection<T>::value || has_annotation<discriminant>(^^T);
+}
+
+template<typename T>
+consteval bool is_discriminated() {
+    return has_annotation<discriminant>(^^T);
+}
+
+/** The key a discriminated type is named under. */
+template<typename T>
+consteval std::string_view discriminant_key() {
+    return std::define_static_string(annotation_of<discriminant>(^^T)->key());
+}
+
+/** What it is called there: the annotation's name, else the type's own identifier. */
+template<typename T>
+consteval std::string_view discriminant_name() {
+    constexpr auto note = annotation_of<discriminant>(^^T);
+    if constexpr (note->name_length > 0)
+        return std::define_static_string(note->name());
+    else
+        return std::define_static_string(std::meta::identifier_of(^^T));
 }
 
 } // namespace detail
@@ -246,6 +301,10 @@ consteval bool opted_in() {
  */
 template<typename T>
 concept reflected_type = std::is_class_v<T> && detail::opted_in<T>();
+
+/** Whether a type names itself on the wire under a key of its own. */
+template<typename T>
+concept discriminated_type = std::is_class_v<T> && detail::is_discriminated<T>();
 
 namespace detail {
 
@@ -260,6 +319,14 @@ namespace detail {
 template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
     requires reflected_type<T>
 void reflect_convert(Visitor &visitor, Object &value) {
+    if constexpr (detail::is_discriminated<T>()) {
+        // Written as though it were a member, read as nothing: the selector is not a field, and
+        // by the time a value is being read something has already used it to choose this type.
+        if constexpr (!std::remove_cvref_t<Visitor>::is_reading) {
+            visitor.member(detail::discriminant_key<T>(), detail::discriminant_name<T>());
+        }
+    }
+
     template for (constexpr auto member :
             std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
         if constexpr (!detail::has_annotation<skip>(member)) {
@@ -278,11 +345,21 @@ void reflect_convert(Visitor &visitor, Object &value) {
 template<typename T>
 concept reflected_type = false;
 
+template<typename T>
+concept discriminated_type = false;
+
 namespace detail {
 
-/** Never defined: reflected_type is false, so every call to it is discarded. */
+// Never defined: the concepts above are false, so every call to these is discarded. They exist
+// so that the discarded branches still name something.
 template<typename Visitor, typename Object>
 void reflect_convert(Visitor &visitor, Object &value);
+
+template<typename T>
+consteval std::string_view discriminant_key();
+
+template<typename T>
+consteval std::string_view discriminant_name();
 
 } // namespace detail
 

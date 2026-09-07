@@ -122,8 +122,48 @@ bool read_discriminating(Source source, T &value) {
     }
 }
 
+/** Whether every alternative names itself, and under the same key. */
+template<typename Variant, std::size_t... Index>
+consteval bool all_discriminated(std::index_sequence<Index...>) {
+    if constexpr ((discriminated_type<std::variant_alternative_t<Index, Variant>> && ...)) {
+        constexpr std::string_view key = detail::discriminant_key<std::variant_alternative_t<0, Variant>>();
+        return ((detail::discriminant_key<std::variant_alternative_t<Index, Variant>>() == key) && ...);
+    } else {
+        return false;
+    }
+}
+
+/**
+ * Picks the alternative the document names, rather than trying each one.
+ *
+ * Unambiguous where trying cannot be: two types with the same members are the same shape, and
+ * only a name distinguishes them.
+ */
+template<typename Source, typename Variant, std::size_t... Index>
+bool read_named_alternative(Source source, Variant &value, std::index_sequence<Index...>) {
+    if (!source.is_valid() || !source.is_object()) return false;
+
+    constexpr std::string_view key = detail::discriminant_key<std::variant_alternative_t<0, Variant>>();
+    const auto named = source[key].as_string();
+    if (!named) return false;
+
+    const auto take = [&]<std::size_t Which>() {
+        using alternative = std::variant_alternative_t<Which, Variant>;
+        if (std::string_view { *named } != detail::discriminant_name<alternative>()) return false;
+        alternative candidate {};
+        if (!read_into(source, candidate)) return false;
+        value = std::move(candidate);
+        return true;
+    };
+    return (take.template operator()<Index>() || ...);
+}
+
 template<typename Source, typename Variant, std::size_t... Index>
 bool read_alternative(Source source, Variant &value, std::index_sequence<Index...>) {
+    if constexpr (all_discriminated<Variant>(std::index_sequence<Index...> {})) {
+        return read_named_alternative(source, value, std::index_sequence<Index...> {});
+    }
+
     const auto attempt = [&]<std::size_t Which>() {
         std::variant_alternative_t<Which, Variant> candidate {};
         if (!read_discriminating(source, candidate)) return false;

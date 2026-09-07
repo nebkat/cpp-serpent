@@ -197,8 +197,22 @@ Two rules follow from "first that fits":
   which is right for a missing key but useless for telling alternatives apart. Inside a variant
   it is not a match.
 
-Alternatives that are genuinely indistinguishable — two structs with the same field names — are
-resolved by order, and nothing can do better without a tag you put there yourself.
+Alternatives that are genuinely indistinguishable — two structs with the same field names —
+cannot be resolved this way at all. Give them a name instead, with
+[a discriminant](reflection.md#naming-a-type-on-the-wire):
+
+```cpp
+struct [[= serpent::discriminant("unit")]] celsius    { double value; };
+struct [[= serpent::discriminant("unit")]] fahrenheit { double value; };
+```
+
+```json
+{"unit":"fahrenheit","value":70.7}
+```
+
+The alternative is then chosen by what the document calls it rather than by what parses, and a
+name that matches nothing fails instead of guessing. This needs reflection; without it, order
+remains the only tie-break.
 
 ## Missing and extra keys
 

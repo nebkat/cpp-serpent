@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 static_assert(serpent::reflection_available, "this test is only built where reflection works");
@@ -100,6 +101,45 @@ void a_type_you_do_not_own() {
     check(back && back->sensorId == 9 && back->degreesCelsius == 1.5, "and it reads back");
 }
 
+// Same members, different meaning. Nothing but a name can tell these apart, so trying each in
+// turn and keeping the first that parses would always answer with the first.
+struct[[= serpent::discriminant("unit")]] celsius {
+    double value = 0;
+};
+struct[[= serpent::discriminant("unit")]] fahrenheit {
+    double value = 0;
+};
+struct[[= serpent::discriminant("unit", "K")]] kelvin {
+    double value = 0;
+};
+
+using temperature = std::variant<celsius, fahrenheit, kelvin>;
+
+void a_discriminant_names_the_type() {
+    check_equal(json::encode(celsius { 21.5 }), R"({"unit":"celsius","value":21.5})",
+            "the name is written before the members");
+    check_equal(json::encode(kelvin { 294.6 }), R"({"unit":"K","value":294.6})",
+            "an explicit name overrides the identifier");
+
+    // It is not a member: reading one on its own ignores it, and nothing declares it.
+    const auto alone = json::decode<celsius>(R"({"unit":"celsius","value":21.5})");
+    check(alone && alone->value == 21.5, "a discriminated type reads back on its own");
+
+    check(json::decode<temperature>(R"({"unit":"celsius","value":21.5})")->index() == 0,
+            "an alternative is chosen by what the document calls it");
+    check(json::decode<temperature>(R"({"unit":"fahrenheit","value":70.7})")->index() == 1,
+            "including one it could not be told apart from otherwise");
+    check(json::decode<temperature>(R"({"unit":"K","value":294.6})")->index() == 2, "and one renamed");
+
+    check(!json::decode<temperature>(R"({"unit":"rankine","value":1})"),
+            "a name that matches nothing fails rather than guessing");
+    check(!json::decode<temperature>(R"({"value":1})"), "and so does no name at all");
+
+    const temperature held { fahrenheit { 70.7 } };
+    const auto binary = bjdata::decode<temperature>(bjdata::encode(held));
+    check(binary && binary->index() == 1, "the same through BJData");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -167,6 +207,7 @@ void naming_styles() {
 
 int main() {
     identifiers_become_keys();
+    a_discriminant_names_the_type();
     a_hand_written_conversion_is_left_alone();
     a_type_you_do_not_own();
     annotations_adjust_keys();
