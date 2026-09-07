@@ -428,6 +428,18 @@ void writer::range(const R &items) noexcept {
                 this->put_marker(element_marker);
                 this->put_marker(marker::count);
                 this->put_length(count);
+
+                // When the chosen marker is exactly what this element type packs as, and the
+                // range is contiguous, the payload is already in wire order: one copy rather
+                // than a store per element. A caller never asks for this - it is the writer's
+                // business, which is the point of value() taking whatever range you have.
+                if constexpr (std::ranges::contiguous_range<R> && strong_type_for<element>() != marker::invalid) {
+                    if (element_marker == strong_type_for<element>()) {
+                        this->put(std::as_bytes(std::span<const element> { std::ranges::data(items), count }));
+                        return;
+                    }
+                }
+
                 for (const auto item : items) {
                     if constexpr (std::floating_point<element>) {
                         this->put_float_payload(element_marker, static_cast<double>(item));

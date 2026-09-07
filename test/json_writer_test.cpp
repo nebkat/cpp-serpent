@@ -32,11 +32,10 @@ struct point {
  * A type whose two directions differ, so it uses the to_json/from_json pair rather than a
  * single json_convert.
  *
- * One template, not an overload per format. The writer is a template parameter, so a body
- * can ask what this particular writer can do: BJData has typed_array, which puts the payload
- * out in one copy, and JSON does not, so it takes the ordinary path and writes numbers. That
- * is capability detection rather than overloading, and it degrades on its own when a new
- * format arrives.
+ * One template, and the body knows nothing about the writer: it says value(), and each writer
+ * decides what that means. BJData measures the readings and picks a packed [$u# array when
+ * that is smaller, copying the payload in one go; JSON writes plain numbers. Neither the type
+ * nor its author has to know that happened.
  */
 struct legacy {
     int code = 0;
@@ -45,12 +44,7 @@ struct legacy {
     friend void to_json(auto &out, const legacy &value) {
         const auto scope = out.object();
         scope.member("code", value.code);
-        out.key("readings");
-        if constexpr (requires { out.typed_array(std::span<const std::uint16_t> { value.readings }); }) {
-            out.typed_array(std::span<const std::uint16_t> { value.readings });
-        } else {
-            out.value(value.readings);
-        }
+        scope.member("readings", value.readings);
     }
 
     friend bool from_json(auto source, legacy &value) {
@@ -115,21 +109,29 @@ void containers() {
                 "an empty optional is null");
 
     check_equal(json::encode(point { 3, 4 }), std::string { "{\"x\":3,\"y\":4}" }, "the macro form writes JSON directly");
-    // One template, and the writer decides: BJData takes the typed_array fast path, JSON
-    // writes plain numbers. Same definition, different bytes, no overload in sight.
+    // One definition. The same call site produces a generic array here, because BJData
+    // measured it and found that smaller...
     check_equal(json::encode(legacy { 7, { 1, 2, 3 } }),
                 std::string { "{\"code\":7,\"readings\":[1,2,3]}" },
                 "one templated to_json writes JSON");
-    const auto binary = encode(legacy { 7, { 1, 2, 3 } });
-    check_equal(std::string_view { hex(binary) }, "7b5504636f64655507550872656164696e67735b24552355030102037d",
-                "and BJData, using typed_array where JSON cannot");
+    check_equal(std::string_view { hex(encode(legacy { 7, { 1, 2, 3 } })) },
+                "7b5504636f64655507550872656164696e67735b5501550255035d7d",
+                "and BJData, generically for three small values");
+
+    // ...and a packed one here, from the very same to_json body.
+    const legacy larger { 7, { 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007 } };
+    check_equal(std::string_view { hex(encode(larger)) },
+                "7b5504636f64655507550872656164696e67735b2475235508e803e903ea03eb03ec03ed03ee03ef037d",
+                "and a packed array once packing wins, with no change to the type");
+    check_equal(json::encode(larger).substr(0, 24), std::string { "{\"code\":7,\"readings\":[10" },
+                "while JSON writes numbers either way");
 
     const auto from_text = json::decode<legacy>(R"({"code":9,"readings":[4,5]})");
     check(from_text.has_value() && from_text->code == 9 && from_text->readings.size() == 2,
           "and the matching from_json reads JSON back");
-    const auto from_binary = decode<legacy>(binary);
-    check(from_binary.has_value() && from_binary->readings.size() == 3,
-          "and reads BJData back from the same definition");
+    const auto from_binary = decode<legacy>(encode(larger));
+    check(from_binary.has_value() && from_binary->readings.size() == 8 && from_binary->readings[7] == 1007,
+          "and reads a packed BJData array back from the same definition");
 
     check_equal(json::encode(std::vector<point> { { 1, 2 }, { 3, 4 } }),
                 std::string { "[{\"x\":1,\"y\":2},{\"x\":3,\"y\":4}]" }, "array of structs");

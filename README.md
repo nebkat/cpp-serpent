@@ -201,24 +201,26 @@ friend void to_json(auto &out, const connection &value);
 friend bool from_json(auto source, connection &value);
 ```
 
-Templated on the writer and the reader, not overloaded per format — which means a body can
-ask what *this* writer can do:
+Templated on the writer and the reader, not overloaded per format — but the body should know
+nothing about either. It says `value()`, and each writer decides what that means:
 
 ```cpp
 friend void to_json(auto &out, const samples &value) {
     const auto scope = out.object();
-    out.key("readings");
-    if constexpr (requires { out.typed_array(std::span<const std::uint16_t> { value.readings }); }) {
-        out.typed_array(std::span<const std::uint16_t> { value.readings });   // BJData: one memcpy
-    } else {
-        out.value(value.readings);                                            // JSON: numbers
-    }
+    scope.member("readings", value.readings);   // a std::vector<std::uint16_t>
 }
 ```
 
-That is capability detection rather than overloading, so a format that arrives later gets the
-general path for free instead of a missing overload. The names carry no format because the
-data model does not either — it is JSON's model, whichever bytes it ends up as.
+From that one line, BJData measures the list and writes `[$u#8` with the payload copied in
+one go when packing is smaller, or a generic array when it isn't; JSON writes plain numbers.
+Neither the type nor its author is told which happened, and a format added later needs no
+change here at all.
+
+That is the division of labour the library rests on: **customizations are dumb, writers are
+smart.** A customization names fields and hands over values. Choosing markers, measuring
+whether a packed array beats a generic one, and taking the memcpy path when the element type
+already matches the wire type are the writer's business. Anything a customization had to ask
+the writer about would be a capability that belonged in `value()` and wasn't there yet.
 
 Note the asymmetry in how they are passed: the writer is a mutable reference because writing
 accumulates, while the reader goes **by value** because it is a small trivially copyable
