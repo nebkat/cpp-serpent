@@ -53,9 +53,9 @@ nav:
   - Getting started: getting-started.md
   - Guide:
       - Your types: types.md
+      - Reflection: reflection.md
       - Reading: reading.md
       - Writing: writing.md
-      - Reflection: reflection.md
   - Formats:
       - JSON: json.md
       - BJData: bjdata.md

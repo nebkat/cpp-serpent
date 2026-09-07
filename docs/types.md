@@ -1,7 +1,22 @@
 # Your types
 
-There are three ways to opt a type in. They all end up at the same place, so pick the shortest
+There are four ways to opt a type in. They all end up at the same place, so pick the shortest
 one that fits.
+
+## Let the compiler do it
+
+Where the compiler supports reflection, it already knows the field names and you write nothing
+else:
+
+```cpp
+struct [[= serpent::serializable {}]] point {
+    int x = 0;
+    int y = 0;
+};
+```
+
+This needs GCC 16 with `-freflection`; see [Reflection](reflection.md) for the naming rules and
+what to do on compilers that are not there yet. The remaining three forms work everywhere.
 
 ## The macro
 

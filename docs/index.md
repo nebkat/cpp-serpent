@@ -51,6 +51,22 @@ decoders that go straight from those into your types.
 BJData borrows strings outright, because the value *is* the bytes. JSON decodes them, because
 an escape means it is not — see [Reading](reading.md#strings).
 
+## Where the compiler can, it writes the definition for you
+
+On GCC 16 with `-freflection`, the field list goes away entirely:
+
+```cpp
+struct [[= serpent::serializable {},
+       = serpent::naming { serpent::naming_style::snake_case }]] link_config {
+    [[= serpent::key("ip")]] std::string ipAddress;
+    [[= serpent::skip {}]]   int cacheGeneration;
+                             int mtuBytes;          // becomes "mtu_bytes"
+};
+```
+
+No other released compiler has the whole C++26 feature set this needs yet, so the macro and
+function forms remain first-class — see [Reflection](reflection.md).
+
 ## At a glance
 
 | | |
@@ -58,8 +74,8 @@ an escape means it is not — see [Reading](reading.md#strings).
 | Header only | C++23, no dependencies beyond [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
 | Allocates | only where you ask it to |
 | Works without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
-| JSON output | byte-identical to dart-bjdata's own JSON |
-| BJData output | byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata) |
+| JSON output | byte-identical to the reference implementation's own JSON |
+| BJData output | byte-identical to the reference implementation |
 
 ## Where to go
 

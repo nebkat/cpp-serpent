@@ -42,15 +42,30 @@ stored["samples"].as_span<std::uint16_t>();    // span INTO bytes
 ```
 
 BJData borrows strings outright, because the value *is* the bytes. JSON decodes them, because
-an escape means it is not.
+an escape means it is not — see [Reading](docs/reading.md#strings).
 
+## Where the compiler can, it writes the definition for you
+
+On GCC 16 with `-freflection`, the field list goes away entirely:
+
+```cpp
+struct [[= serpent::serializable {},
+       = serpent::naming { serpent::naming_style::snake_case }]] link_config {
+    [[= serpent::key("ip")]] std::string ipAddress;
+    [[= serpent::skip {}]]   int cacheGeneration;
+                             int mtuBytes;          // becomes "mtu_bytes"
+};
+```
+
+No other released compiler has the whole C++26 feature set this needs yet, so the macro and
+function forms remain first-class — see [Reflection](docs/reflection.md).
 | | |
 |---|---|
 | Header only | C++23, one dependency: [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
 | Allocates | only where you ask it to |
 | Without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
-| JSON output | byte-identical to dart-bjdata's own JSON |
-| BJData output | byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata) |
+| JSON output | byte-identical to the reference implementation's own JSON |
+| BJData output | byte-identical to the reference implementation |
 
 ## Install
 
@@ -79,7 +94,8 @@ access. Tests build with ASan and UBSan by default.
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | build it, run something |
-| [Your types](docs/types.md) | three ways to opt a type in |
+| [Your types](docs/types.md) | four ways to opt a type in |
+| [Reflection](docs/reflection.md) | letting the compiler name the fields |
 | [Reading](docs/reading.md) · [Writing](docs/writing.md) | the API |
 | [JSON](docs/json.md) · [BJData](docs/bjdata.md) | format specifics |
 | [Design](docs/design.md) | why it is shaped this way |
