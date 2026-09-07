@@ -20,6 +20,46 @@ if(NOT EXISTS "${OTHER_DIR}/json.hpp")
     endif()
 endif()
 
+# The other comparisons. Single-file distributions where one exists, so a benchmark run does
+# not clone hundreds of megabytes; the two header-only repositories are shallow clones.
+set(SINGLE_DIR "${CMAKE_CURRENT_BINARY_DIR}/other")
+foreach(PAIR
+        "simdjson/simdjson.h|https://raw.githubusercontent.com/simdjson/simdjson/master/singleheader/simdjson.h"
+        "simdjson/simdjson.cpp|https://raw.githubusercontent.com/simdjson/simdjson/master/singleheader/simdjson.cpp"
+        "yyjson/yyjson.h|https://raw.githubusercontent.com/ibireme/yyjson/master/src/yyjson.h"
+        "yyjson/yyjson.c|https://raw.githubusercontent.com/ibireme/yyjson/master/src/yyjson.c")
+    string(REPLACE "|" ";" PARTS "${PAIR}")
+    list(GET PARTS 0 SINGLE_NAME)
+    list(GET PARTS 1 SINGLE_URL)
+    if(NOT EXISTS "${SINGLE_DIR}/${SINGLE_NAME}")
+        message(STATUS "Fetching comparison library: ${SINGLE_NAME}")
+        file(DOWNLOAD "${SINGLE_URL}" "${SINGLE_DIR}/${SINGLE_NAME}" STATUS SINGLE_STATUS)
+        list(GET SINGLE_STATUS 0 SINGLE_CODE)
+        if(NOT SINGLE_CODE EQUAL 0)
+            file(REMOVE "${SINGLE_DIR}/${SINGLE_NAME}")
+            message(FATAL_ERROR "Could not fetch ${SINGLE_NAME}: ${SINGLE_STATUS}")
+        endif()
+    endif()
+endforeach()
+
+# One of the comparison libraries is C, and the project itself declares only CXX.
+enable_language(C)
+
+include(FetchContent)
+# SOURCE_SUBDIR names a directory with no CMakeLists so the sources are fetched without
+# configuring the project - it is header-only and its own build only adds tests and examples.
+FetchContent_Declare(rapidjson
+        GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
+        GIT_TAG master
+        GIT_SHALLOW TRUE
+        SOURCE_SUBDIR headers-only)
+FetchContent_Declare(glaze
+        GIT_REPOSITORY https://github.com/stephenberry/glaze.git
+        GIT_TAG main
+        GIT_SHALLOW TRUE)
+set(GLAZE_BUILD_TESTS OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(rapidjson glaze)
+
 # The corpus the published C++ JSON benchmarks use. Downloaded rather than vendored: it is
 # someone else's data and it is larger than the library.
 set(CORPUS_DIR "${CMAKE_CURRENT_BINARY_DIR}/corpus")
@@ -42,9 +82,9 @@ foreach(PAIR
     endif()
 endforeach()
 
-add_executable(serpent_bench main.cpp)
-target_link_libraries(serpent_bench PRIVATE serpent)
-target_include_directories(serpent_bench PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/other")
+add_executable(serpent_bench main.cpp "${SINGLE_DIR}/simdjson/simdjson.cpp" "${SINGLE_DIR}/yyjson/yyjson.c")
+target_link_libraries(serpent_bench PRIVATE serpent glaze::glaze)
+target_include_directories(serpent_bench PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${SINGLE_DIR}" "${rapidjson_SOURCE_DIR}/include")
 target_compile_definitions(serpent_bench PRIVATE SERPENT_CORPUS_DIR="${CORPUS_DIR}")
 target_compile_options(serpent_bench PRIVATE -O3 -DNDEBUG)
 

@@ -21,6 +21,7 @@ inline bool counting = false;
 struct result {
     std::string group;
     std::string library;
+    bool allocations_visible = true;
     double nanoseconds_per_operation = 0;
     double megabytes_per_second = 0;
     double allocations_per_operation = 0;
@@ -37,7 +38,8 @@ inline std::vector<result> results;
  * `payload_bytes` is the document size, used only to derive a throughput figure.
  */
 template<typename Operation>
-void measure(std::string_view group, std::string_view library, std::size_t payload_bytes, Operation operation) {
+void measure(std::string_view group, std::string_view library, std::size_t payload_bytes, Operation operation,
+        bool allocations_visible = true) {
     constexpr int rounds = 7;
     constexpr auto target = std::chrono::milliseconds { 120 };
 
@@ -71,6 +73,7 @@ void measure(std::string_view group, std::string_view library, std::size_t paylo
     results.push_back({
             std::string { group },
             std::string { library },
+            allocations_visible,
             best,
             payload_bytes > 0 ? static_cast<double>(payload_bytes) / best * 1e9 / (1024 * 1024) : 0,
             static_cast<double>(allocation_count),
@@ -79,8 +82,8 @@ void measure(std::string_view group, std::string_view library, std::size_t paylo
 }
 
 inline void report() {
-    std::printf("\n%-34s %-10s %12s %10s %10s %12s\n", "benchmark", "library", "ns/op", "MB/s", "allocs", "bytes");
-    std::printf("%s\n", std::string(92, '-').c_str());
+    std::printf("\n%-36s %-12s %12s %10s %10s %12s\n", "benchmark", "library", "ns/op", "MB/s", "allocs", "bytes");
+    std::printf("%s\n", std::string(96, '-').c_str());
 
     std::string current;
     for (const auto &entry : results) {
@@ -88,24 +91,42 @@ inline void report() {
             if (!current.empty()) std::printf("\n");
             current = entry.group;
         }
-        std::printf("%-34s %-10s %12.0f %10.1f %10.0f %12.0f\n", entry.group.c_str(), entry.library.c_str(),
-                entry.nanoseconds_per_operation, entry.megabytes_per_second, entry.allocations_per_operation,
-                entry.bytes_allocated_per_operation);
+        // A library that allocates through malloc rather than operator new is invisible to the
+        // counter, and printing its zero would read as "allocates nothing".
+        if (entry.allocations_visible) {
+            std::printf("%-36s %-12s %12.0f %10.1f %10.0f %12.0f\n", entry.group.c_str(), entry.library.c_str(),
+                    entry.nanoseconds_per_operation, entry.megabytes_per_second, entry.allocations_per_operation,
+                    entry.bytes_allocated_per_operation);
+        } else {
+            std::printf("%-36s %-12s %12.0f %10.1f %10s %12s\n", entry.group.c_str(), entry.library.c_str(),
+                    entry.nanoseconds_per_operation, entry.megabytes_per_second, "(malloc)", "(malloc)");
+        }
     }
 
-    // Speedups, paired by group. Both libraries must have run for a ratio to mean anything.
-    std::printf("\n%-34s %14s %14s\n", "ratio (other / serpent)", "time", "allocations");
-    std::printf("%s\n", std::string(64, '-').c_str());
-    for (std::size_t index = 0; index + 1 < results.size(); ++index) {
-        const auto &a = results[index];
-        const auto &b = results[index + 1];
-        if (a.group != b.group || a.library == b.library) continue;
-        const auto &ours = a.library == "serpent" ? a : b;
-        const auto &theirs = a.library == "serpent" ? b : a;
-        std::printf("%-34s %13.2fx %13.2fx\n", a.group.c_str(),
-                theirs.nanoseconds_per_operation / ours.nanoseconds_per_operation,
-                ours.allocations_per_operation > 0 ? theirs.allocations_per_operation / ours.allocations_per_operation
-                                                   : theirs.allocations_per_operation);
+    // Every library in a group, relative to serpent. Above 1.00 means serpent is ahead.
+    std::printf("\n%-36s %-12s %10s %14s\n", "relative to serpent", "library", "time", "allocations");
+    std::printf("%s\n", std::string(76, '-').c_str());
+
+    current.clear();
+    for (const auto &entry : results) {
+        if (entry.library == "serpent") continue;
+
+        const auto ours = std::find_if(results.begin(), results.end(), [&](const result &candidate) {
+            return candidate.group == entry.group && candidate.library == "serpent";
+        });
+        if (ours == results.end()) continue;
+
+        if (entry.group != current) {
+            if (!current.empty()) std::printf("\n");
+            current = entry.group;
+        }
+        const auto allocations = !entry.allocations_visible ? std::string { "(malloc)" }
+                : ours->allocations_per_operation > 0
+                ? std::to_string(static_cast<long>(entry.allocations_per_operation / ours->allocations_per_operation))
+                        + "x"
+                : std::to_string(static_cast<long>(entry.allocations_per_operation)) + " vs 0";
+        std::printf("%-36s %-12s %9.2fx %13s\n", entry.group.c_str(), entry.library.c_str(),
+                entry.nanoseconds_per_operation / ours->nanoseconds_per_operation, allocations.c_str());
     }
 }
 

@@ -98,7 +98,7 @@ access. Tests build with ASan and UBSan by default.
 | [Reflection](docs/reflection.md) | letting the compiler name the fields |
 | [Reading](docs/reading.md) · [Writing](docs/writing.md) | the API |
 | [JSON](docs/json.md) · [BJData](docs/bjdata.md) | format specifics |
-| [Benchmarks](docs/benchmarks.md) | against a DOM library, and where it does not win |
+| [Benchmarks](docs/benchmarks.md) | against four other libraries, including where it loses |
 | [Design](docs/design.md) | why it is shaped this way |
 
 ```sh
