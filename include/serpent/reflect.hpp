@@ -2,10 +2,10 @@
 
 // A type opts in and the compiler enumerates its fields, instead of a macro listing them.
 //
-// UNVERIFIED: the binding to std::meta needs P2996, P1306 and P3394, which no available
-// toolchain implements, so it follows the papers rather than a working compiler - expect to
-// adjust spellings. Everything that does not need reflection, meaning the annotations and the
-// identifier-to-key conversion, sits outside the gate and is tested.
+// Needs P2996 reflection, P1306 expansion statements and P3394 annotations together. GCC 16
+// has all three, behind -freflection. Everything that does not need reflection, meaning the
+// annotations and the identifier-to-key conversion, sits outside the gate and compiles
+// everywhere.
 
 #include <serpent/visitor.hpp>
 
@@ -16,9 +16,14 @@
 
 #include <cstddef>
 
-#if defined(__cpp_reflection) && __cpp_reflection >= 202411L && defined(__cpp_impl_reflection_annotations)
-#define SERPENT_HAS_REFLECTION 1
+// <meta> is includable whether or not reflection is enabled, but only defines
+// __cpp_lib_reflection when it is, which makes it the gate rather than __cpp_reflection.
+#if __has_include(<meta>) && defined(__cpp_expansion_statements)
 #include <meta>
+#endif
+
+#if defined(__cpp_lib_reflection) && defined(__cpp_expansion_statements)
+#define SERPENT_HAS_REFLECTION 1
 #else
 #define SERPENT_HAS_REFLECTION 0
 #endif
@@ -31,9 +36,23 @@ inline constexpr bool reflection_available = SERPENT_HAS_REFLECTION != 0;
 // Annotations are ordinary values, not parsed strings. Write them qualified -
 // [[=serpent::key("dt")]] - which is what lets them be this short.
 
-/** On a field: use this key instead of the identifier. */
+/**
+ * On a field: use this key instead of the identifier.
+ *
+ * The name is stored as an array rather than a view because an annotation's type has to be
+ * structural, and neither a pointer nor a string_view is.
+ */
 struct key {
-    std::string_view name;
+    char storage[64] {};
+    std::size_t length = 0;
+
+    consteval key(std::string_view name) {
+        for (std::size_t index = 0; index < name.size() && index < sizeof(this->storage) - 1; ++index)
+            this->storage[index] = name[index];
+        this->length = name.size();
+    }
+
+    [[nodiscard]] constexpr std::string_view view() const { return { this->storage, this->length }; }
 };
 
 /** On a field: leave it out of the document entirely. */
@@ -159,22 +178,21 @@ namespace detail {
 /** The annotation of type A attached to an entity, if there is one. */
 template<typename A>
 consteval std::optional<A> annotation_of(std::meta::info entity) {
-    for (const auto note : std::meta::annotations_of(entity)) {
-        if (std::meta::type_of(note) == std::meta::dealias(^^A)) return std::meta::extract<A>(note);
-    }
-    return std::nullopt;
+    const auto found = std::meta::annotations_of_with_type(entity, ^^A);
+    if (found.empty()) return std::nullopt;
+    return std::meta::extract<A>(found[0]);
 }
 
 template<typename A>
 consteval bool has_annotation(std::meta::info entity) {
-    return annotation_of<A>(entity).has_value();
+    return !std::meta::annotations_of_with_type(entity, ^^A).empty();
 }
 
 /** The wire key for one field: an explicit key, else the type's naming rule. */
 template<typename T, std::meta::info Member>
 consteval std::string_view field_key() {
     if constexpr (constexpr auto explicit_name = annotation_of<key>(Member); explicit_name.has_value()) {
-        return std::define_static_string(explicit_name->name);
+        return std::define_static_string(explicit_name->view());
     } else {
         constexpr auto style = annotation_of<naming>(^^T).value_or(naming {}).style;
         if constexpr (style == naming_style::as_written) {
@@ -209,15 +227,15 @@ concept reflected_type = std::is_class_v<T> && detail::opted_in<T>();
  * Found by ordinary unqualified lookup from convertible_type in serializer.hpp, which is why
  * this header is included before it.
  */
-template<typename T>
+template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
     requires reflected_type<T>
-void json_convert(auto &visitor, conversion_object_t<decltype(visitor), T> value) {
-    constexpr auto members =
-            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
-
-    template for (constexpr auto member : members) {
+void json_convert(Visitor &visitor, Object &value) {
+    template for (constexpr auto member :
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
         if constexpr (!detail::has_annotation<skip>(member)) {
-            visitor.member(detail::field_key<T, member>(), value.[:member:]);
+            // Bound to a reference first: a splice may not appear in an arbitrary expression.
+            auto &field = value.[:member:];
+            visitor.member(detail::field_key<T, member>(), field);
         }
     }
 }

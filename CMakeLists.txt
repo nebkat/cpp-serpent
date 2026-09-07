@@ -18,6 +18,29 @@ if(PROJECT_IS_TOP_LEVEL)
     set(BUILD_TESTING ON)
 endif()
 
+# Reflection lets a type name its own fields. It needs P2996, P1306 and P3394 together, which
+# today means GCC 16 with -freflection, so it is detected rather than assumed.
+include(CheckCXXSourceCompiles)
+set(SERPENT_REFLECTION_FLAGS -std=c++26 -freflection)
+set(CMAKE_REQUIRED_FLAGS "-std=c++26 -freflection")
+check_cxx_source_compiles([==[
+    #include <meta>
+    struct marker {};
+    struct [[=marker{}]] tagged { [[=marker{}]] int field; };
+    consteval bool probe() {
+        bool named = false;
+        template for (constexpr auto member : std::define_static_array(
+                std::meta::nonstatic_data_members_of(^^tagged, std::meta::access_context::current()))) {
+            named = std::meta::identifier_of(member) == "field"
+                    && !std::meta::annotations_of_with_type(member, ^^marker).empty();
+        }
+        return named && !std::meta::annotations_of_with_type(^^tagged, ^^marker).empty();
+    }
+    static_assert(probe());
+    int main() { return 0; }
+]==] SERPENT_HAS_REFLECTION_SUPPORT)
+unset(CMAKE_REQUIRED_FLAGS)
+
 # Header only.
 add_library(serpent INTERFACE)
 add_library(serpent::serpent ALIAS serpent)

@@ -1,9 +1,9 @@
 // Letting the compiler name the fields, instead of a macro listing them.
 //
 // The reflected path needs C++26: P2996 for reflection, P1306 for `template for`, P3394 for
-// the [[=value]] annotation syntax. No released toolchain has all three, so this example
-// compiles the annotated form only when they are present and falls back to the macro
-// otherwise - which is exactly how you would ship a type today.
+// the [[=value]] annotation syntax. GCC 16 has all three behind -freflection; other compilers
+// do not yet, so this example compiles the annotated form only when they are present and falls
+// back to the hand-written form otherwise - which is how you would ship a type today.
 
 #include <serpent/bjdata.hpp>
 #include <serpent/json.hpp>
@@ -17,9 +17,9 @@ namespace json = serpent::json;
 
 // Keys come from the identifiers, adjusted by the type's naming rule; a field can override
 // its own, and one can be left out entirely.
-struct[[= serpent::serializable]][[= serpent::naming { serpent::naming_style::snake_case }]] link_config {
+struct[[ = serpent::serializable {}, = serpent::naming { serpent::naming_style::snake_case } ]] link_config {
     [[= serpent::key("ip")]] std::string ipAddress = "0.0.0.0";
-    [[= serpent::skip]] int cacheGeneration = 0;
+    [[= serpent::skip {}]] int cacheGeneration = 0;
     int mtuBytes = 1500;
 };
 

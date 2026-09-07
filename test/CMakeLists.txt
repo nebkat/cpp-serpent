@@ -30,6 +30,17 @@ foreach(TEST_NAME IN LISTS TESTS)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME}_test)
 endforeach()
 
+# The reflected path is a separate binary because it needs a newer standard and a compiler
+# flag; the rest of the suite must keep working without either.
+if(SERPENT_HAS_REFLECTION_SUPPORT)
+    add_executable(reflect_test reflect_test.cpp)
+    target_link_libraries(reflect_test PRIVATE serpent)
+    target_include_directories(reflect_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
+    target_compile_options(reflect_test PRIVATE -Wall -Wextra ${SERPENT_REFLECTION_FLAGS})
+    target_link_options(reflect_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
+    add_test(NAME reflect COMMAND reflect_test)
+endif()
+
 # The library must also compile with exceptions off, where only the total accessors exist.
 add_executable(no_exceptions_test no_exceptions_test.cpp)
 target_link_libraries(no_exceptions_test PRIVATE serpent)

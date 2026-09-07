@@ -82,7 +82,7 @@ class error : public std::exception {
 
 public:
     error() = default;
-    constexpr error(errc value, std::size_t byte_offset) noexcept : value(value), byte_offset(byte_offset) {}
+    constexpr error(errc code, std::size_t offset) noexcept : value(code), byte_offset(offset) {}
 
     [[nodiscard]] constexpr errc code() const noexcept { return this->value; }
     [[nodiscard]] constexpr std::size_t offset() const noexcept { return this->byte_offset; }
