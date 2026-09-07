@@ -244,29 +244,42 @@ void sinks() {
     check(fitting.finish().has_value(), "an exactly sized buffer succeeds");
     check_equal(std::string_view { hex(fitted.written()) }, std::string_view { hex(reference) }, "span_sink bytes");
 
+    // The writer batches, so a sink only holds everything once finish() has handed it over.
     counting_sink counter;
-    writer counting { counter };
-    counting.value(std::vector<int> { 1, 2, 3 });
+    {
+        writer counting { counter };
+        counting.value(std::vector<int> { 1, 2, 3 });
+        check(counting.finish().has_value(), "counting_sink accepts the document");
+    }
     check_equal(counter.size(), reference.size(), "counting_sink agrees with the real output");
     check_equal(measure(std::vector<int> { 1, 2, 3 }), reference.size(), "measure() agrees");
 
     std::vector<std::byte> appended;
     iterator_sink iterated { std::back_inserter(appended) };
-    writer iterating { iterated };
-    iterating.value(std::vector<int> { 1, 2, 3 });
+    {
+        writer iterating { iterated };
+        iterating.value(std::vector<int> { 1, 2, 3 });
+        check(iterating.finish().has_value(), "iterator_sink accepts the document");
+    }
     check_equal(std::string_view { hex(appended) }, std::string_view { hex(reference) }, "iterator_sink bytes");
 
     std::ostringstream stream;
     ostream_sink streamed { stream };
-    writer streaming { streamed };
-    streaming.value(std::vector<int> { 1, 2, 3 });
+    {
+        writer streaming { streamed };
+        streaming.value(std::vector<int> { 1, 2, 3 });
+        check(streaming.finish().has_value(), "ostream_sink accepts the document");
+    }
     check_equal(stream.str().size(), reference.size(), "ostream_sink bytes");
 
     // A bare lambda needs no sink type at all.
     std::size_t seen = 0;
     auto collect = [&](std::span<const std::byte> bytes) { seen += bytes.size(); };
-    writer callback { collect };
-    callback.value(std::vector<int> { 1, 2, 3 });
+    {
+        writer callback { collect };
+        callback.value(std::vector<int> { 1, 2, 3 });
+        check(callback.finish().has_value(), "a callable accepts the document");
+    }
     check_equal(seen, reference.size(), "a callable is a sink");
 }
 
@@ -303,11 +316,13 @@ void error_latching() {
         check_equal(std::string_view { hex(moved) }, "5b55015d", "and produces one well formed array");
     }
     {
-        // Once failed, everything after is a no-op rather than a cascade of errors.
+        // Once failed, everything after is a no-op rather than a cascade of errors. The string
+        // is longer than the writer's batch, so it goes to the sink directly and fails there
+        // rather than waiting for finish().
         std::array<std::byte, 1> tiny {};
         span_sink small { tiny };
         writer target { small };
-        target.value("a long string that will not fit");
+        target.value(std::string(1024, 'x'));
         target.value(1);
         target.value(2);
         check_equal(target.error_code(), errc::sink_failed, "the first failure is the one reported");

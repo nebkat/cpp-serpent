@@ -37,6 +37,26 @@ A container is opened only by a scope, which closes it. There is no `begin_objec
 Scopes are movable, so one can live in a `std::optional` to open in one place and close in
 another.
 
+## `finish()` is what completes the document
+
+Writers emit at token granularity — a brace, a key, a separator — and the sink is reached
+through a type-erased call that cannot be inlined, so bytes are gathered into a small internal
+batch and handed over when it fills. That makes BJData encoding about 1.7x quicker, at the
+cost of one rule:
+
+!!! warning "A sink does not hold the whole document until `finish()`"
+
+    Call `finish()` before reading what a sink collected. Destroying the writer flushes too, so
+    scoping it works as well, but reading the sink while the writer is still alive and
+    unfinished gives you only what has been handed over so far.
+
+    A failure can likewise surface at `finish()` rather than at the write that caused it: a
+    write smaller than the batch may not have reached the sink yet. `finish()` is where the
+    answer is, which is what it was for already.
+
+Writers are neither copyable nor movable — two of them sharing one sink would hand over the
+same batch twice.
+
 ## Failures latch
 
 The first error is kept and every later call is a no-op, so you check once at the end:

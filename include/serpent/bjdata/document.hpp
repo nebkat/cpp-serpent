@@ -65,7 +65,9 @@ template<writer_options Options = writer_options {}, typename T>
     counting_sink counter;
     basic_writer<Options> target { counter };
     target.value(value);
-    return counter.size();
+    // finish() both hands over the last batch and reports the total, so the sink is only there
+    // to have somewhere for the bytes to go.
+    return target.finish().value_or(0);
 }
 
 /** Shorthand for the policy that does no compaction at all. */
