@@ -39,6 +39,17 @@ if(SERPENT_HAS_REFLECTION_SUPPORT)
     target_compile_options(reflect_test PRIVATE -Wall -Wextra ${SERPENT_REFLECTION_FLAGS})
     target_link_options(reflect_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
     add_test(NAME reflect COMMAND reflect_test)
+
+    # Annotating a type that already has a hand-written conversion must be rejected, not
+    # silently ranked. Excluded from the default build so only this test builds it, and
+    # expected to fail: the diagnostic is the thing under test.
+    add_executable(reflect_conflict_test EXCLUDE_FROM_ALL reflect_conflict_test.cpp)
+    target_link_libraries(reflect_conflict_test PRIVATE serpent)
+    target_compile_options(reflect_conflict_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
+    target_link_options(reflect_conflict_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
+    add_test(NAME reflect_conflict
+            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target reflect_conflict_test)
+    set_tests_properties(reflect_conflict PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # The library must also compile with exceptions off, where only the total accessors exist.

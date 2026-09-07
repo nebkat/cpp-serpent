@@ -141,18 +141,25 @@ struct serpent::serializer<timestamp, void> {
 };
 ```
 
-## Which one wins
+## Only one at a time
 
-A type can carry more than one of these — annotating a type that already has a `json_convert`
-is the normal way to migrate it. They resolve in a fixed order, and the first that exists wins:
+A type may carry exactly one of these forms. If it is opted in to reflection **and** has a
+hand-written conversion, that is a compile error rather than a silent ranking:
 
-1. a `serpent::serializer<T>` specialization
-2. a `json_convert` — the macro forms expand to one
-3. a `to_json` / `from_json` pair
-4. reflection
+```
+static assertion failed: this type is opted in to reflection and also has a
+hand-written conversion. The hand-written one would be used and the annotation
+would do nothing; remove whichever of the two you did not mean
+```
 
-So a hand-written conversion always beats the reflected one, and adding an annotation to a
-type that already has one changes nothing until you delete the hand-written form.
+The alternative would be worse: the annotation would sit on the type looking like it does
+something while the hand-written form quietly won. Migrating a type therefore means replacing
+one with the other in the same change, not adding the annotation and coming back later.
+
+The one exception is a `serializer<T>` specialization. It replaces the dispatch entirely
+rather than competing inside it, so it may coexist with an annotation and it wins — which is
+what specializing it is for, and the only way to override a type whose definition you cannot
+touch.
 
 ## What works out of the box
 

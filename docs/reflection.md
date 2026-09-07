@@ -47,8 +47,9 @@ Annotations are ordinary values rather than parsed strings, which is why they ar
 
 ## A type you cannot annotate
 
-You cannot put an annotation on someone else's type, so the opt-in is a trait instead. It can
-carry the naming rule too:
+You cannot put an annotation on someone else's type, so the opt-in is a trait instead. It
+carries the naming rule as well, because with no conversion function of your own there is
+nowhere else for a type-level setting to live — the trait is the only surface you control:
 
 ```cpp
 template<>
@@ -89,12 +90,14 @@ compiler it targets has caught up:
 `serpent::reflection_available` is the same answer as a `constexpr bool`. `example/reflection.cpp`
 shows a type written both ways.
 
-## A hand-written conversion always wins
+## Reflection and a hand-written conversion are exclusive
 
-Reflection is the last thing tried, after a `serializer<T>` specialization, a `json_convert`
-and a `to_json` / `from_json` pair. Annotating a type that already has one of those changes
-nothing until you delete the hand-written form, which makes adding the annotation a safe first
-step rather than an ambiguity.
+Annotating a type that already has a `json_convert`, or a `to_json` / `from_json` pair, is a
+compile error. Preferring one silently would leave the annotation on the type doing nothing,
+so it is diagnosed instead. Replace one form with the other in the same change.
+
+A `serializer<T>` specialization is the exception — it replaces the dispatch outright, so it
+may sit alongside an annotation and it wins.
 
 ## Why opting in is deliberate
 

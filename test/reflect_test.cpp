@@ -43,12 +43,12 @@ struct site {
 template<>
 struct serpent::enable_reflection<site> : std::true_type {};
 
-// Annotated and hand-written at once, which is what migrating a type looks like midway.
-struct[[= serpent::serializable {}]] both_forms {
+// Hand-written and never annotated: reflection must keep out of its way entirely.
+struct hand_written {
     int x = 1;
     int y = 2;
 
-    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), both_forms> value) {
+    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), hand_written> value) {
         visitor.member("only_x", value.x);
     }
 };
@@ -82,14 +82,15 @@ struct serpent::serializer<specialized, void> {
     }
 };
 
-void a_hand_written_conversion_outranks_reflection() {
-    check(json::encode(both_forms {}) == R"({"only_x":1})", "the hand-written json_convert wins");
-    const auto back = json::decode<both_forms>(R"({"only_x":9})");
-    check(back && back->x == 9 && back->y == 2, "and is what reads, so y keeps its default");
+void a_hand_written_conversion_is_left_alone() {
+    check(json::encode(hand_written {}) == R"({"only_x":1})", "an unannotated type uses its json_convert");
+    const auto back = json::decode<hand_written>(R"({"only_x":9})");
+    check(back && back->x == 9 && back->y == 2, "in both directions, so y keeps its default");
 
-    check(json::encode(specialized {}) == "5", "a serializer specialization wins too");
+    // Annotating this type as well would be a compile error - see reflect_conflict_test.cpp.
+    check(json::encode(specialized {}) == "5", "a serializer specialization replaces reflection");
     const auto scalar = json::decode<specialized>("7");
-    check(scalar && scalar->value == 7, "in both directions");
+    check(scalar && scalar->value == 7, "and is not diagnosed, because it replaces the dispatch");
 }
 
 void a_type_you_do_not_own() {
@@ -166,7 +167,7 @@ void naming_styles() {
 
 int main() {
     identifiers_become_keys();
-    a_hand_written_conversion_outranks_reflection();
+    a_hand_written_conversion_is_left_alone();
     a_type_you_do_not_own();
     annotations_adjust_keys();
     an_absent_optional_is_still_written_null();

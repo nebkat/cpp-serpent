@@ -24,9 +24,12 @@ concept convertible_type = requires(detail::convert_probe &visitor, const T &val
  *        functions to.
  *
  * Resolved in order: a single json_convert, then the to_json / from_json pair for types whose
- * two directions genuinely differ, then reflection. A hand-written conversion therefore always
- * wins over the reflected one, which is what makes annotating a type that already has one a
- * safe intermediate step rather than an ambiguity.
+ * two directions genuinely differ, then reflection.
+ *
+ * A type may only offer one of them. Silently preferring the hand-written one would leave an
+ * annotation on the type doing nothing, so having both is diagnosed instead of ranked. The
+ * exception is a specialization of this template, which replaces the whole thing and never
+ * reaches these checks - that is what specializing it means.
  */
 template<typename T, typename>
 struct serializer {
@@ -38,6 +41,11 @@ struct serializer {
      */
     template<typename Writer>
     static void write(Writer &out, const T &value) {
+        static_assert(!(reflected_type<T> && (convertible_type<T> || requires { to_json(out, value); })),
+                "this type is opted in to reflection and also has a hand-written conversion. The "
+                "hand-written one would be used and the annotation would do nothing; remove "
+                "whichever of the two you did not mean");
+
         if constexpr (convertible_type<T>) {
             write_visitor<Writer> visitor { out };
             const auto scope = out.object();
@@ -59,6 +67,11 @@ struct serializer {
     /** Reads from any source offering the reader interface. Resolved as to_json is. */
     template<typename Source>
     static bool read(Source source, T &value) {
+        static_assert(!(reflected_type<T> && (convertible_type<T> || requires { from_json(source, value); })),
+                "this type is opted in to reflection and also has a hand-written conversion. The "
+                "hand-written one would be used and the annotation would do nothing; remove "
+                "whichever of the two you did not mean");
+
         if constexpr (convertible_type<T>) {
             if (!source.is_object()) return false;
             read_visitor<Source> visitor { source };

@@ -78,8 +78,9 @@ struct naming {
 /**
  * The opt-in for a type you cannot annotate. Specialize to true_type.
  *
- * A specialization may also carry a naming style, which is the only way to set one on a type
- * whose definition you do not control:
+ * A specialization may also carry a naming style. Reflection reads the fields directly, so
+ * there is no conversion function to hang a setting on, and the type cannot be annotated -
+ * this trait is the only type-level surface the consumer owns:
  *
  *     template<>
  *     struct serpent::enable_reflection<foreign> : std::true_type {
