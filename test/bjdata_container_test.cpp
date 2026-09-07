@@ -1,5 +1,5 @@
 // Container grammar: unbounded, counted and typed arrays and objects, noop handling,
-// zero-copy spans, and the strict strong-type rule. Vectors from dart-bjdata.
+// zero-copy spans, and the strict strong-type rule. Vectors from the reference implementation.
 
 #include "check.hpp"
 
@@ -130,7 +130,7 @@ void typed_arrays_and_spans() {
 }
 
 void strict_strong_types() {
-    // dart-bjdata restricts $ to fixed width types, so S, H, Z, T and F are rejected.
+    // The reference encoder restricts $ to fixed width types, so S, H, Z, T and F are rejected.
     for (const auto *hex :
             { "5b2453235501015501610000", "5b245a2355030000", "5b2454235503", "5b2446235503", "5b2448235501" }) {
         const auto value = parse(hex);

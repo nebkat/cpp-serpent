@@ -1,4 +1,4 @@
-// Cross-implementation check against dart-bjdata. For every fixture the C++ view must
+// Cross-implementation check against the reference implementation. For every fixture the C++ view must
 // produce the same block notation and decode to the same values as the reference.
 // Regenerate with: python3 test/generate_fixtures.py /tmp/bjdatacli
 
@@ -244,13 +244,13 @@ int main(int argc, char **argv) {
 
         check_equal(std::string_view { block_notation(bytes) },
                 std::string_view { read_text(directory / (name + ".blocks")) },
-                name + ": block notation matches dart-bjdata");
+                name + ": block notation matches the reference implementation");
 
         check_equal(std::string_view { digest(view::over(bytes)) },
                 std::string_view { read_text(directory / (name + ".digest")) },
-                name + ": decodes to the same values as dart-bjdata");
+                name + ": decodes to the same values as the reference implementation");
 
-        // The headline check: re-encoding the decoded values must reproduce dart's bytes.
+        // The headline check: re-encoding the decoded values must reproduce the reference bytes.
         {
             std::vector<std::byte> produced;
             container_sink out { produced };
@@ -259,7 +259,7 @@ int main(int argc, char **argv) {
             const auto finished = target.finish();
             check(finished.has_value(), name + ": re-encodes cleanly");
             check_equal(std::string_view { hex(produced) }, std::string_view { hex(bytes) },
-                    name + ": re-encodes to the same bytes as dart-bjdata");
+                    name + ": re-encodes to the same bytes as the reference implementation");
         }
 
         // JSON output is checked against the reference's own JSON rendering of the same
@@ -267,14 +267,14 @@ int main(int argc, char **argv) {
         // agree - not just the structure.
         check_equal(std::string_view { json::encode(view::over(bytes), { .indent = 2 }) },
                 std::string_view { read_text(directory / (name + ".json.expected")) },
-                name + ": JSON matches dart-bjdata");
+                name + ": JSON matches the reference implementation");
 
-        // And read back: parsing dart-bjdata's own JSON must produce the same values the
+        // And read back: parsing the reference implementation's own JSON must produce the same values the
         // BJData reader produces from the same document.
         {
             const auto text = read_text(directory / (name + ".json.expected"));
             const auto parsed = json::validate(text);
-            check(parsed.has_value(), name + ": dart's JSON validates");
+            check(parsed.has_value(), name + ": the reference implementation's JSON validates");
             if (parsed) {
                 check_equal(std::string_view { json_digest(json::reader::over(text)) },
                         std::string_view { read_text(directory / (name + ".digest")) },

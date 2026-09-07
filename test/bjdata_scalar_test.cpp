@@ -1,4 +1,4 @@
-// Scalar decoding. Hex vectors ported from dart-bjdata test/bjdata_test.dart.
+// Scalar decoding. Hex vectors ported from the reference test suite.
 
 #include "check.hpp"
 

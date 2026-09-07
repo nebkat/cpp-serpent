@@ -41,7 +41,7 @@ inline int report(const char *name) {
     return 1;
 }
 
-/** Decodes the hex literals lifted from dart-bjdata's test vectors. */
+/** Decodes the hex literals lifted from the reference test vectors. */
 inline std::vector<std::byte> from_hex(std::string_view text) {
     const auto nibble = [](char c) -> int {
         if (c >= '0' && c <= '9') return c - '0';

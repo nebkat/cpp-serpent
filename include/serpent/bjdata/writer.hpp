@@ -23,7 +23,7 @@
 namespace serpent::bjdata {
 
 /**
- * What the writer is allowed to do to shrink the output. Mirrors dart-bjdata's BjdataConfig.
+ * What the writer is allowed to do to shrink the output. Mirrors the reference encoder's configuration.
  *
  * A template argument rather than a member, so a build that does not want an optimization
  * does not carry its code. The measuring and marker-selection routines themselves stay
@@ -215,7 +215,7 @@ public:
         this->put_text(digits);
     }
 
-    /** A [$B#n array, which is how binary round-trips through nlohmann's get_binary(). */
+    /** A [$B#n array, which is how binary round-trips through DOM libraries. */
     void binary(std::span<const std::byte> bytes) noexcept {
         this->put_marker(marker::array_begin);
         this->put_marker(marker::strong_type);

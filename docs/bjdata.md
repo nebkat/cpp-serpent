@@ -18,7 +18,7 @@ demands an exact layout match.
 
 ## What the writer emits
 
-Output is byte-identical to [dart-bjdata](https://github.com/nebkat/dart-bjdata):
+Output is byte-identical to the reference implementation:
 
 - Integer markers take the narrowest width that holds the value, preferring unsigned, so
   `200` is `U` and never `i`.
@@ -96,7 +96,7 @@ rules. `E` is rejected rather than skipped.
 !!! warning "Strict grammar"
 
     A strong type must be fixed width, so `$S`, `$H`, `$Z`, `$T` and `$F` are rejected — which
-    is what keeps every typed container O(1) to index and skip. nlohmann writes arrays of
+    is what keeps every typed container O(1) to index and skip. Some libraries write arrays of
     strings as `[$S#…`, so reading its output needs a leniency mode this does not yet have.
 
 Draft 4 Structure-of-Arrays is not implemented in either direction.

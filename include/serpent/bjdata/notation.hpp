@@ -280,7 +280,7 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
 } // namespace detail
 
 /**
- * @brief Renders a document as dart-bjdata's block notation, e.g. [S][U][5][hello].
+ * @brief Renders a document as the reference implementation's block notation, e.g. [S][U][5][hello].
  *
  * A token-level trace of the byte stream rather than of the decoded value, so it catches
  * grammar drift that comparing decoded values would miss.

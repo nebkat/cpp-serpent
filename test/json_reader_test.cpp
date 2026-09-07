@@ -1,4 +1,4 @@
-// The JSON reader. The fixture suite additionally parses dart-bjdata's own JSON for all 44
+// The JSON reader. The fixture suite additionally parses the reference implementation's own JSON for all 44
 // documents and checks the values against the same digests the BJData reader is held to.
 
 #include "check.hpp"

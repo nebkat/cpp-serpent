@@ -169,7 +169,7 @@ public:
      * JSON has no NaN or infinity, so a non-finite value is written as null.
      *
      * Finite values use the same rendering as the reference implementation's own JSON output,
-     * so a document transcribed here is byte-identical to what dart-bjdata prints for it.
+     * so a document transcribed here is byte-identical to what the reference implementation prints for it.
      */
     void real(double value) noexcept {
         this->begin_value();

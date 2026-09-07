@@ -44,4 +44,4 @@ Escapes are checked properly, surrogate pairs included.
 ## Formatting
 
 Numbers are rendered the way the reference implementation renders them, which is what lets the
-test suite compare our JSON to dart-bjdata's own JSON byte for byte.
+test suite compare our JSON to the reference implementation's own JSON byte for byte.

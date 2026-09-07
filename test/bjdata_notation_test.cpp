@@ -1,4 +1,4 @@
-// Block notation. Expected strings are the ones dart-bjdata's README and tests document.
+// Block notation. Expected strings are the ones the reference implementation documents.
 
 #include "check.hpp"
 

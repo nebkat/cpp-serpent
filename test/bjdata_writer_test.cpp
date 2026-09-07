@@ -1,4 +1,4 @@
-// The writer. Expected bytes are dart-bjdata's, either quoted from its test vectors or
+// The writer. Expected bytes are the reference implementation's, either quoted from its test vectors or
 // produced by its CLI; bjdata_fixture_test checks the whole corpus byte for byte.
 
 #include "check.hpp"

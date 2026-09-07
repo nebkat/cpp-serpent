@@ -1,4 +1,4 @@
-// JSON output. The fixture suite already checks 44 documents against dart-bjdata's own JSON
+// JSON output. The fixture suite already checks 44 documents against the reference implementation's own JSON
 // rendering; this covers what JSON-from-a-C++-value adds on top, and the lossy mappings.
 
 #include "check.hpp"
