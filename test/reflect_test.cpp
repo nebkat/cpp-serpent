@@ -140,6 +140,51 @@ void a_discriminant_names_the_type() {
     check(binary && binary->index() == 1, "the same through BJData");
 }
 
+// Plain structs, never annotated: the sort of thing that arrives from a header you do not own.
+struct plain_point {
+    int x = 0;
+    int y = 0;
+};
+struct plain_circle {
+    int radius = 0;
+};
+
+struct[[= serpent::serializable {}]] drawing {
+    std::string title;
+    [[= serpent::tagged("kind")]] std::variant<plain_point, plain_circle> body;
+};
+
+struct[[= serpent::serializable {}]] renamed {
+    [[= serpent::tagged("k", { "pt", "circ" })]] std::variant<plain_point, plain_circle> body;
+};
+
+void a_field_can_carry_the_tag() {
+    const drawing shape { "a", plain_circle { 9 } };
+    check_equal(json::encode(shape), R"({"title":"a","body":{"kind":"plain_circle","radius":9}})",
+            "the tag names the alternative inside the field's own object");
+
+    const auto back = json::decode<drawing>(json::encode(shape));
+    check(back && back->body.index() == 1, "and the name selects it on the way back");
+    check(back && std::get<plain_circle>(back->body).radius == 9, "with its members intact");
+
+    // Neither alternative opted in to reflection; naming them on the field is that opt-in.
+    const auto by_identifier = json::decode<drawing>(R"({"body":{"kind":"plain_point","x":1,"y":2}})");
+    check(by_identifier && by_identifier->body.index() == 0, "an alternative named by its own identifier");
+    check(by_identifier && std::get<plain_point>(by_identifier->body).y == 2, "and read in full");
+
+    check_equal(json::encode(renamed { plain_point { 3, 4 } }), R"({"body":{"k":"pt","x":3,"y":4}})",
+            "an explicit list overrides the identifiers");
+    const auto short_form = json::decode<renamed>(R"({"body":{"k":"circ","radius":5}})");
+    check(short_form && short_form->body.index() == 1, "and reads back by those names");
+
+    check(!json::decode<renamed>(R"({"body":{"k":"nope","radius":5}})"),
+            "a name matching no alternative fails rather than guessing");
+
+    const drawing binary_source { "b", plain_point { 3, 4 } };
+    const auto binary = bjdata::decode<drawing>(bjdata::encode(binary_source));
+    check(binary && binary->body.index() == 0, "the same through BJData");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -208,6 +253,7 @@ void naming_styles() {
 int main() {
     identifiers_become_keys();
     a_discriminant_names_the_type();
+    a_field_can_carry_the_tag();
     a_hand_written_conversion_is_left_alone();
     a_type_you_do_not_own();
     annotations_adjust_keys();

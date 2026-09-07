@@ -65,6 +65,38 @@ struct serializer {
         }
     }
 
+    /**
+     * Writes only the members, into an object the caller has already opened.
+     *
+     * What lets a tag share an object with the value it names, rather than nesting it.
+     */
+    template<typename Writer>
+    static void write_members(Writer &out, const T &value) {
+        write_visitor<Writer> visitor { out };
+        if constexpr (convertible_type<T>) {
+            json_convert(visitor, value);
+        } else if constexpr (reflection_available) {
+            detail::reflect_members(visitor, value);
+        } else {
+            static_assert(always_false<Writer>, "this type has no members to write");
+        }
+    }
+
+    /** Reads the members from an object the caller has already identified. */
+    template<typename Source>
+    static bool read_members(Source source, T &value) {
+        if (!source.is_object()) return false;
+        read_visitor<Source> visitor { source };
+        if constexpr (convertible_type<T>) {
+            json_convert(visitor, value);
+        } else if constexpr (reflection_available) {
+            detail::reflect_members(visitor, value);
+        } else {
+            static_assert(always_false<Source>, "this type has no members to read");
+        }
+        return visitor.ok();
+    }
+
     /** Reads from any source offering the reader interface. Resolved as to_json is. */
     template<typename Source>
     static bool read(Source source, T &value) {
@@ -156,6 +188,30 @@ bool read_named_alternative(Source source, Variant &value, std::index_sequence<I
         return true;
     };
     return (take.template operator()<Index>() || ...);
+}
+
+/** Reads a variant whose field named the key and the alternatives. */
+template<tagged Tag, typename Source, typename Variant, std::size_t... Index>
+bool read_tagged(Source source, Variant &value, std::index_sequence<Index...>) {
+    if (!source.is_valid() || !source.is_object()) return false;
+
+    const auto named = source[Tag.key()].as_string();
+    if (!named) return false;
+
+    const auto take = [&]<std::size_t Which>() {
+        if (std::string_view { *named } != Tag.name(Which)) return false;
+        using alternative = std::variant_alternative_t<Which, Variant>;
+        alternative candidate {};
+        if (!serializer<alternative>::read_members(source, candidate)) return false;
+        value = std::move(candidate);
+        return true;
+    };
+    return (take.template operator()<Index>() || ...);
+}
+
+template<tagged Tag, typename Source, typename Variant>
+bool read_into(Source source, tagged_variant<Tag, Variant> wrapper) {
+    return read_tagged<Tag>(source, wrapper.target, std::make_index_sequence<std::variant_size_v<Variant>> {});
 }
 
 template<typename Source, typename Variant, std::size_t... Index>

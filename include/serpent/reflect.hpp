@@ -248,6 +248,25 @@ consteval naming_style naming_for() {
         return annotation_of<naming>(^^T).value_or(naming {}).style;
 }
 
+/**
+ * A field's tag, with any name it did not spell out filled in from the alternative's identifier.
+ *
+ * Resolved here, where reflection is available, so that the writer and reader receive a tag that
+ * already knows every name and need not reflect on anything themselves.
+ */
+template<typename Variant, tagged Base>
+consteval tagged resolved_tag() {
+    tagged result = Base;
+    [&]<std::size_t... Index>(std::index_sequence<Index...>) {
+        ((result.name(Index).empty() ? result.name_alternative(Index,
+                                               std::meta::identifier_of(std::meta::dealias(
+                                                       ^^std::variant_alternative_t<Index, Variant>)))
+                                     : void()),
+                ...);
+    }(std::make_index_sequence<std::variant_size_v<Variant>> {});
+    return result;
+}
+
 /** The wire key for one field: an explicit key, else the type's naming rule. */
 template<typename T, std::meta::info Member>
 consteval std::string_view field_key() {
@@ -316,9 +335,14 @@ namespace detail {
  * false - reporting no conversion at all rather than two. serializer<T> calls this by name
  * instead, after it has looked for the hand-written forms.
  */
+/**
+ * The member walk itself, with no opt-in requirement.
+ *
+ * A field tagged with serpent::tagged names alternatives that may never have opted in - that is
+ * the point of putting the tag on the field - so naming them there is the opt-in for them.
+ */
 template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
-    requires reflected_type<T>
-void reflect_convert(Visitor &visitor, Object &value) {
+void reflect_members(Visitor &visitor, Object &value) {
     if constexpr (detail::is_discriminated<T>()) {
         // Written as though it were a member, read as nothing: the selector is not a field, and
         // by the time a value is being read something has already used it to choose this type.
@@ -332,9 +356,28 @@ void reflect_convert(Visitor &visitor, Object &value) {
         if constexpr (!detail::has_annotation<skip>(member)) {
             // Bound to a reference first: a splice may not appear in an arbitrary expression.
             auto &field = value.[:member:];
-            visitor.member(detail::field_key<T, member>(), field);
+
+            if constexpr (constexpr auto tag = detail::annotation_of<tagged>(member); tag.has_value()) {
+                // Taken from the member rather than from the local, which may not be named in a
+                // template argument here.
+                using declared = [:std::meta::type_of(member):];
+                static_assert(detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
+
+                constexpr tagged resolved = detail::resolved_tag<declared, *tag>();
+                auto wrapper = make_tagged<resolved>(field);
+                visitor.member(detail::field_key<T, member>(), wrapper);
+            } else {
+                visitor.member(detail::field_key<T, member>(), field);
+            }
         }
     }
+}
+
+/** The opted-in entry point, which is what serializer<T> looks for. */
+template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
+    requires reflected_type<T>
+void reflect_convert(Visitor &visitor, Object &value) {
+    reflect_members(visitor, value);
 }
 
 } // namespace detail
@@ -360,6 +403,9 @@ consteval std::string_view discriminant_key();
 
 template<typename T>
 consteval std::string_view discriminant_name();
+
+template<typename Visitor, typename Object>
+void reflect_members(Visitor &visitor, Object &value);
 
 } // namespace detail
 

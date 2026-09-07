@@ -174,6 +174,30 @@ public:
     }
 };
 
+/** Writes a tagged variant: the name it goes by, then the alternative's own members. */
+template<typename Emitter, tagged Tag, typename Variant>
+void emit_tagged(Emitter &out, const tagged_variant<Tag, Variant> &item) {
+    const auto scope = out.object();
+    out.key(Tag.key());
+
+    std::size_t index = 0;
+    const bool named = ([&]<std::size_t... Which>(std::index_sequence<Which...>) {
+        return ((item.target.index() == Which ? (index = Which, true) : false) || ...);
+    })(std::make_index_sequence<std::variant_size_v<std::remove_const_t<Variant>>> {});
+    (void)named;
+
+    ([&]<std::size_t... Which>(std::index_sequence<Which...>) {
+        ((index == Which ? (out.string(Tag.name(Which)), true) : false) || ...);
+    })(std::make_index_sequence<std::variant_size_v<std::remove_const_t<Variant>>> {});
+
+    std::visit(
+            [&out](const auto &held) {
+                using held_type = std::remove_cvref_t<decltype(held)>;
+                serializer<held_type>::write_members(out, held);
+            },
+            item.target);
+}
+
 /**
  * Turns a C++ value into calls on an emitter.
  *
@@ -204,6 +228,8 @@ void emit_value(Emitter &out, const T &item) {
             emit_value(out, *item);
         else
             out.null();
+    } else if constexpr (requires { emit_tagged(out, item); }) {
+        emit_tagged(out, item);
     } else if constexpr (detail::variant_like<bare>) {
         // Untagged: whichever alternative is held is written as itself, and the value on the
         // wire says what it is.

@@ -211,8 +211,16 @@ struct [[= serpent::discriminant("unit")]] fahrenheit { double value; };
 ```
 
 The alternative is then chosen by what the document calls it rather than by what parses, and a
-name that matches nothing fails instead of guessing. This needs reflection; without it, order
-remains the only tie-break.
+name that matches nothing fails instead of guessing.
+
+Where the alternatives are not yours to annotate, tag the field instead — which also opts them
+in, so neither type needs to know serpent exists:
+
+```cpp
+[[= serpent::tagged("kind")]] std::variant<point, circle> body;
+```
+
+Both need reflection; without it, order remains the only tie-break.
 
 ## Missing and extra keys
 

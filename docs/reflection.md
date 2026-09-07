@@ -39,6 +39,7 @@ struct [[= serpent::serializable {},
 | `key("...")` | a field | overrides one key |
 | `skip {}` | a field | leaves it out of the document, both directions |
 | `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
+| `tagged("key")` | a variant field | the same, decided at the field instead of on the alternatives |
 
 Styles: `as_written`, `snake_case`, `screaming_snake_case`, `kebab_case`, `camel_case`,
 `pascal_case`.
@@ -69,6 +70,35 @@ ignores it, and it is written before the fields.
 
 Decoding a variant then reads that key and picks the alternative it names. A name that matches
 nothing fails, rather than falling back to a guess.
+
+### Tagging at the field instead
+
+A discriminant on the type needs the alternatives to be yours to annotate. Where they are not,
+put the tag on the field:
+
+```cpp
+struct point  { int x, y; };      // someone else's header
+struct circle { int radius; };
+
+struct [[= serpent::serializable {}]] drawing {
+    std::string title;
+    [[= serpent::tagged("kind")]] std::variant<point, circle> body;
+};
+```
+
+```json
+{"title":"a","body":{"kind":"circle","radius":9}}
+```
+
+Naming the alternatives here is also what opts them in, so neither type needs to know serpent
+exists. They are named by their own identifiers unless you say otherwise:
+
+```cpp
+[[= serpent::tagged("k", { "pt", "circ" })]] std::variant<point, circle> body;
+```
+
+Because the tag belongs to the field, the same types can be tagged differently in different
+places, which a type-level annotation cannot do.
 
 ## A type you cannot annotate
 
