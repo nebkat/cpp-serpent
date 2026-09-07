@@ -63,6 +63,14 @@ concept variant_like = requires(const T &value) {
     { value.index() } -> std::convertible_to<std::size_t>;
 };
 
+/**
+ * A type written as an object of its own members, rather than as a value of some built-in
+ * shape. Only these can carry a tag, because only these have somewhere to put it.
+ */
+template<typename T>
+concept object_like = std::is_class_v<T> && !string_like<T> && !optional_like<T> && !variant_like<T> && !byte_range<T>
+        && !map_like<T> && !std::ranges::input_range<T>;
+
 template<typename T>
 concept structurally_readable =
         optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T> || keyed_insertable<T>;

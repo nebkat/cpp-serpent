@@ -100,6 +100,25 @@ exists. They are named by their own identifiers unless you say otherwise:
 Because the tag belongs to the field, the same types can be tagged differently in different
 places, which a type-level annotation cannot do.
 
+### Alternatives that are not objects
+
+Only an alternative written as an object of its own members can carry a name — there is nowhere
+to put one on a number. Those keep the untagged behaviour, which is all they need:
+
+```cpp
+[[= serpent::tagged("kind")]] std::variant<int, point, circle> body;
+```
+
+```json
+{"body":42}
+{"body":{"kind":"circle","radius":9}}
+```
+
+A number is recovered as a number, and the objects are still told apart by name. This holds for
+the type-level `discriminant` too: alternatives that cannot carry one do not stop the ones that
+can from being named. A name that matches no alternative still fails, rather than falling
+through to the untagged attempt.
+
 ## A type you cannot annotate
 
 You cannot put an annotation on someone else's type, so the opt-in is a trait instead. It

@@ -258,10 +258,11 @@ template<typename Variant, tagged Base>
 consteval tagged resolved_tag() {
     tagged result = Base;
     [&]<std::size_t... Index>(std::index_sequence<Index...>) {
-        ((result.name(Index).empty() ? result.name_alternative(Index,
-                                               std::meta::identifier_of(std::meta::dealias(
-                                                       ^^std::variant_alternative_t<Index, Variant>)))
-                                     : void()),
+        ((result.name(Index).empty() && detail::object_like<std::variant_alternative_t<Index, Variant>>
+                         ? result.name_alternative(Index,
+                                   std::meta::identifier_of(
+                                           std::meta::dealias(^^std::variant_alternative_t<Index, Variant>)))
+                         : void()),
                 ...);
     }(std::make_index_sequence<std::variant_size_v<Variant>> {});
     return result;
@@ -308,6 +309,19 @@ consteval std::string_view discriminant_name() {
         return std::define_static_string(note->name());
     else
         return std::define_static_string(std::meta::identifier_of(^^T));
+}
+
+/** The discriminant key of the first alternative that has one. */
+template<typename Variant>
+consteval std::string_view first_discriminant_key() {
+    std::string_view found {};
+    [&]<std::size_t... Index>(std::index_sequence<Index...>) {
+        ((found.empty() && is_discriminated<std::variant_alternative_t<Index, Variant>>()
+                         ? found = discriminant_key<std::variant_alternative_t<Index, Variant>>()
+                         : found),
+                ...);
+    }(std::make_index_sequence<std::variant_size_v<Variant>> {});
+    return found;
 }
 
 } // namespace detail
@@ -406,6 +420,9 @@ consteval std::string_view discriminant_name();
 
 template<typename Visitor, typename Object>
 void reflect_members(Visitor &visitor, Object &value);
+
+template<typename Variant>
+consteval std::string_view first_discriminant_key();
 
 } // namespace detail
 

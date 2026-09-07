@@ -154,14 +154,26 @@ bool read_discriminating(Source source, T &value) {
     }
 }
 
-/** Whether every alternative names itself, and under the same key. */
+/**
+ * Whether every alternative written as an object names itself, and under the same key.
+ *
+ * Alternatives of other shapes are not required to: a number already says what it is.
+ */
 template<typename Variant, std::size_t... Index>
 consteval bool all_discriminated(std::index_sequence<Index...>) {
-    if constexpr ((discriminated_type<std::variant_alternative_t<Index, Variant>> && ...)) {
-        constexpr std::string_view key = detail::discriminant_key<std::variant_alternative_t<0, Variant>>();
-        return ((detail::discriminant_key<std::variant_alternative_t<Index, Variant>>() == key) && ...);
-    } else {
+    constexpr bool every_object_named = ((!detail::object_like<std::variant_alternative_t<Index, Variant>>
+                                                 || discriminated_type<std::variant_alternative_t<Index, Variant>>)
+            && ...);
+    constexpr bool any_object_named = ((detail::object_like<std::variant_alternative_t<Index, Variant>>
+                                               && discriminated_type<std::variant_alternative_t<Index, Variant>>)
+            || ...);
+    if constexpr (!every_object_named || !any_object_named) {
         return false;
+    } else {
+        constexpr std::string_view key = detail::first_discriminant_key<Variant>();
+        return ((!discriminated_type<std::variant_alternative_t<Index, Variant>>
+                        || detail::discriminant_key<std::variant_alternative_t<Index, Variant>>() == key)
+                && ...);
     }
 }
 
@@ -169,44 +181,87 @@ consteval bool all_discriminated(std::index_sequence<Index...>) {
  * Picks the alternative the document names, rather than trying each one.
  *
  * Unambiguous where trying cannot be: two types with the same members are the same shape, and
- * only a name distinguishes them.
+ * only a name distinguishes them. Alternatives that are not objects keep the untagged path.
  */
 template<typename Source, typename Variant, std::size_t... Index>
 bool read_named_alternative(Source source, Variant &value, std::index_sequence<Index...>) {
-    if (!source.is_valid() || !source.is_object()) return false;
+    if (!source.is_valid()) return false;
 
-    constexpr std::string_view key = detail::discriminant_key<std::variant_alternative_t<0, Variant>>();
-    const auto named = source[key].as_string();
-    if (!named) return false;
+    if (source.is_object()) {
+        constexpr std::string_view key = detail::first_discriminant_key<Variant>();
+        if (const auto named = source[key].as_string()) {
+            const auto take = [&]<std::size_t Which>() {
+                using alternative = std::variant_alternative_t<Which, Variant>;
+                if constexpr (!discriminated_type<alternative>) {
+                    return false;
+                } else {
+                    if (std::string_view { *named } != detail::discriminant_name<alternative>()) return false;
+                    alternative candidate {};
+                    if (!read_into(source, candidate)) return false;
+                    value = std::move(candidate);
+                    return true;
+                }
+            };
+            return (take.template operator()<Index>() || ...);
+        }
+    }
 
-    const auto take = [&]<std::size_t Which>() {
+    const auto untagged = [&]<std::size_t Which>() {
         using alternative = std::variant_alternative_t<Which, Variant>;
-        if (std::string_view { *named } != detail::discriminant_name<alternative>()) return false;
-        alternative candidate {};
-        if (!read_into(source, candidate)) return false;
-        value = std::move(candidate);
-        return true;
+        if constexpr (detail::object_like<alternative>) {
+            return false;
+        } else {
+            alternative candidate {};
+            if (!read_into(source, candidate)) return false;
+            value = std::move(candidate);
+            return true;
+        }
     };
-    return (take.template operator()<Index>() || ...);
+    return (untagged.template operator()<Index>() || ...);
 }
 
-/** Reads a variant whose field named the key and the alternatives. */
+/**
+ * Reads a variant whose field named the key and the alternatives.
+ *
+ * Only the alternatives written as objects carry the name. Anything else - a number, a string,
+ * an array - already says what it is, so it is recovered the way an untagged variant is.
+ */
 template<tagged Tag, typename Source, typename Variant, std::size_t... Index>
 bool read_tagged(Source source, Variant &value, std::index_sequence<Index...>) {
-    if (!source.is_valid() || !source.is_object()) return false;
+    if (!source.is_valid()) return false;
 
-    const auto named = source[Tag.key()].as_string();
-    if (!named) return false;
+    if (source.is_object()) {
+        if (const auto named = source[Tag.key()].as_string()) {
+            const auto take = [&]<std::size_t Which>() {
+                using alternative = std::variant_alternative_t<Which, Variant>;
+                if constexpr (!detail::object_like<alternative>) {
+                    return false;
+                } else {
+                    if (std::string_view { *named } != Tag.name(Which)) return false;
+                    alternative candidate {};
+                    if (!serializer<alternative>::read_members(source, candidate)) return false;
+                    value = std::move(candidate);
+                    return true;
+                }
+            };
+            // A name was given, so it decides. One that matches nothing is an error rather than
+            // a reason to start guessing.
+            return (take.template operator()<Index>() || ...);
+        }
+    }
 
-    const auto take = [&]<std::size_t Which>() {
-        if (std::string_view { *named } != Tag.name(Which)) return false;
+    const auto untagged = [&]<std::size_t Which>() {
         using alternative = std::variant_alternative_t<Which, Variant>;
-        alternative candidate {};
-        if (!serializer<alternative>::read_members(source, candidate)) return false;
-        value = std::move(candidate);
-        return true;
+        if constexpr (detail::object_like<alternative>) {
+            return false;
+        } else {
+            alternative candidate {};
+            if (!read_into(source, candidate)) return false;
+            value = std::move(candidate);
+            return true;
+        }
     };
-    return (take.template operator()<Index>() || ...);
+    return (untagged.template operator()<Index>() || ...);
 }
 
 template<tagged Tag, typename Source, typename Variant>

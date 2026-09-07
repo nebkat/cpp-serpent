@@ -185,6 +185,35 @@ void a_field_can_carry_the_tag() {
     check(binary && binary->body.index() == 0, "the same through BJData");
 }
 
+// A sum type where only some alternatives are objects. The scalar cannot carry a tag and does
+// not need one: a number already says what it is.
+struct[[= serpent::serializable {}]] mixed_holder {
+    [[= serpent::tagged("kind")]] std::variant<int, plain_point, plain_circle> body;
+};
+
+using mixed_temperature = std::variant<int, celsius, fahrenheit>;
+
+void a_variant_can_mix_shapes() {
+    check_equal(json::encode(mixed_holder { 42 }), R"({"body":42})", "a scalar alternative is written bare");
+    check_equal(json::encode(mixed_holder { plain_circle { 9 } }), R"({"body":{"kind":"plain_circle","radius":9}})",
+            "an object alternative still carries the name");
+
+    check(json::decode<mixed_holder>(R"({"body":42})")->body.index() == 0, "a number reads as the number");
+    check(json::decode<mixed_holder>(R"({"body":{"kind":"plain_point","x":1,"y":2}})")->body.index() == 1,
+            "and a named object as that object");
+    check(!json::decode<mixed_holder>(R"({"body":{"kind":"nope"}})"),
+            "a name matching nothing still fails rather than falling through to the scalar");
+
+    // The same on the type-level path: the discriminant is used for the objects that carry one,
+    // and the alternative that cannot is recovered as itself.
+    check_equal(json::encode(mixed_temperature { 5 }), "5", "a scalar beside discriminated types");
+    check_equal(json::encode(mixed_temperature { fahrenheit { 70.7 } }), R"({"unit":"fahrenheit","value":70.7})",
+            "which does not stop the others being named");
+    check(json::decode<mixed_temperature>("5")->index() == 0, "the scalar reads back");
+    check(json::decode<mixed_temperature>(R"({"unit":"fahrenheit","value":70.7})")->index() == 2,
+            "and the named object is still told from its twin");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -254,6 +283,7 @@ int main() {
     identifiers_become_keys();
     a_discriminant_names_the_type();
     a_field_can_carry_the_tag();
+    a_variant_can_mix_shapes();
     a_hand_written_conversion_is_left_alone();
     a_type_you_do_not_own();
     annotations_adjust_keys();
