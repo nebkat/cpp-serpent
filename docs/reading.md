@@ -2,10 +2,10 @@
 
 ## Two handles, one shape
 
-| | |
-|---|---|
-| `bjdata::view` | a **view** — values *are* the bytes, so strings and arrays are borrowed |
-| `json::reader` | a **reader** — values must be constructed, so strings are decoded |
+| | | |
+|---|---|---|
+| `bjdata::view` | a **view** | values *are* the bytes, so strings and typed arrays are borrowed |
+| `json::reader` | a **reader** | values must be constructed, so strings and numbers are decoded |
 
 The difference is the format's, not a naming choice. Everything else is the same: the same
 `errc`, the same accessors, the same forward iterators.
@@ -56,6 +56,8 @@ for (auto [key, value] : document.items()) { }
 
 ## Accessors
 
+On both handles:
+
 ```cpp
 value.type();          // null, boolean, integer, real, string, array, object, invalid
 value.is_array();
@@ -65,9 +67,35 @@ value.as_bool();
 value.as_int<std::uint16_t>();     // range-checked, not truncated
 value.as_float<double>();
 value.as_string();
-value.as_binary();                  // BJData only
-value.as_span<std::uint16_t>();     // BJData only
 ```
+
+On `bjdata::view` only:
+
+```cpp
+value.as_binary();                 // a [$B# array, as its raw bytes
+value.as_span<std::uint16_t>();    // a [$u# array, in place
+```
+
+These cannot exist on `json::reader`, and the reason is the format rather than the API. A span
+hands back a contiguous run of `T` out of the buffer — but in JSON `[900,901,902]` is *text*,
+so there are no `std::uint16_t` in there to point at. JSON has no binary type either.
+
+The JSON equivalent is to build the container you wanted:
+
+```cpp
+// BJData: a span over the bytes, no allocation
+auto samples = document["samples"].as_span<std::uint16_t>();
+
+// JSON: decoded into a container you own
+auto samples = json::decode<std::vector<std::uint16_t>>(text);
+for (auto element : reader["samples"].array()) element.as_int<std::uint16_t>();
+```
+
+!!! note "Not alignment-sensitive"
+
+    `as_span<T>()` returns an `unaligned_little_span<const T>`, so the bytes need no
+    particular alignment and elements are read through a proxy. It is still a
+    `random_access_range`, so `<algorithm>` and `<ranges>` apply.
 
 ## Strings
 
