@@ -15,6 +15,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <cstddef>
 #include <cstdint>
@@ -186,7 +187,7 @@ void emit_value(Emitter &out, const T &item) {
 
     if constexpr (std::same_as<bare, bool>) {
         out.boolean(item);
-    } else if constexpr (std::same_as<bare, std::nullptr_t>) {
+    } else if constexpr (std::same_as<bare, std::nullptr_t> || std::same_as<bare, std::monostate>) {
         out.null();
     } else if constexpr (std::is_enum_v<bare>) {
         emit_value(out, std::to_underlying(item));
@@ -203,6 +204,14 @@ void emit_value(Emitter &out, const T &item) {
             emit_value(out, *item);
         else
             out.null();
+    } else if constexpr (detail::variant_like<bare>) {
+        // Untagged: whichever alternative is held is written as itself, and the value on the
+        // wire says what it is.
+        if (item.valueless_by_exception()) {
+            out.null();
+        } else {
+            std::visit([&out](const auto &held) { emit_value(out, held); }, item);
+        }
     } else if constexpr (detail::byte_range<bare>) {
         out.bytes(item);
     } else if constexpr (detail::map_like<bare>) {

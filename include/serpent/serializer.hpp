@@ -12,6 +12,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace serpent {
 
@@ -94,10 +95,50 @@ struct serializer {
     }
 };
 
+/**
+ * Recovers a sum type by asking each alternative, in declaration order, whether the value fits.
+ *
+ * The first that accepts it wins, so order is the tie-break where more than one could. A
+ * custom type only accepts an object and a number only accepts a number, which separates most
+ * alternatives on its own; two alternatives of the same shape are decided by their order.
+ */
+template<typename Source, typename T>
+bool read_discriminating(Source source, T &value) {
+    // Outside a sum type an object with none of the expected keys decodes to defaults, which is
+    // what "a missing key keeps its value" means. That answer is useless for telling
+    // alternatives apart, so here an object has to name at least one member to be believed.
+    constexpr bool has_members = convertible_type<T> || reflected_type<T>;
+    if constexpr (has_members) {
+        if (!source.is_object()) return false;
+        read_visitor<Source> visitor { source };
+        if constexpr (convertible_type<T>) {
+            json_convert(visitor, value);
+        } else {
+            detail::reflect_convert(visitor, value);
+        }
+        return visitor.ok() && visitor.matched() > 0;
+    } else {
+        return read_into(source, value);
+    }
+}
+
+template<typename Source, typename Variant, std::size_t... Index>
+bool read_alternative(Source source, Variant &value, std::index_sequence<Index...>) {
+    const auto attempt = [&]<std::size_t Which>() {
+        std::variant_alternative_t<Which, Variant> candidate {};
+        if (!read_discriminating(source, candidate)) return false;
+        value = std::move(candidate);
+        return true;
+    };
+    return (attempt.template operator()<Index>() || ...);
+}
+
 /** Reads one value into a destination, handling optionals and containers along the way. */
 template<typename Source, typename T>
 bool read_into(Source source, T &value) {
-    if constexpr (detail::optional_like<T>) {
+    if constexpr (std::same_as<T, std::monostate>) {
+        return source.is_valid() && source.is_null();
+    } else if constexpr (detail::optional_like<T>) {
         if (!source.is_valid() || source.is_null()) {
             value.reset();
             return true;
@@ -106,6 +147,8 @@ bool read_into(Source source, T &value) {
         if (!read_into(source, item)) return false;
         value = std::move(item);
         return true;
+    } else if constexpr (detail::variant_like<T>) {
+        return read_alternative(source, value, std::make_index_sequence<std::variant_size_v<T>> {});
     } else if constexpr (detail::byte_range<T>) {
         if constexpr (requires(T &target) { target.clear(); }) value.clear();
         if constexpr (requires { source.as_binary(); }) {

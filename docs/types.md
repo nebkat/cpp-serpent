@@ -163,9 +163,42 @@ touch.
 
 ## What works out of the box
 
-Arithmetic types, `bool`, `std::string` and string-likes, `std::optional`, any range, any
-keyed container with string keys, ranges of `std::byte` (as binary), and enums. None of these
-need opting in, in either direction.
+Arithmetic types, `bool`, `std::string` and string-likes, `std::optional`, `std::variant`, any
+range, any keyed container with string keys, ranges of `std::byte` (as binary), and enums. None
+of these need opting in, in either direction.
+
+## A field that can hold one of several types
+
+`std::variant` needs no tag on the wire, because a value already says what it is:
+
+```cpp
+struct setting {
+    std::string name;
+    std::variant<bool, std::int64_t, double, std::string> value;
+
+    SERPENT_DEFINE_TYPE(setting, name, value)
+};
+```
+
+```json
+{"name":"threshold","value":2.5}
+```
+
+Writing emits whichever alternative is held. Reading asks each alternative, in declaration
+order, whether the value fits, and the first that accepts it wins. `std::monostate` is `null`,
+so `std::variant<std::monostate, T>` behaves like an optional that is explicitly present.
+
+Two rules follow from "first that fits":
+
+- **Declaration order is the tie-break.** `variant<double, std::int64_t>` reading `4` gives the
+  double, because a whole number fits one. Put the more specific alternative first.
+- **An object must name at least one of a type's members to be read as that type.** Decoding
+  `{"radius":9}` into a `point` would otherwise succeed and leave every member at its default,
+  which is right for a missing key but useless for telling alternatives apart. Inside a variant
+  it is not a match.
+
+Alternatives that are genuinely indistinguishable — two structs with the same field names — are
+resolved by order, and nothing can do better without a tag you put there yourself.
 
 ## Missing and extra keys
 

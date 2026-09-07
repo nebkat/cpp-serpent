@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace serpent;
@@ -404,6 +405,54 @@ void counted_containers() {
     check(typed_hint && *typed_hint == 5, "a packed numeric array states its length already");
 }
 
+struct circle {
+    int radius = 0;
+    SERPENT_DEFINE_TYPE(circle, radius)
+};
+
+/**
+ * A sum type is written as whichever alternative it holds and recovered by asking which one
+ * the value fits. Nothing tags it: the value already says what it is.
+ */
+void variants() {
+    using scalar = std::variant<bool, std::int64_t, double, std::string>;
+
+    check_equal(json::encode(scalar { true }), "true", "a variant writes the alternative it holds");
+    check_equal(json::encode(scalar { std::int64_t { 42 } }), "42", "and nothing else");
+    check_equal(json::encode(scalar { std::string { "hi" } }), "\"hi\"", "including a string");
+
+    check(json::decode<scalar>("true")->index() == 0, "a boolean comes back as the boolean");
+    check(json::decode<scalar>("42")->index() == 1, "an integer as the integer");
+    check(json::decode<scalar>("2.5")->index() == 2, "a real as the real");
+    check(json::decode<scalar>("\"hi\"")->index() == 3, "a string as the string");
+
+    const scalar held { 2.5 };
+    check(decode<scalar>(encode(held)) == held, "and it round-trips through BJData too");
+
+    // monostate is null, which is what makes variant<monostate, T> the optional-shaped case.
+    using maybe = std::variant<std::monostate, int>;
+    check_equal(json::encode(maybe {}), "null", "monostate writes null");
+    check(json::decode<maybe>("null")->index() == 0, "and reads back as itself");
+    check(json::decode<maybe>("7")->index() == 1, "without swallowing the other alternative");
+
+    // Two alternatives of the same shape are told apart by which keys the document names. An
+    // object that names none of a type's members is not that type, even though decoding one
+    // outside a variant would succeed and leave every member at its default.
+    using shape = std::variant<point, circle>;
+    check_equal(json::encode(shape { circle { 9 } }), "{\"radius\":9}", "a struct alternative writes itself");
+    const auto round_tripped = json::decode<shape>("{\"radius\":9}");
+    check(round_tripped && round_tripped->index() == 1, "and is recognised rather than matching the first");
+    check(json::decode<shape>("{\"x\":1,\"y\":2}")->index() == 0, "the other way round as well");
+
+    // Where two alternatives genuinely both fit, declaration order decides.
+    check(json::decode<std::variant<double, std::int64_t>>("4")->index() == 0,
+            "an integer fits a real, so a real declared first takes it");
+    check(json::decode<std::variant<std::int64_t, double>>("4")->index() == 0,
+            "and the integer takes it when declared first");
+
+    check(!json::decode<std::variant<bool, point>>("[1,2]"), "an array matches neither and fails");
+}
+
 void sizing() {
     const point value { 3, 4 };
     check_equal(measure(value), encode(value).size(), "measure agrees with encode_TMP");
@@ -423,6 +472,7 @@ int main() {
     aggregates_are_not_strings();
     containers_need_no_customization();
     counted_containers();
+    variants();
     both_formats();
     sizing();
     return report("serializer");

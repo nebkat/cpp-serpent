@@ -68,6 +68,7 @@ class read_visitor {
     Source source {};
     iterator cursor {};
     bool complete = true;
+    std::size_t found = 0;
 
 public:
     static constexpr bool is_reading = true;
@@ -80,16 +81,21 @@ public:
             const auto entry = *this->cursor;
             if (entry.key_is(name)) {
                 if (!read_into(entry.value, value)) this->complete = false;
+                ++this->found;
                 ++this->cursor;
                 return;
             }
         }
-        const auto found = this->source[name];
-        if (!found.is_valid()) return; // absent: keep the existing value
-        if (!read_into(found, value)) this->complete = false;
+        const auto elsewhere = this->source[name];
+        if (!elsewhere.is_valid()) return; // absent: keep the existing value
+        ++this->found;
+        if (!read_into(elsewhere, value)) this->complete = false;
     }
 
     [[nodiscard]] bool ok() const noexcept { return this->complete; }
+
+    /** How many of the type's members the document actually named. */
+    [[nodiscard]] std::size_t matched() const noexcept { return this->found; }
 };
 
 } // namespace serpent

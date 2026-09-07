@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <variant>
 #include <ranges>
 #include <string_view>
 #include <type_traits>
@@ -50,7 +51,20 @@ concept keyed_insertable = requires(T &target) {
  * These need no customization, so asking a reader for one must not go looking for a
  * json_convert that was never going to exist.
  */
+/**
+ * A sum type: one of several alternatives, which one being a run-time question.
+ *
+ * There is no tag on the wire. A value already says what it is, so the alternative is
+ * recovered by asking which one the value fits.
+ */
 template<typename T>
-concept structurally_readable = optional_like<T> || byte_range<T> || back_insertable<T> || keyed_insertable<T>;
+concept variant_like = requires(const T &value) {
+    std::variant_size<T>::value;
+    { value.index() } -> std::convertible_to<std::size_t>;
+};
+
+template<typename T>
+concept structurally_readable =
+        optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T> || keyed_insertable<T>;
 
 } // namespace serpent::detail
