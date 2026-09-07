@@ -30,4 +30,27 @@ concept optional_like = requires(const T &value) {
     { *value };
 };
 
+/** A container that can be cleared and grown one element at a time. */
+template<typename T>
+concept back_insertable = requires(T &target) {
+    target.clear();
+    target.emplace_back();
+};
+
+/** A keyed container that can be cleared and filled. */
+template<typename T>
+concept keyed_insertable = requires(T &target) {
+    target.clear();
+    target.emplace(typename T::key_type {}, typename T::mapped_type {});
+};
+
+/**
+ * A type filled from the shape of the document alone, with no help from the type itself.
+ *
+ * These need no customization, so asking a reader for one must not go looking for a
+ * json_convert that was never going to exist.
+ */
+template<typename T>
+concept structurally_readable = optional_like<T> || byte_range<T> || back_insertable<T> || keyed_insertable<T>;
+
 } // namespace serpent::detail

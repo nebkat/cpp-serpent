@@ -342,6 +342,38 @@ void aggregates_are_not_strings() {
             "a string first member does not swallow the object");
 }
 
+/**
+ * A container needs no customization, so decoding straight into one must work.
+ *
+ * encode() has always accepted these; decode() used to look for a json_convert that a
+ * std::vector was never going to have, and refuse to compile.
+ */
+void containers_need_no_customization() {
+    const std::vector<std::uint16_t> numbers { 900, 901, 902 };
+    check(decode<std::vector<std::uint16_t>>(encode(numbers)) == numbers, "vector through BJData");
+    check(json::decode<std::vector<std::uint16_t>>(json::encode(numbers)) == numbers, "vector through JSON");
+
+    const std::map<std::string, int> keyed { { "a", 1 }, { "b", 2 } };
+    check(decode<std::map<std::string, int>>(encode(keyed)) == keyed, "map through BJData");
+    check(json::decode<std::map<std::string, int>>(json::encode(keyed)) == keyed, "map through JSON");
+
+    const std::vector<point> structs { { 1, 2 }, { 3, 4 } };
+    const auto binary_structs = decode<std::vector<point>>(encode(structs));
+    const auto text_structs = json::decode<std::vector<point>>(json::encode(structs));
+    check(binary_structs && binary_structs->size() == 2 && binary_structs->at(1).y == 4,
+            "a container of custom types through BJData");
+    check(text_structs && text_structs->size() == 2 && text_structs->at(1).y == 4, "and through JSON");
+
+    // Binary is a range of bytes in BJData and an array of integers in JSON, both ways.
+    const std::vector<std::byte> raw { std::byte { 0xde }, std::byte { 0xad } };
+    check(decode<std::vector<std::byte>>(encode(raw)) == raw, "bytes through BJData");
+    check(json::decode<std::vector<std::byte>>(json::encode(raw)) == raw, "bytes through JSON");
+
+    const std::optional<int> engaged { 7 };
+    check(decode<std::optional<int>>(encode(engaged)) == engaged, "optional through BJData");
+    check(json::decode<std::optional<int>>(json::encode(engaged)) == engaged, "optional through JSON");
+}
+
 void sizing() {
     const point value { 3, 4 };
     check_equal(measure(value), encode(value).size(), "measure agrees with encode_TMP");
@@ -359,6 +391,7 @@ int main() {
     key_order_and_absence();
     reflection_seam();
     aggregates_are_not_strings();
+    containers_need_no_customization();
     both_formats();
     sizing();
     return report("serializer");

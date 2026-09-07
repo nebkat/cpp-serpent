@@ -23,9 +23,6 @@ inline constexpr bool always_false = false;
 template<typename Visitor, typename T>
 using conversion_object_t = std::conditional_t<std::remove_cvref_t<Visitor>::is_reading, T &, const T &>;
 
-template<typename Source, typename T>
-bool read_into(Source source, T &value);
-
 /** Names each field on the way out: key, then value. Generic over the writer. */
 template<typename Writer>
 class write_visitor {

@@ -268,7 +268,13 @@ public:
             return this->as_float<T>();
         else if constexpr (std::integral<T>)
             return this->as_int<T>();
-        else {
+        else if constexpr (serpent::detail::structurally_readable<T>) {
+            // Containers and optionals are filled from the shape of the document, so they
+            // need no customization and must not go looking for one.
+            T value {};
+            if (!read_into(*this, value)) return std::nullopt;
+            return value;
+        } else {
             T value {};
             if (!serializer<T>::read(*this, value)) return std::nullopt;
             return value;
