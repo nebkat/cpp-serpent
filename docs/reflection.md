@@ -47,12 +47,23 @@ Annotations are ordinary values rather than parsed strings, which is why they ar
 
 ## A type you cannot annotate
 
-Specialize the opt-in instead:
+You cannot put an annotation on someone else's type, so the opt-in is a trait instead. It can
+carry the naming rule too:
 
 ```cpp
 template<>
-struct serpent::enable_reflection<site> : std::true_type {};
+struct serpent::enable_reflection<foreign_reading> : std::true_type {
+    static constexpr serpent::naming_style style = serpent::naming_style::snake_case;
+};
 ```
+
+```json
+{"sensor_id":4,"degrees_celsius":21.5}
+```
+
+Every field is included and none can be renamed individually, because `key` and `skip` go on
+the fields. When you need that much control over a type you do not own, write the conversion
+by hand — see [Types you do not own](types.md#types-you-do-not-own).
 
 ## Requirements
 
@@ -77,6 +88,13 @@ compiler it targets has caught up:
 
 `serpent::reflection_available` is the same answer as a `constexpr bool`. `example/reflection.cpp`
 shows a type written both ways.
+
+## A hand-written conversion always wins
+
+Reflection is the last thing tried, after a `serializer<T>` specialization, a `json_convert`
+and a `to_json` / `from_json` pair. Annotating a type that already has one of those changes
+nothing until you delete the hand-written form, which makes adding the annotation a safe first
+step rather than an ambiguity.
 
 ## Why opting in is deliberate
 

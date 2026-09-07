@@ -94,7 +94,7 @@ access. Tests build with ASan and UBSan by default.
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | build it, run something |
-| [Your types](docs/types.md) | four ways to opt a type in |
+| [Your types](docs/types.md) | opting a type in, whether or not you own it |
 | [Reflection](docs/reflection.md) | letting the compiler name the fields |
 | [Reading](docs/reading.md) · [Writing](docs/writing.md) | the API |
 | [JSON](docs/json.md) · [BJData](docs/bjdata.md) | format specifics |
