@@ -32,9 +32,9 @@ void scalars() {
     check_equal(parse("-129").as_int<int>().value_or(0), -129, "negative");
     check_equal(parse("4294967296").as_int<std::int64_t>().value_or(0), 4294967296ll, "wide integer");
     check_equal(parse("-9223372036854775808").as_int<std::int64_t>().value_or(0),
-                std::numeric_limits<std::int64_t>::min(), "int64 minimum");
+            std::numeric_limits<std::int64_t>::min(), "int64 minimum");
     check_equal(parse("18446744073709551615").as_int<std::uint64_t>().value_or(0),
-                std::numeric_limits<std::uint64_t>::max(), "uint64 maximum");
+            std::numeric_limits<std::uint64_t>::max(), "uint64 maximum");
 
     check(parse("1").is_integer(), "1 is an integer");
     check(parse("1.0").is_real(), "1.0 is a real");
@@ -57,14 +57,14 @@ void strings() {
     check_equal(parse(R"("hello")").as_string().value_or("?"), std::string { "hello" }, "plain");
     check_equal(parse(R"("")").as_string().value_or("?"), std::string { "" }, "empty");
     check_equal(parse(R"("a\"b\\c\/d")").as_string().value_or("?"), std::string { "a\"b\\c/d" }, "escapes");
-    check_equal(parse(R"("a\nb\tc\r\b\f")").as_string().value_or("?"), std::string { "a\nb\tc\r\b\f" },
-                "control escapes");
+    check_equal(
+            parse(R"("a\nb\tc\r\b\f")").as_string().value_or("?"), std::string { "a\nb\tc\r\b\f" }, "control escapes");
     check_equal(parse(R"("\u00e9\u2713")").as_string().value_or("?"), std::string { "\xc3\xa9\xe2\x9c\x93" },
-                "bmp escapes become utf-8");
+            "bmp escapes become utf-8");
     check_equal(parse(R"("\ud83d\ude00")").as_string().value_or("?"), std::string { "\xf0\x9f\x98\x80" },
-                "a surrogate pair becomes one code point");
+            "a surrogate pair becomes one code point");
     check_equal(parse("\"h\xc3\xa9llo\"").as_string().value_or("?"), std::string { "h\xc3\xa9llo" },
-                "raw utf-8 passes through");
+            "raw utf-8 passes through");
 
     // Comparison never materialises the string.
     check(parse(R"("a\nb")").string_is("a\nb"), "escaped comparison matches");
@@ -95,7 +95,8 @@ void containers() {
     check(!spaced["missing"].is_valid(), "missing key poisons");
 
     std::string keys;
-    for (const auto entry : spaced.items()) keys += entry.key_string();
+    for (const auto entry : spaced.items())
+        keys += entry.key_string();
     check_equal(keys, std::string { "ab" }, "items preserves order");
 
     // A key containing an escape still matches.
@@ -143,16 +144,17 @@ void malformed() {
     rejected("\"a\nb\"", errc::invalid_string, "raw newline in a string");
 
     std::string deep;
-    for (int level = 0; level < max_depth + 5; ++level) deep += "[";
+    for (int level = 0; level < max_depth + 5; ++level)
+        deep += "[";
     deep += "1";
-    for (int level = 0; level < max_depth + 5; ++level) deep += "]";
+    for (int level = 0; level < max_depth + 5; ++level)
+        deep += "]";
     rejected(deep, errc::depth_exceeded, "over deep nesting");
 }
 
 void truncation() {
-    for (const auto *text : { R"({"a":[1,2,3],"b":"x\ny","c":{"d":true}})",
-                              R"([1,-2.5,1e10,null,false,"\u00e9"])",
-                              R"({"":{},"x":[]})" }) {
+    for (const auto *text : { R"({"a":[1,2,3],"b":"x\ny","c":{"d":true}})", R"([1,-2.5,1e10,null,false,"\u00e9"])",
+                 R"({"":{},"x":[]})" }) {
         const std::string_view whole { text };
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const auto prefix = whole.substr(0, length);
@@ -162,24 +164,24 @@ void truncation() {
             const auto value = reader::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
-                (void) element.as_int<long long>();
+                (void)element.as_int<long long>();
                 if (++seen > 64) break;
             }
             for (const auto entry : value.items()) {
-                (void) entry.key_is("a");
-                (void) entry.value.as_string();
+                (void)entry.key_is("a");
+                (void)entry.value.as_string();
                 if (++seen > 64) break;
             }
-            (void) value.size();
-            (void) value["a"];
-            (void) value[0];
-            (void) value.as_string();
-            (void) value.extent();
+            (void)value.size();
+            (void)value["a"];
+            (void)value[0];
+            (void)value.as_string();
+            (void)value.extent();
         }
     }
 }
 
-}// namespace
+} // namespace
 
 int main() {
     scalars();

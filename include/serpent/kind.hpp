@@ -14,4 +14,4 @@ enum class kind {
     object,
 };
 
-}// namespace serpent
+} // namespace serpent

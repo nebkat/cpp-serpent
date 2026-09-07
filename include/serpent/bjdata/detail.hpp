@@ -23,16 +23,16 @@ template<typename T>
 /** Reads a fixed-width integer payload, sign-extending the signed markers. */
 [[nodiscard]] inline std::int64_t load_integer(marker kind, const std::byte *position) noexcept {
     switch (kind) {
-        case marker::uint8:  return load<std::uint8_t>(position);
-        case marker::int8:   return load<std::int8_t>(position);
-        case marker::uint16: return load<std::uint16_t>(position);
-        case marker::int16:  return load<std::int16_t>(position);
-        case marker::uint32: return load<std::uint32_t>(position);
-        case marker::int32:  return load<std::int32_t>(position);
-        case marker::uint64: return static_cast<std::int64_t>(load<std::uint64_t>(position));
-        case marker::int64:  return load<std::int64_t>(position);
-        case marker::byte:   return load<std::uint8_t>(position);
-        default:             return 0;
+    case marker::uint8: return load<std::uint8_t>(position);
+    case marker::int8: return load<std::int8_t>(position);
+    case marker::uint16: return load<std::uint16_t>(position);
+    case marker::int16: return load<std::int16_t>(position);
+    case marker::uint32: return load<std::uint32_t>(position);
+    case marker::int32: return load<std::int32_t>(position);
+    case marker::uint64: return static_cast<std::int64_t>(load<std::uint64_t>(position));
+    case marker::int64: return load<std::int64_t>(position);
+    case marker::byte: return load<std::uint8_t>(position);
+    default: return 0;
     }
 }
 
@@ -43,18 +43,22 @@ template<typename T>
  * every step, and the recorded offset is the one where things first went wrong.
  */
 struct cursor {
-    const std::byte *origin   = nullptr;
+    const std::byte *origin = nullptr;
     const std::byte *position = nullptr;
-    const std::byte *limit    = nullptr;
+    const std::byte *limit = nullptr;
 
     errc failure = errc::ok;
     std::size_t failure_offset = 0;
 
     constexpr cursor() = default;
     constexpr cursor(const std::byte *origin, const std::byte *position, const std::byte *limit) noexcept
-        : origin(origin), position(position), limit(limit) {}
+    : origin(origin)
+    , position(position)
+    , limit(limit) {}
     constexpr cursor(std::span<const std::byte> buffer, const std::byte *position) noexcept
-        : origin(buffer.data()), position(position), limit(buffer.data() + buffer.size()) {}
+    : origin(buffer.data())
+    , position(position)
+    , limit(buffer.data() + buffer.size()) {}
 
     [[nodiscard]] constexpr bool ok() const noexcept { return this->failure == errc::ok; }
     [[nodiscard]] constexpr std::size_t remaining() const noexcept {
@@ -254,7 +258,7 @@ inline void read_dimension_list(cursor &source, counted_shape &shape) noexcept {
 
 /** A parsed container header: everything between the opening brace and the first element. */
 struct header {
-    marker element = marker::invalid;   ///< strong type, or invalid when heterogeneous
+    marker element = marker::invalid; ///< strong type, or invalid when heterogeneous
     std::uint64_t count = 0;
     bool unbounded = false;
     const std::byte *body = nullptr;
@@ -309,7 +313,8 @@ struct header {
     result.count = shape.total;
     result.rank = shape.rank;
     result.column_major = shape.column_major;
-    for (std::size_t index = 0; index < shape.rank; ++index) result.extents[index] = shape.extents[index];
+    for (std::size_t index = 0; index < shape.rank; ++index)
+        result.extents[index] = shape.extents[index];
 
     result.body = source.position;
     return result;
@@ -322,7 +327,8 @@ inline void skip_container(cursor &source, bool object, int depth) noexcept {
     if (!source.ok()) return;
 
     const auto skip_noops = [&] {
-        while (source.available(1) && source.peek_marker() == marker::noop) source.advance(1);
+        while (source.available(1) && source.peek_marker() == marker::noop)
+            source.advance(1);
     };
 
     const auto skip_element = [&] {
@@ -406,28 +412,20 @@ inline void skip_value(cursor &source, marker kind, int depth) noexcept {
     }
 
     switch (kind) {
-        case marker::string:
-        case marker::high_precision: {
-            const auto length = read_length(source);
-            if (!source.need(length)) return;
-            source.advance(length);
-            return;
-        }
-        case marker::array_begin:
-            skip_container(source, false, depth);
-            return;
-        case marker::object_begin:
-            skip_container(source, true, depth);
-            return;
-        case marker::extension:
-            source.fail(errc::extension_unsupported);
-            return;
-        default:
-            source.fail(errc::unexpected_marker);
-            return;
+    case marker::string:
+    case marker::high_precision: {
+        const auto length = read_length(source);
+        if (!source.need(length)) return;
+        source.advance(length);
+        return;
+    }
+    case marker::array_begin: skip_container(source, false, depth); return;
+    case marker::object_begin: skip_container(source, true, depth); return;
+    case marker::extension: source.fail(errc::extension_unsupported); return;
+    default: source.fail(errc::unexpected_marker); return;
     }
 }
 
-}// namespace detail
+} // namespace detail
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

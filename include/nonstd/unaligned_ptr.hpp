@@ -30,11 +30,11 @@ class unaligned_ref {
 
 public:
     using storage_type = unaligned<T, Bits, E>;
-    using value_type   = T;
+    using value_type = T;
 
     static constexpr std::size_t stride = storage_type::storage_bytes;
 
-    constexpr explicit unaligned_ref(std::byte *pointer) noexcept: pointer(pointer) {}
+    constexpr explicit unaligned_ref(std::byte *pointer) noexcept : pointer(pointer) {}
 
     [[nodiscard]] constexpr T value() const noexcept {
         typename storage_type::storage_type storage {};
@@ -56,31 +56,69 @@ public:
 
     [[nodiscard]] constexpr std::byte *data() const noexcept { return this->pointer; }
 
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator+=(U y) const noexcept { return *this = static_cast<T>(this->value() + static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator-=(U y) const noexcept { return *this = static_cast<T>(this->value() - static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator*=(U y) const noexcept { return *this = static_cast<T>(this->value() * static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator/=(U y) const noexcept { return *this = static_cast<T>(this->value() / static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator%=(U y) const noexcept { return *this = static_cast<T>(this->value() % static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator&=(U y) const noexcept { return *this = static_cast<T>(this->value() & static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator|=(U y) const noexcept { return *this = static_cast<T>(this->value() | static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator^=(U y) const noexcept { return *this = static_cast<T>(this->value() ^ static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator<<=(U y) const noexcept { return *this = static_cast<T>(this->value() << static_cast<T>(y)); }
-    template<class U> requires std::convertible_to<U, T>
-    constexpr const unaligned_ref &operator>>=(U y) const noexcept { return *this = static_cast<T>(this->value() >> static_cast<T>(y)); }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator+=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() + static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator-=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() - static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator*=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() * static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator/=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() / static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator%=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() % static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator&=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() & static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator|=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() | static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator^=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() ^ static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator<<=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() << static_cast<T>(y));
+    }
+    template<class U>
+        requires std::convertible_to<U, T>
+    constexpr const unaligned_ref &operator>>=(U y) const noexcept {
+        return *this = static_cast<T>(this->value() >> static_cast<T>(y));
+    }
 
     constexpr const unaligned_ref &operator++() const noexcept { return *this += static_cast<T>(1); }
     constexpr const unaligned_ref &operator--() const noexcept { return *this -= static_cast<T>(1); }
-    [[nodiscard]] constexpr T operator++(int) const noexcept { const T old = this->value(); ++(*this); return old; }
-    [[nodiscard]] constexpr T operator--(int) const noexcept { const T old = this->value(); --(*this); return old; }
+    [[nodiscard]] constexpr T operator++(int) const noexcept {
+        const T old = this->value();
+        ++(*this);
+        return old;
+    }
+    [[nodiscard]] constexpr T operator--(int) const noexcept {
+        const T old = this->value();
+        --(*this);
+        return old;
+    }
 
     friend constexpr void swap(const unaligned_ref &a, const unaligned_ref &b) noexcept {
         const T temporary = a.value();
@@ -98,13 +136,13 @@ public:
 template<typename T, std::size_t Bits = sizeof(T) * 8, std::endian E = std::endian::native>
 class unaligned_ptr {
 public:
-    using value_type   = std::remove_const_t<T>;
+    using value_type = std::remove_const_t<T>;
     using storage_type = unaligned<value_type, Bits, E>;
-    using byte_type    = std::conditional_t<std::is_const_v<T>, const std::byte, std::byte>;
-    using reference    = std::conditional_t<std::is_const_v<T>, value_type, unaligned_ref<value_type, Bits, E>>;
+    using byte_type = std::conditional_t<std::is_const_v<T>, const std::byte, std::byte>;
+    using reference = std::conditional_t<std::is_const_v<T>, value_type, unaligned_ref<value_type, Bits, E>>;
 
-    using difference_type   = std::ptrdiff_t;
-    using iterator_concept  = std::random_access_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using iterator_concept = std::random_access_iterator_tag;
     using iterator_category = std::random_access_iterator_tag;
 
     static constexpr std::size_t stride = storage_type::storage_bytes;
@@ -119,15 +157,16 @@ private:
 
 public:
     constexpr unaligned_ptr() = default;
-    constexpr explicit unaligned_ptr(byte_type *pointer) noexcept: pointer(pointer) {}
+    constexpr explicit unaligned_ptr(byte_type *pointer) noexcept : pointer(pointer) {}
 
     /**
      * Converting constructor from the mutable to the const form, mirroring T* -> const T*.
      * A constructor template so that it is never itself the copy constructor, which would
      * suppress the implicit one for a non-const T.
      */
-    template<typename U> requires (std::is_const_v<T> && std::same_as<U, value_type>)
-    constexpr unaligned_ptr(const unaligned_ptr<U, Bits, E> &other) noexcept: pointer(other.data()) {}
+    template<typename U>
+        requires (std::is_const_v<T> && std::same_as<U, value_type>)
+    constexpr unaligned_ptr(const unaligned_ptr<U, Bits, E> &other) noexcept : pointer(other.data()) {}
 
     [[nodiscard]] constexpr byte_type *data() const noexcept { return this->pointer; }
 
@@ -145,23 +184,54 @@ public:
 
     [[nodiscard]] constexpr arrow_proxy operator->() const noexcept { return arrow_proxy { **this }; }
 
-    constexpr unaligned_ptr &operator++() noexcept { this->pointer += stride; return *this; }
-    constexpr unaligned_ptr &operator--() noexcept { this->pointer -= stride; return *this; }
-    constexpr unaligned_ptr operator++(int) noexcept { auto old = *this; ++(*this); return old; }
-    constexpr unaligned_ptr operator--(int) noexcept { auto old = *this; --(*this); return old; }
+    constexpr unaligned_ptr &operator++() noexcept {
+        this->pointer += stride;
+        return *this;
+    }
+    constexpr unaligned_ptr &operator--() noexcept {
+        this->pointer -= stride;
+        return *this;
+    }
+    constexpr unaligned_ptr operator++(int) noexcept {
+        auto old = *this;
+        ++(*this);
+        return old;
+    }
+    constexpr unaligned_ptr operator--(int) noexcept {
+        auto old = *this;
+        --(*this);
+        return old;
+    }
 
-    constexpr unaligned_ptr &operator+=(difference_type n) noexcept { this->pointer += n * static_cast<difference_type>(stride); return *this; }
-    constexpr unaligned_ptr &operator-=(difference_type n) noexcept { this->pointer -= n * static_cast<difference_type>(stride); return *this; }
+    constexpr unaligned_ptr &operator+=(difference_type n) noexcept {
+        this->pointer += n * static_cast<difference_type>(stride);
+        return *this;
+    }
+    constexpr unaligned_ptr &operator-=(difference_type n) noexcept {
+        this->pointer -= n * static_cast<difference_type>(stride);
+        return *this;
+    }
 
-    [[nodiscard]] friend constexpr unaligned_ptr operator+(unaligned_ptr p, difference_type n) noexcept { return p += n; }
-    [[nodiscard]] friend constexpr unaligned_ptr operator+(difference_type n, unaligned_ptr p) noexcept { return p += n; }
-    [[nodiscard]] friend constexpr unaligned_ptr operator-(unaligned_ptr p, difference_type n) noexcept { return p -= n; }
+    [[nodiscard]] friend constexpr unaligned_ptr operator+(unaligned_ptr p, difference_type n) noexcept {
+        return p += n;
+    }
+    [[nodiscard]] friend constexpr unaligned_ptr operator+(difference_type n, unaligned_ptr p) noexcept {
+        return p += n;
+    }
+    [[nodiscard]] friend constexpr unaligned_ptr operator-(unaligned_ptr p, difference_type n) noexcept {
+        return p -= n;
+    }
     [[nodiscard]] friend constexpr difference_type operator-(const unaligned_ptr &a, const unaligned_ptr &b) noexcept {
         return (a.pointer - b.pointer) / static_cast<difference_type>(stride);
     }
 
-    [[nodiscard]] friend constexpr bool operator==(const unaligned_ptr &a, const unaligned_ptr &b) noexcept { return a.pointer == b.pointer; }
-    [[nodiscard]] friend constexpr std::strong_ordering operator<=>(const unaligned_ptr &a, const unaligned_ptr &b) noexcept { return a.pointer <=> b.pointer; }
+    [[nodiscard]] friend constexpr bool operator==(const unaligned_ptr &a, const unaligned_ptr &b) noexcept {
+        return a.pointer == b.pointer;
+    }
+    [[nodiscard]] friend constexpr std::strong_ordering operator<=>(
+            const unaligned_ptr &a, const unaligned_ptr &b) noexcept {
+        return a.pointer <=> b.pointer;
+    }
 
     [[nodiscard]] friend constexpr value_type iter_move(const unaligned_ptr &p) noexcept { return *p; }
 
@@ -183,13 +253,13 @@ public:
 template<typename T, std::size_t Bits = sizeof(T) * 8, std::endian E = std::endian::native>
 class unaligned_span : public std::ranges::view_interface<unaligned_span<T, Bits, E>> {
 public:
-    using pointer    = unaligned_ptr<T, Bits, E>;
+    using pointer = unaligned_ptr<T, Bits, E>;
     using value_type = typename pointer::value_type;
-    using byte_type  = typename pointer::byte_type;
-    using reference  = typename pointer::reference;
+    using byte_type = typename pointer::byte_type;
+    using reference = typename pointer::reference;
 
     static constexpr std::size_t stride = pointer::stride;
-    static constexpr std::size_t npos   = static_cast<std::size_t>(-1);
+    static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
 private:
     pointer origin {};
@@ -197,15 +267,19 @@ private:
 
 public:
     constexpr unaligned_span() = default;
-    constexpr unaligned_span(pointer origin, std::size_t count) noexcept: origin(origin), count(count) {}
-    constexpr unaligned_span(byte_type *data, std::size_t count) noexcept: origin(data), count(count) {}
+    constexpr unaligned_span(pointer origin, std::size_t count) noexcept : origin(origin), count(count) {}
+    constexpr unaligned_span(byte_type *data, std::size_t count) noexcept : origin(data), count(count) {}
 
-    template<typename U> requires (std::is_const_v<T> && std::same_as<U, value_type>)
+    template<typename U>
+        requires (std::is_const_v<T> && std::same_as<U, value_type>)
     constexpr unaligned_span(const unaligned_span<U, Bits, E> &other) noexcept
-        : origin(other.begin()), count(other.size()) {}
+    : origin(other.begin())
+    , count(other.size()) {}
 
     [[nodiscard]] constexpr pointer begin() const noexcept { return this->origin; }
-    [[nodiscard]] constexpr pointer end() const noexcept { return this->origin + static_cast<std::ptrdiff_t>(this->count); }
+    [[nodiscard]] constexpr pointer end() const noexcept {
+        return this->origin + static_cast<std::ptrdiff_t>(this->count);
+    }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return this->count; }
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return this->count * stride; }
 
@@ -215,8 +289,9 @@ public:
 
     [[nodiscard]] constexpr unaligned_span subspan(std::size_t offset, std::size_t length = npos) const noexcept {
         const auto clamped_offset = std::min(offset, this->count);
-        const auto remaining      = this->count - clamped_offset;
-        return unaligned_span { this->origin + static_cast<std::ptrdiff_t>(clamped_offset), std::min(length, remaining) };
+        const auto remaining = this->count - clamped_offset;
+        return unaligned_span { this->origin + static_cast<std::ptrdiff_t>(clamped_offset),
+            std::min(length, remaining) };
     }
 
     [[nodiscard]] constexpr unaligned_span first(std::size_t length) const noexcept { return this->subspan(0, length); }
@@ -250,4 +325,4 @@ using unaligned_big_ref = unaligned_ref<T, Bits, std::endian::big>;
 template<typename T, std::size_t Bits = sizeof(T) * 8>
 using unaligned_big_span = unaligned_span<T, Bits, std::endian::big>;
 
-}// namespace nonstd
+} // namespace nonstd

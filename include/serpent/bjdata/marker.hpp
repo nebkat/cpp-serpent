@@ -20,51 +20,68 @@ namespace serpent::bjdata {
 enum class marker : unsigned char {
     invalid = 0,
 
-    null           = 'Z',
-    boolean_true   = 'T',
-    boolean_false  = 'F',
-    noop           = 'N',
+    null = 'Z',
+    boolean_true = 'T',
+    boolean_false = 'F',
+    noop = 'N',
 
-    uint8          = 'U',
-    int8           = 'i',
-    uint16         = 'u',
-    int16          = 'I',
-    uint32         = 'm',
-    int32          = 'l',
-    uint64         = 'M',
-    int64          = 'L',
+    uint8 = 'U',
+    int8 = 'i',
+    uint16 = 'u',
+    int16 = 'I',
+    uint32 = 'm',
+    int32 = 'l',
+    uint64 = 'M',
+    int64 = 'L',
 
-    float16        = 'h',
-    float32        = 'd',
-    float64        = 'D',
+    float16 = 'h',
+    float32 = 'd',
+    float64 = 'D',
 
-    character      = 'C',
-    byte           = 'B',
-    string         = 'S',
+    character = 'C',
+    byte = 'B',
+    string = 'S',
     high_precision = 'H',
 
-    array_begin    = '[',
-    array_end      = ']',
-    object_begin   = '{',
-    object_end     = '}',
-    strong_type    = '$',
-    count          = '#',
+    array_begin = '[',
+    array_end = ']',
+    object_begin = '{',
+    object_end = '}',
+    strong_type = '$',
+    count = '#',
 
-    extension      = 'E',
+    extension = 'E',
 };
 
 [[nodiscard]] constexpr marker to_marker(std::byte value) noexcept {
     switch (static_cast<char>(value)) {
-        case 'Z': case 'T': case 'F': case 'N':
-        case 'U': case 'i': case 'u': case 'I':
-        case 'm': case 'l': case 'M': case 'L':
-        case 'h': case 'd': case 'D':
-        case 'C': case 'B': case 'S': case 'H':
-        case '[': case ']': case '{': case '}':
-        case '$': case '#': case 'E':
-            return static_cast<marker>(value);
-        default:
-            return marker::invalid;
+    case 'Z':
+    case 'T':
+    case 'F':
+    case 'N':
+    case 'U':
+    case 'i':
+    case 'u':
+    case 'I':
+    case 'm':
+    case 'l':
+    case 'M':
+    case 'L':
+    case 'h':
+    case 'd':
+    case 'D':
+    case 'C':
+    case 'B':
+    case 'S':
+    case 'H':
+    case '[':
+    case ']':
+    case '{':
+    case '}':
+    case '$':
+    case '#':
+    case 'E': return static_cast<marker>(value);
+    default: return marker::invalid;
     }
 }
 
@@ -73,88 +90,76 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
 
 [[nodiscard]] constexpr std::size_t payload_width(marker value) noexcept {
     switch (value) {
-        case marker::null:
-        case marker::boolean_true:
-        case marker::boolean_false:
-        case marker::noop:
-            return 0;
-        case marker::uint8:
-        case marker::int8:
-        case marker::character:
-        case marker::byte:
-            return 1;
-        case marker::uint16:
-        case marker::int16:
-        case marker::float16:
-            return 2;
-        case marker::uint32:
-        case marker::int32:
-        case marker::float32:
-            return 4;
-        case marker::uint64:
-        case marker::int64:
-        case marker::float64:
-            return 8;
-        default:
-            return variable_width;
+    case marker::null:
+    case marker::boolean_true:
+    case marker::boolean_false:
+    case marker::noop: return 0;
+    case marker::uint8:
+    case marker::int8:
+    case marker::character:
+    case marker::byte: return 1;
+    case marker::uint16:
+    case marker::int16:
+    case marker::float16: return 2;
+    case marker::uint32:
+    case marker::int32:
+    case marker::float32: return 4;
+    case marker::uint64:
+    case marker::int64:
+    case marker::float64: return 8;
+    default: return variable_width;
     }
 }
 
 /** A marker that opens a value, as opposed to a structural or reserved one. */
 [[nodiscard]] constexpr bool is_value(marker value) noexcept {
     switch (value) {
-        case marker::null:
-        case marker::boolean_true:
-        case marker::boolean_false:
-        case marker::uint8:
-        case marker::int8:
-        case marker::uint16:
-        case marker::int16:
-        case marker::uint32:
-        case marker::int32:
-        case marker::uint64:
-        case marker::int64:
-        case marker::float16:
-        case marker::float32:
-        case marker::float64:
-        case marker::character:
-        case marker::byte:
-        case marker::string:
-        case marker::high_precision:
-        case marker::array_begin:
-        case marker::object_begin:
-            return true;
-        default:
-            return false;
+    case marker::null:
+    case marker::boolean_true:
+    case marker::boolean_false:
+    case marker::uint8:
+    case marker::int8:
+    case marker::uint16:
+    case marker::int16:
+    case marker::uint32:
+    case marker::int32:
+    case marker::uint64:
+    case marker::int64:
+    case marker::float16:
+    case marker::float32:
+    case marker::float64:
+    case marker::character:
+    case marker::byte:
+    case marker::string:
+    case marker::high_precision:
+    case marker::array_begin:
+    case marker::object_begin: return true;
+    default: return false;
     }
 }
 
 /** The eight integer markers, which are also exactly the legal length and count prefixes. */
 [[nodiscard]] constexpr bool is_integer(marker value) noexcept {
     switch (value) {
-        case marker::uint8:
-        case marker::int8:
-        case marker::uint16:
-        case marker::int16:
-        case marker::uint32:
-        case marker::int32:
-        case marker::uint64:
-        case marker::int64:
-            return true;
-        default:
-            return false;
+    case marker::uint8:
+    case marker::int8:
+    case marker::uint16:
+    case marker::int16:
+    case marker::uint32:
+    case marker::int32:
+    case marker::uint64:
+    case marker::int64: return true;
+    default: return false;
     }
 }
 
 [[nodiscard]] constexpr bool is_signed_integer(marker value) noexcept {
     switch (value) {
-        case marker::int8:
-        case marker::int16:
-        case marker::int32:
-        case marker::int64:
-            return true;
-        default:
-            return false;
+    case marker::int8:
+    case marker::int16:
+    case marker::int32:
+    case marker::int64: return true;
+    default: return false;
     }
 }
 
@@ -172,7 +177,7 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
 
 /** Decodes an IEEE-754 binary16 bit pattern. Written out rather than relying on _Float16. */
 [[nodiscard]] constexpr float decode_float16(std::uint16_t bits) noexcept {
-    const std::uint32_t sign     = static_cast<std::uint32_t>(bits >> 15) << 31;
+    const std::uint32_t sign = static_cast<std::uint32_t>(bits >> 15) << 31;
     const std::uint32_t exponent = (bits >> 10) & 0x1Fu;
     const std::uint32_t mantissa = bits & 0x3FFu;
 
@@ -196,9 +201,9 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
 /** `value >> shift`, rounded to nearest with ties going to the even value. */
 [[nodiscard]] constexpr std::uint32_t shift_round_to_nearest_even(std::uint32_t value, std::uint32_t shift) noexcept {
     if (shift > 24) return 0;
-    const std::uint32_t quotient  = value >> shift;
+    const std::uint32_t quotient = value >> shift;
     const std::uint32_t remainder = value & ((1u << shift) - 1u);
-    const std::uint32_t half      = 1u << (shift - 1u);
+    const std::uint32_t half = 1u << (shift - 1u);
     if (remainder > half || (remainder == half && (quotient & 1u) != 0)) return quotient + 1u;
     return quotient;
 }
@@ -237,8 +242,7 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
 
 /** Whether a value survives a trip through binary16 unchanged. NaN counts as surviving. */
 [[nodiscard]] constexpr bool fits_float16(double value) noexcept {
-    return value != value
-            || static_cast<double>(decode_float16(encode_float16(static_cast<float>(value)))) == value;
+    return value != value || static_cast<double>(decode_float16(encode_float16(static_cast<float>(value)))) == value;
 }
 
 /**
@@ -284,19 +288,32 @@ inline constexpr std::size_t max_dimensions = 8;
 template<typename T>
 [[nodiscard]] consteval marker strong_type_for() noexcept {
     using bare = std::remove_cv_t<T>;
-    if constexpr (std::same_as<bare, std::uint8_t>)  return marker::uint8;
-    else if constexpr (std::same_as<bare, std::int8_t>)   return marker::int8;
-    else if constexpr (std::same_as<bare, std::uint16_t>) return marker::uint16;
-    else if constexpr (std::same_as<bare, std::int16_t>)  return marker::int16;
-    else if constexpr (std::same_as<bare, std::uint32_t>) return marker::uint32;
-    else if constexpr (std::same_as<bare, std::int32_t>)  return marker::int32;
-    else if constexpr (std::same_as<bare, std::uint64_t>) return marker::uint64;
-    else if constexpr (std::same_as<bare, std::int64_t>)  return marker::int64;
-    else if constexpr (std::same_as<bare, float>)         return marker::float32;
-    else if constexpr (std::same_as<bare, double>)        return marker::float64;
-    else if constexpr (std::same_as<bare, char>)          return marker::character;
-    else if constexpr (std::same_as<bare, std::byte>)     return marker::byte;
-    else return marker::invalid;
+    if constexpr (std::same_as<bare, std::uint8_t>)
+        return marker::uint8;
+    else if constexpr (std::same_as<bare, std::int8_t>)
+        return marker::int8;
+    else if constexpr (std::same_as<bare, std::uint16_t>)
+        return marker::uint16;
+    else if constexpr (std::same_as<bare, std::int16_t>)
+        return marker::int16;
+    else if constexpr (std::same_as<bare, std::uint32_t>)
+        return marker::uint32;
+    else if constexpr (std::same_as<bare, std::int32_t>)
+        return marker::int32;
+    else if constexpr (std::same_as<bare, std::uint64_t>)
+        return marker::uint64;
+    else if constexpr (std::same_as<bare, std::int64_t>)
+        return marker::int64;
+    else if constexpr (std::same_as<bare, float>)
+        return marker::float32;
+    else if constexpr (std::same_as<bare, double>)
+        return marker::float64;
+    else if constexpr (std::same_as<bare, char>)
+        return marker::character;
+    else if constexpr (std::same_as<bare, std::byte>)
+        return marker::byte;
+    else
+        return marker::invalid;
 }
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

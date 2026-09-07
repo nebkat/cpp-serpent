@@ -62,49 +62,46 @@ std::string repr_real(double value) {
 /** Mirrors digest() in generate_fixtures.py. */
 std::string digest(const view &value) {
     switch (value.type()) {
-        case kind::null:
-            return "Z";
-        case kind::boolean:
-            return value.as_bool() == true ? "T" : "F";
-        case kind::integer: {
-            if (value.type_marker() == marker::uint64) {
-                const auto unsigned_value = value.as_int<unsigned long long>();
-                return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
-            }
-            const auto signed_value = value.as_int<long long>();
-            return signed_value ? "i:" + std::format("{}", *signed_value) : "?";
+    case kind::null: return "Z";
+    case kind::boolean: return value.as_bool() == true ? "T" : "F";
+    case kind::integer: {
+        if (value.type_marker() == marker::uint64) {
+            const auto unsigned_value = value.as_int<unsigned long long>();
+            return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
         }
-        case kind::real: {
-            const auto real_value = value.as_float<double>();
-            return real_value ? "d:" + repr_real(*real_value) : "?";
+        const auto signed_value = value.as_int<long long>();
+        return signed_value ? "i:" + std::format("{}", *signed_value) : "?";
+    }
+    case kind::real: {
+        const auto real_value = value.as_float<double>();
+        return real_value ? "d:" + repr_real(*real_value) : "?";
+    }
+    case kind::string: {
+        const auto text = value.as_string();
+        if (!text) return "?";
+        return "s" + std::to_string(text->size()) + ":" + std::string { *text };
+    }
+    case kind::array: {
+        std::string out = "[";
+        bool first = true;
+        for (const auto element : value.array()) {
+            if (!std::exchange(first, false)) out += ',';
+            out += digest(element);
         }
-        case kind::string: {
-            const auto text = value.as_string();
-            if (!text) return "?";
-            return "s" + std::to_string(text->size()) + ":" + std::string { *text };
+        return out + "]";
+    }
+    case kind::object: {
+        std::string out = "{";
+        bool first = true;
+        for (const auto [key, element] : value.items()) {
+            if (!std::exchange(first, false)) out += ',';
+            out += key;
+            out += '=';
+            out += digest(element);
         }
-        case kind::array: {
-            std::string out = "[";
-            bool first = true;
-            for (const auto element : value.array()) {
-                if (!std::exchange(first, false)) out += ',';
-                out += digest(element);
-            }
-            return out + "]";
-        }
-        case kind::object: {
-            std::string out = "{";
-            bool first = true;
-            for (const auto [key, element] : value.items()) {
-                if (!std::exchange(first, false)) out += ',';
-                out += key;
-                out += '=';
-                out += digest(element);
-            }
-            return out + "}";
-        }
-        default:
-            return "?";
+        return out + "}";
+    }
+    default: return "?";
     }
 }
 
@@ -119,112 +116,105 @@ std::string digest(const view &value) {
  */
 void reencode(writer &out, view source) {
     switch (source.type()) {
-        case kind::null:
-            out.null();
-            return;
-        case kind::boolean:
-            out.value(source.as_bool() == true);
-            return;
-        case kind::integer:
-            out.value(source.as_int<std::int64_t>().value_or(0));
-            return;
-        case kind::real:
-            out.value(source.as_float<double>().value_or(0.0));
-            return;
-        case kind::string: {
-            const auto text = source.as_string().value_or("");
-            if (source.type_marker() == marker::high_precision) out.high_precision(text);
-            else if (source.type_marker() == marker::character) out.character(text.empty() ? '\0' : text.front());
-            else out.value(text);
+    case kind::null: out.null(); return;
+    case kind::boolean: out.value(source.as_bool() == true); return;
+    case kind::integer: out.value(source.as_int<std::int64_t>().value_or(0)); return;
+    case kind::real: out.value(source.as_float<double>().value_or(0.0)); return;
+    case kind::string: {
+        const auto text = source.as_string().value_or("");
+        if (source.type_marker() == marker::high_precision)
+            out.high_precision(text);
+        else if (source.type_marker() == marker::character)
+            out.character(text.empty() ? '\0' : text.front());
+        else
+            out.value(text);
+        return;
+    }
+    case kind::array: {
+        bool any = false;
+        bool all_integer = true;
+        bool all_real = true;
+        for (const auto element : source.array()) {
+            any = true;
+            all_integer = all_integer && element.type() == kind::integer;
+            all_real = all_real && element.type() == kind::real;
+        }
+        if (any && all_integer) {
+            std::vector<std::int64_t> values;
+            for (const auto element : source.array())
+                values.push_back(element.as_int<std::int64_t>().value_or(0));
+            out.value(values);
             return;
         }
-        case kind::array: {
-            bool any = false;
-            bool all_integer = true;
-            bool all_real = true;
-            for (const auto element : source.array()) {
-                any = true;
-                all_integer = all_integer && element.type() == kind::integer;
-                all_real = all_real && element.type() == kind::real;
-            }
-            if (any && all_integer) {
-                std::vector<std::int64_t> values;
-                for (const auto element : source.array()) values.push_back(element.as_int<std::int64_t>().value_or(0));
-                out.value(values);
-                return;
-            }
-            if (any && all_real) {
-                std::vector<double> values;
-                for (const auto element : source.array()) values.push_back(element.as_float<double>().value_or(0.0));
-                out.value(values);
-                return;
-            }
-            const auto scope = out.array();
-            for (const auto element : source.array()) reencode(out, element);
+        if (any && all_real) {
+            std::vector<double> values;
+            for (const auto element : source.array())
+                values.push_back(element.as_float<double>().value_or(0.0));
+            out.value(values);
             return;
         }
-        case kind::object: {
-            const auto scope = out.object();
-            for (const auto [key, element] : source.items()) {
-                out.key(key);
-                reencode(out, element);
-            }
-            return;
+        const auto scope = out.array();
+        for (const auto element : source.array())
+            reencode(out, element);
+        return;
+    }
+    case kind::object: {
+        const auto scope = out.object();
+        for (const auto [key, element] : source.items()) {
+            out.key(key);
+            reencode(out, element);
         }
-        default:
-            out.fail(errc::type_mismatch);
-            return;
+        return;
+    }
+    default: out.fail(errc::type_mismatch); return;
     }
 }
 
 /** The same canonical rendering as digest(), over the JSON reader instead of the view. */
 std::string json_digest(const json::reader &source) {
     switch (source.type()) {
-        case kind::null:
-            return "Z";
-        case kind::boolean:
-            return source.as_bool() == true ? "T" : "F";
-        case kind::integer: {
-            const auto signed_value = source.as_int<long long>();
-            if (signed_value) return "i:" + std::format("{}", *signed_value);
-            const auto unsigned_value = source.as_int<unsigned long long>();
-            return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
+    case kind::null: return "Z";
+    case kind::boolean: return source.as_bool() == true ? "T" : "F";
+    case kind::integer: {
+        const auto signed_value = source.as_int<long long>();
+        if (signed_value) return "i:" + std::format("{}", *signed_value);
+        const auto unsigned_value = source.as_int<unsigned long long>();
+        return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
+    }
+    case kind::real: {
+        const auto real_value = source.as_float<double>();
+        return real_value ? "d:" + repr_real(*real_value) : "?";
+    }
+    case kind::string: {
+        const auto text = source.as_string();
+        if (!text) return "?";
+        return "s" + std::to_string(text->size()) + ":" + *text;
+    }
+    case kind::array: {
+        std::string out = "[";
+        bool first = true;
+        for (const auto element : source.array()) {
+            if (!std::exchange(first, false)) out += ',';
+            out += json_digest(element);
         }
-        case kind::real: {
-            const auto real_value = source.as_float<double>();
-            return real_value ? "d:" + repr_real(*real_value) : "?";
+        return out + "]";
+    }
+    case kind::object: {
+        std::string out = "{";
+        bool first = true;
+        for (const auto entry : source.items()) {
+            if (!std::exchange(first, false)) out += ',';
+            out += entry.key_string();
+            out += '=';
+            out += json_digest(entry.value);
         }
-        case kind::string: {
-            const auto text = source.as_string();
-            if (!text) return "?";
-            return "s" + std::to_string(text->size()) + ":" + *text;
-        }
-        case kind::array: {
-            std::string out = "[";
-            bool first = true;
-            for (const auto element : source.array()) {
-                if (!std::exchange(first, false)) out += ',';
-                out += json_digest(element);
-            }
-            return out + "]";
-        }
-        case kind::object: {
-            std::string out = "{";
-            bool first = true;
-            for (const auto entry : source.items()) {
-                if (!std::exchange(first, false)) out += ',';
-                out += entry.key_string();
-                out += '=';
-                out += json_digest(entry.value);
-            }
-            return out + "}";
-        }
-        default:
-            return "?";
+        return out + "}";
+    }
+    default: return "?";
     }
 }
 
-}// namespace
+} // namespace
 
 int main(int argc, char **argv) {
     const std::filesystem::path directory = argc > 1 ? argv[1] : SERPENT_FIXTURE_DIR;
@@ -253,12 +243,12 @@ int main(int argc, char **argv) {
         }
 
         check_equal(std::string_view { block_notation(bytes) },
-                    std::string_view { read_text(directory / (name + ".blocks")) },
-                    name + ": block notation matches dart-bjdata");
+                std::string_view { read_text(directory / (name + ".blocks")) },
+                name + ": block notation matches dart-bjdata");
 
         check_equal(std::string_view { digest(view::over(bytes)) },
-                    std::string_view { read_text(directory / (name + ".digest")) },
-                    name + ": decodes to the same values as dart-bjdata");
+                std::string_view { read_text(directory / (name + ".digest")) },
+                name + ": decodes to the same values as dart-bjdata");
 
         // The headline check: re-encoding the decoded values must reproduce dart's bytes.
         {
@@ -269,15 +259,15 @@ int main(int argc, char **argv) {
             const auto finished = target.finish();
             check(finished.has_value(), name + ": re-encodes cleanly");
             check_equal(std::string_view { hex(produced) }, std::string_view { hex(bytes) },
-                        name + ": re-encodes to the same bytes as dart-bjdata");
+                    name + ": re-encodes to the same bytes as dart-bjdata");
         }
 
         // JSON output is checked against the reference's own JSON rendering of the same
         // bytes, so the number formatting, key order, escaping and indentation all have to
         // agree - not just the structure.
         check_equal(std::string_view { json::encode(view::over(bytes), { .indent = 2 }) },
-                    std::string_view { read_text(directory / (name + ".json.expected")) },
-                    name + ": JSON matches dart-bjdata");
+                std::string_view { read_text(directory / (name + ".json.expected")) },
+                name + ": JSON matches dart-bjdata");
 
         // And read back: parsing dart-bjdata's own JSON must produce the same values the
         // BJData reader produces from the same document.
@@ -287,8 +277,8 @@ int main(int argc, char **argv) {
             check(parsed.has_value(), name + ": dart's JSON validates");
             if (parsed) {
                 check_equal(std::string_view { json_digest(json::reader::over(text)) },
-                            std::string_view { read_text(directory / (name + ".digest")) },
-                            name + ": the JSON reader agrees with the BJData reader");
+                        std::string_view { read_text(directory / (name + ".digest")) },
+                        name + ": the JSON reader agrees with the BJData reader");
             }
         }
 
@@ -300,15 +290,15 @@ int main(int argc, char **argv) {
             write_value(target, view::over(bytes));
             check(target.finish().has_value(), name + ": splices cleanly");
             check_equal(std::string_view { hex(spliced) }, std::string_view { hex(bytes) },
-                        name + ": splices to identical bytes");
+                    name + ": splices to identical bytes");
         }
 
         // Every truncation of a reference document must still fail safely.
         for (std::size_t length = 0; length < bytes.size(); ++length) {
             const auto prefix = std::span { bytes }.first(length);
             check(!validate(prefix).has_value(), name + ": truncation is rejected");
-            (void) digest(view::over(prefix));
-            (void) block_notation(prefix);
+            (void)digest(view::over(prefix));
+            (void)block_notation(prefix);
         }
     }
 

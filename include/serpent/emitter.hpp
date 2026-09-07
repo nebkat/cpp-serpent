@@ -25,8 +25,8 @@ template<typename T>
 concept string_like = std::convertible_to<const T &, std::string_view>;
 
 template<typename T>
-concept byte_range = std::ranges::input_range<T>
-        && std::same_as<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte>;
+concept byte_range =
+        std::ranges::input_range<T> && std::same_as<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte>;
 
 /** A keyed container whose keys are strings: written as an object, not an array of pairs. */
 template<typename T>
@@ -41,7 +41,7 @@ concept optional_like = requires(const T &value) {
     { *value };
 };
 
-}// namespace detail
+} // namespace detail
 
 /**
  * @brief Where bytes go, whether it went wrong, and how deep the nesting is.
@@ -61,7 +61,7 @@ class byte_emitter {
     std::size_t produced = 0;
 
 protected:
-    std::uint32_t object_mask = 0;   ///< bit i: nesting level i is an object
+    std::uint32_t object_mask = 0; ///< bit i: nesting level i is an object
     int depth = 0;
 
     bool push(bool object) noexcept {
@@ -70,8 +70,10 @@ protected:
             this->fail(errc::depth_exceeded);
             return false;
         }
-        if (object) this->object_mask |= 1u << this->depth;
-        else this->object_mask &= ~(1u << this->depth);
+        if (object)
+            this->object_mask |= 1u << this->depth;
+        else
+            this->object_mask &= ~(1u << this->depth);
         ++this->depth;
         return true;
     }
@@ -97,25 +99,25 @@ protected:
 public:
     template<sink S>
     explicit byte_emitter(S &out) noexcept
-        : write_bytes([](void *target, std::span<const std::byte> bytes) {
-              return detail::put(*static_cast<S *>(target), bytes);
-          }),
-          context(std::addressof(out)) {}
+    : write_bytes([](void *target, std::span<const std::byte> bytes) {
+        return detail::put(*static_cast<S *>(target), bytes);
+    })
+    , context(std::addressof(out)) {}
 
     /** Also accepts a plain callable, so a lambda needs no sink wrapper. */
     template<typename F>
         requires (!sink<F> && std::invocable<F &, std::span<const std::byte>>)
     explicit byte_emitter(F &callable) noexcept
-        : write_bytes([](void *target, std::span<const std::byte> bytes) {
-              using result_type = std::invoke_result_t<F &, std::span<const std::byte>>;
-              if constexpr (std::is_void_v<result_type>) {
-                  (*static_cast<F *>(target))(bytes);
-                  return true;
-              } else {
-                  return static_cast<bool>((*static_cast<F *>(target))(bytes));
-              }
-          }),
-          context(std::addressof(callable)) {}
+    : write_bytes([](void *target, std::span<const std::byte> bytes) {
+        using result_type = std::invoke_result_t<F &, std::span<const std::byte>>;
+        if constexpr (std::is_void_v<result_type>) {
+            (*static_cast<F *>(target))(bytes);
+            return true;
+        } else {
+            return static_cast<bool>((*static_cast<F *>(target))(bytes));
+        }
+    })
+    , context(std::addressof(callable)) {}
 
     [[nodiscard]] bool ok() const noexcept { return this->failure == errc::ok; }
     [[nodiscard]] errc error_code() const noexcept { return this->failure; }
@@ -172,8 +174,10 @@ void emit_value(Emitter &out, const T &item) {
     } else if constexpr (detail::string_like<bare>) {
         out.string(std::string_view { item });
     } else if constexpr (detail::optional_like<bare>) {
-        if (item.has_value()) emit_value(out, *item);
-        else out.null();
+        if (item.has_value())
+            emit_value(out, *item);
+        else
+            out.null();
     } else if constexpr (detail::byte_range<bare>) {
         out.bytes(item);
     } else if constexpr (detail::map_like<bare>) {
@@ -189,4 +193,4 @@ void emit_value(Emitter &out, const T &item) {
     }
 }
 
-}// namespace serpent
+} // namespace serpent

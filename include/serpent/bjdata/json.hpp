@@ -20,9 +20,9 @@
 
 namespace serpent::json {
 
-using bjdata::view;
-using bjdata::ndarray_view;
 using bjdata::as_ndarray;
+using bjdata::ndarray_view;
+using bjdata::view;
 
 void write_value(writer &out, view source);
 
@@ -33,51 +33,49 @@ inline void write_ndarray(writer &out, const ndarray_view &source) {
         return;
     }
     const auto scope = out.array();
-    for (std::size_t index = 0; index < source.size(); ++index) write_ndarray(out, source.at(index));
+    for (std::size_t index = 0; index < source.size(); ++index)
+        write_ndarray(out, source.at(index));
 }
 
 /** Transcribes one BJData value, and everything under it, as JSON. */
 inline void write_value(writer &out, view source) {
     switch (source.type()) {
-        case kind::null:
-            out.null();
-            return;
-        case kind::boolean:
-            out.boolean(source.as_bool() == true);
-            return;
-        case kind::integer:
-            if (source.type_marker() == bjdata::marker::uint64) out.integer(source.as_int<std::uint64_t>().value_or(0));
-            else out.integer(source.as_int<std::int64_t>().value_or(0));
-            return;
-        case kind::real:
-            out.real(source.as_float<double>().value_or(0.0));
-            return;
-        case kind::string: {
-            const auto text = source.as_string().value_or("");
-            if (source.type_marker() == bjdata::marker::high_precision) out.high_precision(text);
-            else out.string(text);
-            return;
-        }
-        case kind::array: {
-            if (const auto shaped = as_ndarray(source); shaped && shaped->rank() > 1) {
-                write_ndarray(out, *shaped);
-                return;
-            }
-            const auto scope = out.array();
-            for (const auto element : source.array()) write_value(out, element);
+    case kind::null: out.null(); return;
+    case kind::boolean: out.boolean(source.as_bool() == true); return;
+    case kind::integer:
+        if (source.type_marker() == bjdata::marker::uint64)
+            out.integer(source.as_int<std::uint64_t>().value_or(0));
+        else
+            out.integer(source.as_int<std::int64_t>().value_or(0));
+        return;
+    case kind::real: out.real(source.as_float<double>().value_or(0.0)); return;
+    case kind::string: {
+        const auto text = source.as_string().value_or("");
+        if (source.type_marker() == bjdata::marker::high_precision)
+            out.high_precision(text);
+        else
+            out.string(text);
+        return;
+    }
+    case kind::array: {
+        if (const auto shaped = as_ndarray(source); shaped && shaped->rank() > 1) {
+            write_ndarray(out, *shaped);
             return;
         }
-        case kind::object: {
-            const auto scope = out.object();
-            for (const auto [name, element] : source.items()) {
-                out.key(name);
-                write_value(out, element);
-            }
-            return;
+        const auto scope = out.array();
+        for (const auto element : source.array())
+            write_value(out, element);
+        return;
+    }
+    case kind::object: {
+        const auto scope = out.object();
+        for (const auto [name, element] : source.items()) {
+            out.key(name);
+            write_value(out, element);
         }
-        default:
-            out.fail(errc::type_mismatch);
-            return;
+        return;
+    }
+    default: out.fail(errc::type_mismatch); return;
     }
 }
 
@@ -107,4 +105,4 @@ std::expected<std::size_t, error> write(S &out, view source, writer_options opti
     return text;
 }
 
-}// namespace serpent::json
+} // namespace serpent::json

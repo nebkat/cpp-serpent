@@ -52,7 +52,7 @@ int main() {
     check_equal(reread["c"].as_bool().value_or(false), true, "round-trips the boolean");
 
     check_equal(measure(std::vector<int> { 1, 2, 3 }), encode(std::vector<int> { 1, 2, 3 }).size(),
-                "measure without exceptions");
+            "measure without exceptions");
 
     // A fixed buffer latches rather than throwing when it runs out.
     std::array<std::byte, 4> tiny {};

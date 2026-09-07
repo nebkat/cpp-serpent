@@ -27,10 +27,12 @@ class ndarray_view {
     std::span<const std::byte> source {};
     const std::byte *base = nullptr;
     std::uint32_t extents[max_dimensions] {};
-    std::uint32_t strides[max_dimensions] {};   ///< in elements, not bytes; bounded by the buffer size
+    std::uint32_t strides[max_dimensions] {}; ///< in elements, not bytes; bounded by the buffer size
     std::uint8_t order = 0;
 
-    [[nodiscard]] constexpr const std::byte *limit() const noexcept { return this->source.data() + this->source.size(); }
+    [[nodiscard]] constexpr const std::byte *limit() const noexcept {
+        return this->source.data() + this->source.size();
+    }
 
 public:
     ndarray_view() = default;
@@ -47,7 +49,8 @@ public:
 
     [[nodiscard]] std::size_t total() const noexcept {
         std::size_t product = 1;
-        for (std::size_t index = 0; index < this->order; ++index) product *= this->extents[index];
+        for (std::size_t index = 0; index < this->order; ++index)
+            product *= this->extents[index];
         return product;
     }
 
@@ -130,7 +133,8 @@ public:
     }
 
     result.order = static_cast<std::uint8_t>(info.rank);
-    for (std::size_t index = 0; index < info.rank; ++index) result.extents[index] = info.extents[index];
+    for (std::size_t index = 0; index < info.rank; ++index)
+        result.extents[index] = info.extents[index];
 
     if (info.column_major) {
         // Leftmost dimension varies fastest; the logical shape is unchanged.
@@ -147,4 +151,4 @@ public:
     return result;
 }
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

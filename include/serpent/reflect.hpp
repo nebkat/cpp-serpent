@@ -98,7 +98,8 @@ struct name_buffer {
 [[nodiscard]] constexpr name_buffer convert_case(std::string_view identifier, naming_style style) noexcept {
     name_buffer result;
     if (style == naming_style::as_written) {
-        for (const char value : identifier) result.push(value);
+        for (const char value : identifier)
+            result.push(value);
         return result;
     }
 
@@ -121,30 +122,22 @@ struct name_buffer {
 
         if (starting_word && any_word_emitted) {
             switch (style) {
-                case naming_style::snake_case:
-                case naming_style::screaming_snake_case: result.push('_'); break;
-                case naming_style::kebab_case: result.push('-'); break;
-                default: break;
+            case naming_style::snake_case:
+            case naming_style::screaming_snake_case: result.push('_'); break;
+            case naming_style::kebab_case: result.push('-'); break;
+            default: break;
             }
         }
 
         switch (style) {
-            case naming_style::snake_case:
-            case naming_style::kebab_case:
-                result.push(lowered(value));
-                break;
-            case naming_style::screaming_snake_case:
-                result.push(uppered(value));
-                break;
-            case naming_style::camel_case:
-                result.push(starting_word && any_word_emitted ? uppered(value) : lowered(value));
-                break;
-            case naming_style::pascal_case:
-                result.push(starting_word ? uppered(value) : lowered(value));
-                break;
-            default:
-                result.push(value);
-                break;
+        case naming_style::snake_case:
+        case naming_style::kebab_case: result.push(lowered(value)); break;
+        case naming_style::screaming_snake_case: result.push(uppered(value)); break;
+        case naming_style::camel_case:
+            result.push(starting_word && any_word_emitted ? uppered(value) : lowered(value));
+            break;
+        case naming_style::pascal_case: result.push(starting_word ? uppered(value) : lowered(value)); break;
+        default: result.push(value); break;
         }
 
         if (starting_word) {
@@ -155,7 +148,7 @@ struct name_buffer {
     return result;
 }
 
-}// namespace detail
+} // namespace detail
 
 // ---------------- the reflected conversion ----------------
 
@@ -199,7 +192,7 @@ consteval bool opted_in() {
     return has_annotation<serializable>(^^T) || enable_reflection<T>::value;
 }
 
-}// namespace detail
+} // namespace detail
 
 /**
  * A type whose fields this library may enumerate.
@@ -219,8 +212,8 @@ concept reflected_type = std::is_class_v<T> && detail::opted_in<T>();
 template<typename T>
     requires reflected_type<T>
 void json_convert(auto &visitor, conversion_object_t<decltype(visitor), T> value) {
-    constexpr auto members = std::define_static_array(
-            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
+    constexpr auto members =
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
 
     template for (constexpr auto member : members) {
         if constexpr (!detail::has_annotation<skip>(member)) {
@@ -237,4 +230,4 @@ concept reflected_type = false;
 
 #endif
 
-}// namespace serpent
+} // namespace serpent

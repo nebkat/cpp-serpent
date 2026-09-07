@@ -76,73 +76,87 @@ void scalars() {
 
     // compact_types off pins every integer to int64 and every real to float64.
     check_equal(std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1); })) },
-                "4c0100000000000000", "compact_types off widens an integer");
-    check_equal(std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1.0); })) },
-                "44000000000000f03f", "compact_types off widens a real");
+            "4c0100000000000000", "compact_types off widens an integer");
+    check_equal(
+            std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1.0); })) },
+            "44000000000000f03f", "compact_types off widens a real");
 }
 
 void containers() {
     produces("5b5d", [](writer &w) { const auto scope = w.array(); }, "empty array");
     produces("7b7d", [](writer &w) { const auto scope = w.object(); }, "empty object");
     produces("5b5501550255035d", [](writer &w) { w.value(std::vector<int> { 1, 2, 3 }); }, "[1,2,3]");
-    produces("5b5a54465501535501615d", [](writer &w) {
-        const auto scope = w.array();
-        w.null(); w.value(true); w.value(false); w.value(1); w.value("a");
-    }, "heterogeneous array");
+    produces(
+            "5b5a54465501535501615d",
+            [](writer &w) {
+                const auto scope = w.array();
+                w.null();
+                w.value(true);
+                w.value(false);
+                w.value(1);
+                w.value("a");
+            },
+            "heterogeneous array");
 
-    produces("7b5503666f6f5501550362617255027d", [](writer &w) {
-        const auto scope = w.object();
-        scope.member("foo", 1);
-        scope.member("bar", 2);
-    }, "{foo:1,bar:2}");
+    produces(
+            "7b5503666f6f5501550362617255027d",
+            [](writer &w) {
+                const auto scope = w.object();
+                scope.member("foo", 1);
+                scope.member("bar", 2);
+            },
+            "{foo:1,bar:2}");
 
-    produces("5b5355016153550262625355036364655d",
-             [](writer &w) { w.value(std::vector<std::string> { "a", "bb", "cde" }); }, "array of strings");
-
+    produces(
+            "5b5355016153550262625355036364655d",
+            [](writer &w) { w.value(std::vector<std::string> { "a", "bb", "cde" }); }, "array of strings");
 
     // std::map writes as an object, in key order.
-    produces("7b55016155015501625502550163550355016455047d", [](writer &w) {
-        const auto scope = w.object();
-        for (const auto &[key, value] : std::map<std::string, int> { { "a", 1 }, { "b", 2 }, { "c", 3 } }) {
-            scope.member(key, value);
-        }
-        w.key("d");
-        w.value(4);
-    }, "object built from a map");
+    produces(
+            "7b55016155015501625502550163550355016455047d",
+            [](writer &w) {
+                const auto scope = w.object();
+                for (const auto &[key, value] : std::map<std::string, int> { { "a", 1 }, { "b", 2 }, { "c", 3 } }) {
+                    scope.member(key, value);
+                }
+                w.key("d");
+                w.value(4);
+            },
+            "object built from a map");
 
-    produces("5b5b5501550255035d5b5504550555065d5d", [](writer &w) {
-        w.value(std::vector<std::vector<int>> { { 1, 2, 3 }, { 4, 5, 6 } });
-    }, "nested arrays");
+    produces(
+            "5b5b5501550255035d5b5504550555065d5d",
+            [](writer &w) { w.value(std::vector<std::vector<int>> { { 1, 2, 3 }, { 4, 5, 6 } }); }, "nested arrays");
 
-    produces("5b5a5d", [](writer &w) {
-        w.value(std::vector<std::optional<int>> { std::nullopt });
-    }, "an empty optional writes null");
-    produces("5b55075d", [](writer &w) {
-        w.value(std::vector<std::optional<int>> { 7 });
-    }, "an engaged optional writes its value");
+    produces(
+            "5b5a5d", [](writer &w) { w.value(std::vector<std::optional<int>> { std::nullopt }); },
+            "an empty optional writes null");
+    produces(
+            "5b55075d", [](writer &w) { w.value(std::vector<std::optional<int>> { 7 }); },
+            "an engaged optional writes its value");
 }
 
 void numeric_packing() {
     // A generic array stores each value at its own width; a typed one pays the widest
     // throughout. Both are measured and a tie keeps the generic form.
-    produces("5b55015502550355045d", [](writer &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); },
-             "four small ints tie at 10 bytes and stay generic");
+    produces(
+            "5b55015502550355045d", [](writer &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); },
+            "four small ints tie at 10 bytes and stay generic");
 
     check_equal(std::string_view { hex(emit([](writer &w) { w.value(std::vector<int> { 1, 2, 3, 4, 5 }); })) },
-                "5b24552355050102030405", "five small ints pack");
+            "5b24552355050102030405", "five small ints pack");
     check_equal(std::string_view { hex(emit([](writer &w) { w.value(std::vector<int> { 1, 2, 3, 1000000 }); })) },
-                "5b5501550255036d40420f005d", "one large value forces the width and keeps it generic");
-    check_equal(std::string_view { hex(emit([](writer &w) {
-                    w.value(std::vector<int> { 52445, 43707, 13124, 4386 });
-                })) },
-                "5b75ddcc75bbaa7544337522115d", "a 14 byte tie stays generic");
+            "5b5501550255036d40420f005d", "one large value forces the width and keeps it generic");
+    check_equal(
+            std::string_view { hex(emit([](writer &w) { w.value(std::vector<int> { 52445, 43707, 13124, 4386 }); })) },
+            "5b75ddcc75bbaa7544337522115d", "a 14 byte tie stays generic");
     check_equal(std::string_view { hex(emit([](writer &w) { w.value(std::vector<double> { 1.5, 2.5, -0.25 }); })) },
-                "5b68003e6800416800b45d", "three halves stay generic");
+            "5b68003e6800416800b45d", "three halves stay generic");
 
     // Packing off falls back to the generic form whatever the measurement says.
     check_equal(std::string_view { hex(emit<writer_options { .numeric_packing = false }>(
                         [](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4, 5 }); })) },
-                "5b550155025503550455055d", "numeric_packing off keeps the generic form");
+            "5b550155025503550455055d", "numeric_packing off keeps the generic form");
 }
 
 /**
@@ -153,11 +167,14 @@ void numeric_packing() {
  */
 void contiguous_copy() {
     std::vector<double> real;
-    for (int index = 0; index < 200; ++index) real.push_back(index * 0.1);
+    for (int index = 0; index < 200; ++index)
+        real.push_back(index * 0.1);
     std::vector<double> halves;
-    for (int index = 0; index < 200; ++index) halves.push_back(index * 0.5);
+    for (int index = 0; index < 200; ++index)
+        halves.push_back(index * 0.5);
     std::vector<std::int32_t> positive;
-    for (int index = 0; index < 200; ++index) positive.push_back(index * 100000);
+    for (int index = 0; index < 200; ++index)
+        positive.push_back(index * 100000);
 
     constexpr writer_options slack { .copy_tolerance_percent = 5 };
     constexpr writer_options generous { .copy_tolerance_percent = 400 };
@@ -185,23 +202,26 @@ void contiguous_copy() {
 
 void typed_arrays() {
     const std::array<std::uint8_t, 4> bytes { 0xde, 0xad, 0xbe, 0xef };
-    check_equal(std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint8_t> { bytes }); })) },
-                "5b2455235504deadbeef", "typed uint8 array");
+    check_equal(
+            std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint8_t> { bytes }); })) },
+            "5b2455235504deadbeef", "typed uint8 array");
 
     const std::array<std::uint16_t, 3> words { 1, 2, 3 };
-    check_equal(std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint16_t> { words }); })) },
-                "5b2455235503010203", "typed uint16 array narrows to uint8");
+    check_equal(
+            std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint16_t> { words }); })) },
+            "5b2455235503010203", "typed uint16 array narrows to uint8");
 
     const std::array<std::uint16_t, 3> wide { 1, 2, 1000 };
-    check_equal(std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint16_t> { wide }); })) },
-                "5b247523550301000200e803", "typed uint16 array keeps its width");
+    check_equal(
+            std::string_view { hex(emit([&](writer &w) { w.typed_array(std::span<const std::uint16_t> { wide }); })) },
+            "5b247523550301000200e803", "typed uint16 array keeps its width");
 
-    const std::array<std::byte, 6> mac { std::byte { 0x3c }, std::byte { 0xe9 }, std::byte { 0x0e },
-                                         std::byte { 0x12 }, std::byte { 0x34 }, std::byte { 0x56 } };
-    check_equal(std::string_view { hex(emit([&](writer &w) { w.binary(mac); })) },
-                "5b24422355063ce90e123456", "binary is [$B#");
-    check_equal(std::string_view { hex(emit([&](writer &w) { w.value(mac); })) },
-                "5b24422355063ce90e123456", "a range of bytes writes as binary");
+    const std::array<std::byte, 6> mac { std::byte { 0x3c }, std::byte { 0xe9 }, std::byte { 0x0e }, std::byte { 0x12 },
+        std::byte { 0x34 }, std::byte { 0x56 } };
+    check_equal(std::string_view { hex(emit([&](writer &w) { w.binary(mac); })) }, "5b24422355063ce90e123456",
+            "binary is [$B#");
+    check_equal(std::string_view { hex(emit([&](writer &w) { w.value(mac); })) }, "5b24422355063ce90e123456",
+            "a range of bytes writes as binary");
 }
 
 void sinks() {
@@ -266,7 +286,7 @@ void error_latching() {
         writer target { out };
         auto held = std::optional { target.array() };
         check_equal(target.finish().error().code(), errc::unterminated_container,
-                    "a deliberately held-open container fails at finish");
+                "a deliberately held-open container fails at finish");
         held.reset();
     }
     {
@@ -304,7 +324,7 @@ void error_latching() {
     }
 }
 
-}// namespace
+} // namespace
 
 int main() {
     scalars();

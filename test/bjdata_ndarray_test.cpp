@@ -130,7 +130,8 @@ void malformed() {
 
     // Rank above max_dimensions is refused rather than overflowing the extent buffer.
     std::string wide = "5b2455235b";
-    for (std::size_t index = 0; index < max_dimensions + 2; ++index) wide += "5501";
+    for (std::size_t index = 0; index < max_dimensions + 2; ++index)
+        wide += "5501";
     wide += "5d";
     rejected(wide, errc::dimension_overflow, "rank above max_dimensions");
 
@@ -142,9 +143,8 @@ void malformed() {
 }
 
 void truncation() {
-    for (const auto *hex : { "5b2455235b550255035d010203040506",
-                             "5b2455235b5b550255035d5d010203040506",
-                             "5b2455235b24552355020203010203040506" }) {
+    for (const auto *hex : { "5b2455235b550255035d010203040506", "5b2455235b5b550255035d5d010203040506",
+                 "5b2455235b24552355020203010203040506" }) {
         const auto whole = from_hex(hex);
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const auto prefix = std::span { whole }.first(length);
@@ -154,16 +154,16 @@ void truncation() {
             if (const auto array = as_ndarray(value)) {
                 for (std::size_t row = 0; row < 4; ++row) {
                     for (std::size_t column = 0; column < 4; ++column) {
-                        (void) array->at(row).at(column).value().as_int<int>();
+                        (void)array->at(row).at(column).value().as_int<int>();
                     }
                 }
-                (void) array->flat<std::uint8_t>();
+                (void)array->flat<std::uint8_t>();
             }
         }
     }
 }
 
-}// namespace
+} // namespace
 
 int main() {
     row_major();

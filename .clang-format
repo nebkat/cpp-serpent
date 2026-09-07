@@ -1,0 +1,55 @@
+# Continuation is always a fixed indent, never aligned to a column set by the line above.
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: Latest
+
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+
+# The rules this file exists for.
+ContinuationIndentWidth: 8
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignEscapedNewlines: DontAlign
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: None
+AlignTrailingComments: false
+BitFieldColonSpacing: Both
+
+SpaceAfterTemplateKeyword: false
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: true
+  AfterFunctionDefinitionName: false
+  AfterFunctionDeclarationName: false
+  AfterRequiresInClause: true
+  AfterRequiresInExpression: false
+
+BreakBeforeBraces: Attach
+BreakConstructorInitializers: BeforeComma
+ConstructorInitializerIndentWidth: 0
+PackConstructorInitializers: CurrentLine
+BreakBeforeBinaryOperators: NonAssignment
+BreakTemplateDeclarations: Yes
+
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLambdasOnASingleLine: All
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Empty
+
+Cpp11BracedListStyle: false
+SpaceBeforeCpp11BracedList: true
+PointerAlignment: Right
+DerivePointerAlignment: false
+ReferenceAlignment: Pointer
+
+SortIncludes: Never
+IndentPPDirectives: None
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SeparateDefinitionBlocks: Leave

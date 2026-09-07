@@ -16,8 +16,8 @@ inline std::string format_real(double value) {
     const bool negative = value < 0;
 
     char buffer[64];
-    const auto converted = std::to_chars(buffer, buffer + sizeof(buffer),
-                                         negative ? -value : value, std::chars_format::scientific);
+    const auto converted =
+            std::to_chars(buffer, buffer + sizeof(buffer), negative ? -value : value, std::chars_format::scientific);
     const std::string_view text { buffer, static_cast<std::size_t>(converted.ptr - buffer) };
 
     const auto exponent_at = text.find('e');
@@ -30,7 +30,7 @@ inline std::string format_real(double value) {
     std::from_chars(tail.data(), tail.data() + tail.size(), exponent);
 
     const int significant = static_cast<int>(digits.size());
-    const int point = exponent + 1;   // where the decimal point falls among the digits
+    const int point = exponent + 1; // where the decimal point falls among the digits
 
     std::string out;
     if (significant <= point && point <= 21) {
@@ -49,4 +49,4 @@ inline std::string format_real(double value) {
     return negative ? "-" + out : out;
 }
 
-}// namespace serpent::detail
+} // namespace serpent::detail

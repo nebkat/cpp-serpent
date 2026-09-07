@@ -524,3 +524,23 @@ The `nonstd/` include paths deliberately match sunrise-firmware's
 
 One caveat for that move: `notation.hpp` uses `std::format`, which appears nowhere in the
 firmware — it is fmt-only. That header needs an fmt spelling, or should stay host-only.
+
+## Formatting
+
+`.clang-format` is the source of truth. The rule it exists for is that a wrapped line
+continues at a fixed indent and is never aligned to a column set by the line above:
+
+```yaml
+ContinuationIndentWidth: 8
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignConsecutiveAssignments: None
+```
+
+```sh
+clang-format -i $(git ls-files '*.hpp' '*.cpp' | grep -v nonstd/unaligned.hpp)
+```
+
+`nonstd/unaligned.hpp` is excluded: it is a verbatim copy of the firmware's and must not
+fork. The generated `SERPENT_PASTE` chain is fenced with `// clang-format off`, since one
+`#define` per line reads better than the same text wrapped.

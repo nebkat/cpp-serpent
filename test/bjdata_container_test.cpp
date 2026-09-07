@@ -30,7 +30,8 @@ view parse(std::string_view hex) {
 
 std::vector<long long> integers(const view &value) {
     std::vector<long long> result;
-    for (const auto element : value.array()) result.push_back(element.as_int<long long>().value_or(-999));
+    for (const auto element : value.array())
+        result.push_back(element.as_int<long long>().value_or(-999));
     return result;
 }
 
@@ -108,15 +109,16 @@ void typed_arrays_and_spans() {
     check_equal((*span)[7], std::uint8_t { 0x11 }, "span back");
     check(!bytes.as_span<std::uint16_t>().has_value(), "span requires an exact marker match");
     // The span points into the source buffer rather than copying it.
-    check_equal(static_cast<const void *>(span->bytes().data()),
-                static_cast<const void *>(storage.data() + 6), "span aliases the source buffer");
+    check_equal(static_cast<const void *>(span->bytes().data()), static_cast<const void *>(storage.data() + 6),
+            "span aliases the source buffer");
 
     const auto words = parse("5b2475235503010002000300");
     const auto word_span = words.as_span<std::uint16_t>();
     check(word_span.has_value(), "[$u# yields a uint16 span");
     check_equal(word_span->size(), std::size_t { 3 }, "uint16 span size");
     check(std::ranges::equal(*word_span, std::vector<std::uint16_t> { 1, 2, 3 }), "uint16 span values");
-    check_equal(std::ranges::to<std::vector<std::uint16_t>>(*word_span).at(2), std::uint16_t { 3 }, "ranges::to over a span");
+    check_equal(std::ranges::to<std::vector<std::uint16_t>>(*word_span).at(2), std::uint16_t { 3 },
+            "ranges::to over a span");
 
     const auto binary = parse("5b2442235508ddccbbaa44332211");
     check(binary.is_binary(), "[$B# is binary");
@@ -129,7 +131,8 @@ void typed_arrays_and_spans() {
 
 void strict_strong_types() {
     // dart-bjdata restricts $ to fixed width types, so S, H, Z, T and F are rejected.
-    for (const auto *hex : { "5b2453235501015501610000", "5b245a2355030000", "5b2454235503", "5b2446235503", "5b2448235501" }) {
+    for (const auto *hex :
+            { "5b2453235501015501610000", "5b245a2355030000", "5b2454235503", "5b2446235503", "5b2448235501" }) {
         const auto value = parse(hex);
         check_equal(value.size(), std::size_t { 0 }, "non fixed width strong type yields no elements");
         check(!validate(storage).has_value(), "non fixed width strong type fails validation");
@@ -165,27 +168,28 @@ void validation() {
 
     // Nesting deeper than max_depth is refused rather than blowing the stack.
     std::string deep;
-    for (int index = 0; index < max_depth + 5; ++index) deep += "5b";
+    for (int index = 0; index < max_depth + 5; ++index)
+        deep += "5b";
     deep += "5a";
-    for (int index = 0; index < max_depth + 5; ++index) deep += "5d";
+    for (int index = 0; index < max_depth + 5; ++index)
+        deep += "5d";
     const auto too_deep = validate(from_hex(deep));
     check(!too_deep.has_value(), "over deep nesting is rejected");
     check_equal(too_deep.error().code(), errc::depth_exceeded, "depth_exceeded code");
 
     std::string shallow;
-    for (int index = 0; index < 8; ++index) shallow += "5b";
+    for (int index = 0; index < 8; ++index)
+        shallow += "5b";
     shallow += "5a";
-    for (int index = 0; index < 8; ++index) shallow += "5d";
+    for (int index = 0; index < 8; ++index)
+        shallow += "5d";
     check(validate(from_hex(shallow)).has_value(), "moderate nesting is accepted");
 }
 
 void truncation() {
     // Every prefix of a good document must fail cleanly, never read out of bounds.
-    for (const auto *hex : { "5b5501550255035d",
-                             "7b5501615501550162550255016355037d",
-                             "5b2455235508ddccbbaa44332211",
-                             "5b7b55016155017d5d",
-                             "5b2475235503010002000300" }) {
+    for (const auto *hex : { "5b5501550255035d", "7b5501615501550162550255016355037d", "5b2455235508ddccbbaa44332211",
+                 "5b7b55016155017d5d", "5b2475235503010002000300" }) {
         const auto whole = from_hex(hex);
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const auto prefix = std::span { whole }.first(length);
@@ -195,17 +199,17 @@ void truncation() {
             const auto value = view::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
-                (void) element.as_int<long long>();
+                (void)element.as_int<long long>();
                 if (++seen > 64) break;
             }
             for (const auto [key, element] : value.items()) {
-                (void) key;
-                (void) element.as_int<long long>();
+                (void)key;
+                (void)element.as_int<long long>();
                 if (++seen > 64) break;
             }
-            (void) value.size();
-            (void) value["a"];
-            (void) value[0];
+            (void)value.size();
+            (void)value["a"];
+            (void)value[0];
         }
     }
 }
@@ -242,7 +246,7 @@ void checked_accessors() {
 
     // An error points at the offending byte.
     try {
-        (void) document.at("a").get<int>();
+        (void)document.at("a").get<int>();
     } catch (const error &failure) {
         check(failure.offset() > 0 && failure.offset() < storage.size(), "the error offset is inside the document");
     }
@@ -259,7 +263,7 @@ void checked_accessors() {
     throws([&] { return wide.get<std::uint8_t>(); }, errc::type_mismatch, "a value that does not fit throws");
 }
 
-}// namespace
+} // namespace
 
 int main() {
     arrays();

@@ -71,4 +71,4 @@ template<writer_options Options = writer_options {}, typename T>
 /** Shorthand for the policy that does no compaction at all. */
 inline constexpr writer_options no_compaction { .compact_types = false, .numeric_packing = false };
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

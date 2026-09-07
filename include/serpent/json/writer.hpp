@@ -26,7 +26,6 @@
 
 namespace serpent::json {
 
-
 struct writer_options {
     /** Spaces per nesting level. Zero writes the document on one line. */
     std::size_t indent = 0;
@@ -39,8 +38,8 @@ class writer;
 /** @brief Emits JSON text into a sink. */
 class writer : public byte_emitter {
     writer_options options {};
-    std::uint32_t written_mask = 0;   ///< bit i: an element has already been written at level i
-    bool pending_value = false;       ///< a key has been written and owes a value
+    std::uint32_t written_mask = 0; ///< bit i: an element has already been written at level i
+    bool pending_value = false; ///< a key has been written and owes a value
 
     friend class array_scope;
     friend class object_scope;
@@ -88,21 +87,21 @@ class writer : public byte_emitter {
             std::string_view escape;
             char escaped[7] = { '\\', 'u', '0', '0', '0', '0', '\0' };
             switch (value) {
-                case '"':  escape = "\\\""; break;
-                case '\\': escape = "\\\\"; break;
-                case '\b': escape = "\\b"; break;
-                case '\f': escape = "\\f"; break;
-                case '\n': escape = "\\n"; break;
-                case '\r': escape = "\\r"; break;
-                case '\t': escape = "\\t"; break;
-                default:
-                    if (value < 0x20) {
-                        static constexpr char digits[] = "0123456789abcdef";
-                        escaped[4] = digits[(value >> 4) & 0xF];
-                        escaped[5] = digits[value & 0xF];
-                        escape = std::string_view { escaped, 6 };
-                    }
-                    break;
+            case '"': escape = "\\\""; break;
+            case '\\': escape = "\\\\"; break;
+            case '\b': escape = "\\b"; break;
+            case '\f': escape = "\\f"; break;
+            case '\n': escape = "\\n"; break;
+            case '\r': escape = "\\r"; break;
+            case '\t': escape = "\\t"; break;
+            default:
+                if (value < 0x20) {
+                    static constexpr char digits[] = "0123456789abcdef";
+                    escaped[4] = digits[(value >> 4) & 0xF];
+                    escaped[5] = digits[value & 0xF];
+                    escape = std::string_view { escaped, 6 };
+                }
+                break;
             }
             if (escape.empty()) continue;
 
@@ -145,11 +144,13 @@ class writer : public byte_emitter {
 
 public:
     template<sink S>
-    explicit writer(S &out, writer_options options = {}) noexcept: byte_emitter(out), options(options) {}
+    explicit writer(S &out, writer_options options = {}) noexcept : byte_emitter(out)
+                                                                  , options(options) {}
 
     template<typename F>
         requires (!sink<F> && std::invocable<F &, std::span<const std::byte>>)
-    explicit writer(F &callable, writer_options options = {}) noexcept: byte_emitter(callable), options(options) {}
+    explicit writer(F &callable, writer_options options = {}) noexcept : byte_emitter(callable)
+                                                                       , options(options) {}
 
     void null() noexcept {
         this->begin_value();
@@ -236,10 +237,10 @@ class array_scope {
     writer *out = nullptr;
 
 public:
-    explicit array_scope(writer &out) noexcept: out(&out) { this->out->begin_array(); }
+    explicit array_scope(writer &out) noexcept : out(&out) { this->out->begin_array(); }
     array_scope(const array_scope &) = delete;
     array_scope &operator=(const array_scope &) = delete;
-    array_scope(array_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
+    array_scope(array_scope &&other) noexcept : out(std::exchange(other.out, nullptr)) {}
     array_scope &operator=(array_scope &&other) noexcept {
         if (this != &other) {
             if (this->out != nullptr) this->out->end_array();
@@ -252,17 +253,19 @@ public:
     }
 
     template<typename T>
-    void value(const T &item) const noexcept { this->out->value(item); }
+    void value(const T &item) const noexcept {
+        this->out->value(item);
+    }
 };
 
 class object_scope {
     writer *out = nullptr;
 
 public:
-    explicit object_scope(writer &out) noexcept: out(&out) { this->out->begin_object(); }
+    explicit object_scope(writer &out) noexcept : out(&out) { this->out->begin_object(); }
     object_scope(const object_scope &) = delete;
     object_scope &operator=(const object_scope &) = delete;
-    object_scope(object_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
+    object_scope(object_scope &&other) noexcept : out(std::exchange(other.out, nullptr)) {}
     object_scope &operator=(object_scope &&other) noexcept {
         if (this != &other) {
             if (this->out != nullptr) this->out->end_object();
@@ -287,13 +290,15 @@ inline object_scope writer::object() noexcept { return object_scope { *this }; }
 template<detail::byte_range R>
 void writer::bytes(const R &items) noexcept {
     const auto scope = this->array();
-    for (const auto item : items) this->integer(static_cast<std::uint64_t>(std::to_integer<unsigned char>(item)));
+    for (const auto item : items)
+        this->integer(static_cast<std::uint64_t>(std::to_integer<unsigned char>(item)));
 }
 
 template<std::ranges::input_range R>
 void writer::range(const R &items) noexcept {
     const auto scope = this->array();
-    for (const auto &item : items) emit_value(*this, item);
+    for (const auto &item : items)
+        emit_value(*this, item);
 }
 
 template<typename T>
@@ -323,4 +328,4 @@ template<typename T>
     return text;
 }
 
-}// namespace serpent::json
+} // namespace serpent::json

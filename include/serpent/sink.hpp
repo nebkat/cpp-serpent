@@ -32,25 +32,26 @@ template<sink S>
         // bool, std::size_t (0 bytes written is a failure), std::expected, a pointer...
         return static_cast<bool>(out.write(bytes));
     } else {
-        (void) out.write(bytes);
+        (void)out.write(bytes);
         return true;
     }
 }
 
-}// namespace detail
+} // namespace detail
 
 /** Appends to any byte-like growable container: vector<byte>, vector<uint8_t>, string. */
 template<typename Container>
 class container_sink {
     using element = typename Container::value_type;
-    static_assert(sizeof(element) == 1 && (std::same_as<element, std::byte> || std::same_as<element, char>
-                                           || std::same_as<element, unsigned char> || std::same_as<element, signed char>),
-                  "container_sink requires a container of a byte-sized, byte-aliasing element");
+    static_assert(sizeof(element) == 1
+                    && (std::same_as<element, std::byte> || std::same_as<element, char>
+                            || std::same_as<element, unsigned char> || std::same_as<element, signed char>),
+            "container_sink requires a container of a byte-sized, byte-aliasing element");
 
     Container *target = nullptr;
 
 public:
-    explicit container_sink(Container &target) noexcept: target(&target) {}
+    explicit container_sink(Container &target) noexcept : target(&target) {}
 
     void write(std::span<const std::byte> bytes) {
         const auto *first = reinterpret_cast<const element *>(bytes.data());
@@ -76,7 +77,7 @@ class span_sink {
 
 public:
     span_sink() = default;
-    explicit span_sink(std::span<std::byte> target) noexcept: target(target) {}
+    explicit span_sink(std::span<std::byte> target) noexcept : target(target) {}
 
     bool write(std::span<const std::byte> bytes) noexcept {
         if (bytes.size() > this->target.size() - this->used) {
@@ -108,7 +109,7 @@ class iterator_sink {
     Iterator target {};
 
 public:
-    explicit iterator_sink(Iterator target) noexcept: target(target) {}
+    explicit iterator_sink(Iterator target) noexcept : target(target) {}
 
     void write(std::span<const std::byte> bytes) { this->target = std::ranges::copy(bytes, this->target).out; }
 
@@ -118,4 +119,4 @@ public:
 template<typename Iterator>
 iterator_sink(Iterator) -> iterator_sink<Iterator>;
 
-}// namespace serpent
+} // namespace serpent

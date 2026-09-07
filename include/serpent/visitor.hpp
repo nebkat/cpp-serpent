@@ -34,7 +34,7 @@ class write_visitor {
 public:
     static constexpr bool is_reading = false;
 
-    explicit write_visitor(Writer &out) noexcept: out(&out) {}
+    explicit write_visitor(Writer &out) noexcept : out(&out) {}
 
     template<typename T>
     void member(std::string_view name, const T &value) noexcept {
@@ -55,7 +55,7 @@ struct convert_probe {
     void member(std::string_view, const T &);
 };
 
-}// namespace detail
+} // namespace detail
 
 /**
  * Names each field on the way in, keeping a cursor into the object.
@@ -75,7 +75,7 @@ class read_visitor {
 public:
     static constexpr bool is_reading = true;
 
-    explicit read_visitor(Source source) noexcept: source(source), cursor(source.items().begin()) {}
+    explicit read_visitor(Source source) noexcept : source(source), cursor(source.items().begin()) {}
 
     template<typename T>
     void member(std::string_view name, T &value) {
@@ -88,11 +88,11 @@ public:
             }
         }
         const auto found = this->source[name];
-        if (!found.is_valid()) return;                 // absent: keep the existing value
+        if (!found.is_valid()) return; // absent: keep the existing value
         if (!read_into(found, value)) this->complete = false;
     }
 
     [[nodiscard]] bool ok() const noexcept { return this->complete; }
 };
 
-}// namespace serpent
+} // namespace serpent

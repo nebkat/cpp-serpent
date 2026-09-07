@@ -47,9 +47,9 @@ inline std::int64_t notate_marked_integer(std::string &out, cursor &source) {
 
     const auto value = load_integer(kind, source.position);
     source.advance(width);
-    write_block(out, kind == marker::uint64
-            ? std::format("{}", load<std::uint64_t>(source.position - width))
-            : std::format("{}", value));
+    write_block(out,
+            kind == marker::uint64 ? std::format("{}", load<std::uint64_t>(source.position - width))
+                                   : std::format("{}", value));
     return value;
 }
 
@@ -60,7 +60,8 @@ inline void notate_string_body(std::string &out, cursor &source) {
         return;
     }
     if (!source.need(static_cast<std::uint64_t>(length))) return;
-    write_block(out, std::string_view { reinterpret_cast<const char *>(source.position), static_cast<std::size_t>(length) });
+    write_block(out,
+            std::string_view { reinterpret_cast<const char *>(source.position), static_cast<std::size_t>(length) });
     source.advance(static_cast<std::uint64_t>(length));
 }
 
@@ -109,7 +110,8 @@ inline std::uint64_t notate_count(std::string &out, cursor &source) {
         source.advance(1);
         write_block(out, marker::count);
         const auto entries = notate_marked_integer(out, source);
-        for (std::int64_t index = 0; index < entries && source.ok(); ++index) notate_marked_integer(out, source);
+        for (std::int64_t index = 0; index < entries && source.ok(); ++index)
+            notate_marked_integer(out, source);
     } else {
         while (source.ok() && source.available(1) && source.peek_marker() != marker::array_end) {
             notate_marked_integer(out, source);
@@ -198,7 +200,8 @@ inline void notate_container(std::string &out, cursor &source, bool object, int 
     }
 
     if (element != marker::invalid && !object) {
-        for (std::uint64_t index = 0; index < count && source.ok(); ++index) emit_typed_element();
+        for (std::uint64_t index = 0; index < count && source.ok(); ++index)
+            emit_typed_element();
         return;
     }
 
@@ -225,63 +228,56 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
     }
 
     switch (kind) {
-        case marker::null:
-        case marker::boolean_true:
-        case marker::boolean_false:
-        case marker::noop:
-            return;
+    case marker::null:
+    case marker::boolean_true:
+    case marker::boolean_false:
+    case marker::noop: return;
 
-        case marker::string:
-        case marker::high_precision:
-            notate_string_body(out, source);
-            return;
+    case marker::string:
+    case marker::high_precision: notate_string_body(out, source); return;
 
-        case marker::character: {
-            if (!source.need(1)) return;
-            write_block(out, std::string_view { reinterpret_cast<const char *>(source.position), 1 });
-            source.advance(1);
+    case marker::character: {
+        if (!source.need(1)) return;
+        write_block(out, std::string_view { reinterpret_cast<const char *>(source.position), 1 });
+        source.advance(1);
+        return;
+    }
+
+    case marker::float16:
+    case marker::float32:
+    case marker::float64: {
+        const auto width = payload_width(kind);
+        if (!source.need(width)) return;
+        const double value = kind == marker::float16 ? decode_float16(load<std::uint16_t>(source.position))
+                : kind == marker::float32            ? load<float>(source.position)
+                                                     : load<double>(source.position);
+        write_block(out, serpent::detail::format_real(value));
+        source.advance(width);
+        return;
+    }
+
+    case marker::array_begin: notate_container(out, source, false, depth); return;
+    case marker::object_begin: notate_container(out, source, true, depth); return;
+
+    default: {
+        const auto width = payload_width(kind);
+        if (width == variable_width) {
+            source.fail(errc::unexpected_marker);
             return;
         }
-
-        case marker::float16:
-        case marker::float32:
-        case marker::float64: {
-            const auto width = payload_width(kind);
-            if (!source.need(width)) return;
-            const double value = kind == marker::float16 ? decode_float16(load<std::uint16_t>(source.position))
-                    : kind == marker::float32            ? load<float>(source.position)
-                                                         : load<double>(source.position);
-            write_block(out, serpent::detail::format_real(value));
-            source.advance(width);
-            return;
+        if (!source.need(width)) return;
+        if (kind == marker::uint64) {
+            write_block(out, std::format("{}", load<std::uint64_t>(source.position)));
+        } else {
+            write_block(out, std::format("{}", load_integer(kind, source.position)));
         }
-
-        case marker::array_begin:
-            notate_container(out, source, false, depth);
-            return;
-        case marker::object_begin:
-            notate_container(out, source, true, depth);
-            return;
-
-        default: {
-            const auto width = payload_width(kind);
-            if (width == variable_width) {
-                source.fail(errc::unexpected_marker);
-                return;
-            }
-            if (!source.need(width)) return;
-            if (kind == marker::uint64) {
-                write_block(out, std::format("{}", load<std::uint64_t>(source.position)));
-            } else {
-                write_block(out, std::format("{}", load_integer(kind, source.position)));
-            }
-            source.advance(width);
-            return;
-        }
+        source.advance(width);
+        return;
+    }
     }
 }
 
-}// namespace detail
+} // namespace detail
 
 /**
  * @brief Renders a document as dart-bjdata's block notation, e.g. [S][U][5][hello].
@@ -301,8 +297,6 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
     return out;
 }
 
-[[nodiscard]] inline std::string block_notation(const view &value) {
-    return block_notation(value.buffer());
-}
+[[nodiscard]] inline std::string block_notation(const view &value) { return block_notation(value.buffer()); }
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

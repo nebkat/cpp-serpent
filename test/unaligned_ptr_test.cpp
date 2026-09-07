@@ -81,7 +81,7 @@ void endianness() {
 
     // The same bytes read back through the other endianness are byte reversed.
     check_equal(static_cast<std::uint32_t>(*unaligned_little_ptr<const std::uint32_t> { scratch + 1 }),
-                std::uint32_t { 0x04030201 }, "reading big endian bytes as little endian");
+            std::uint32_t { 0x04030201 }, "reading big endian bytes as little endian");
 }
 
 void reference_semantics() {
@@ -136,12 +136,13 @@ void iteration() {
     check_equal(static_cast<std::uint16_t>(span[7]), std::uint16_t { 17 }, "ranges::sort back");
     check_equal(std::ranges::count(span, std::uint16_t { 13 }), std::ptrdiff_t { 1 }, "ranges::count");
 
-    const auto copied = std::ranges::to<std::vector<std::uint16_t>>(unaligned_little_span<const std::uint16_t> { span });
+    const auto copied =
+            std::ranges::to<std::vector<std::uint16_t>>(unaligned_little_span<const std::uint16_t> { span });
     check_equal(copied.size(), std::size_t { 8 }, "ranges::to size");
     check_equal(copied.at(4), std::uint16_t { 14 }, "ranges::to values");
 
-    const auto doubled = std::ranges::to<std::vector<int>>(
-            unaligned_little_span<const std::uint16_t> { span } | std::views::transform([](std::uint16_t v) { return v * 2; }));
+    const auto doubled = std::ranges::to<std::vector<int>>(unaligned_little_span<const std::uint16_t> { span }
+            | std::views::transform([](std::uint16_t v) { return v * 2; }));
     check_equal(doubled.at(0), 20, "views::transform over a span");
 }
 
@@ -162,7 +163,8 @@ void subranges() {
     check_equal(span.last(99).size(), std::size_t { 8 }, "last past the start clamps");
 
     check_equal(span.bytes().size(), std::size_t { 16 }, "bytes span");
-    check_equal(static_cast<const void *>(span.bytes().data()), static_cast<const void *>(scratch + 1), "bytes aliases");
+    check_equal(
+            static_cast<const void *>(span.bytes().data()), static_cast<const void *>(scratch + 1), "bytes aliases");
 
     using const_span = unaligned_little_span<const std::uint16_t>;
     const std::span<const std::byte> raw { scratch + 1, 17 };
@@ -174,7 +176,7 @@ void subranges() {
     check_equal(readable.size(), std::size_t { 8 }, "mutable span converts to const");
 }
 
-}// namespace
+} // namespace
 
 int main() {
     widths();

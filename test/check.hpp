@@ -28,10 +28,8 @@ inline void check_equal(const A &actual, const B &expected, std::string_view wha
 
 inline void check_equal(std::string_view actual, std::string_view expected, std::string_view what) {
     if (actual == expected) return;
-    std::printf("  FAIL %.*s (got \"%.*s\", want \"%.*s\")\n",
-                static_cast<int>(what.size()), what.data(),
-                static_cast<int>(actual.size()), actual.data(),
-                static_cast<int>(expected.size()), expected.data());
+    std::printf("  FAIL %.*s (got \"%.*s\", want \"%.*s\")\n", static_cast<int>(what.size()), what.data(),
+            static_cast<int>(actual.size()), actual.data(), static_cast<int>(expected.size()), expected.data());
     ++failures;
 }
 

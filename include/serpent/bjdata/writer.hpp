@@ -69,7 +69,7 @@ template<typename T>
     }
 }
 
-}// namespace detail
+} // namespace detail
 
 /** @brief Emits BJData into a sink, holding no buffer of its own. */
 template<writer_options Options = writer_options {}>
@@ -106,18 +106,19 @@ class basic_writer : public byte_emitter {
             return integer_marker(minimum, maximum);
         } else {
             std::uint64_t maximum = 0;
-            for (const auto item : values) maximum = std::max<std::uint64_t>(maximum, item);
+            for (const auto item : values)
+                maximum = std::max<std::uint64_t>(maximum, item);
             return integer_marker(maximum);
         }
     }
 
 public:
     template<sink S>
-    explicit basic_writer(S &out) noexcept: byte_emitter(out) {}
+    explicit basic_writer(S &out) noexcept : byte_emitter(out) {}
 
     template<typename F>
         requires (!sink<F> && std::invocable<F &, std::span<const std::byte>>)
-    explicit basic_writer(F &callable) noexcept: byte_emitter(callable) {}
+    explicit basic_writer(F &callable) noexcept : byte_emitter(callable) {}
 
     static constexpr writer_options configuration = Options;
 
@@ -137,26 +138,26 @@ public:
     /** The payload of an integer marker, truncated to that marker's width. */
     void put_integer_payload(marker kind, std::uint64_t bits) noexcept {
         switch (kind) {
-            case marker::uint8:  this->put_raw(static_cast<std::uint8_t>(bits)); return;
-            case marker::int8:   this->put_raw(static_cast<std::int8_t>(bits)); return;
-            case marker::uint16: this->put_raw(static_cast<std::uint16_t>(bits)); return;
-            case marker::int16:  this->put_raw(static_cast<std::int16_t>(bits)); return;
-            case marker::uint32: this->put_raw(static_cast<std::uint32_t>(bits)); return;
-            case marker::int32:  this->put_raw(static_cast<std::int32_t>(bits)); return;
-            case marker::uint64: this->put_raw(static_cast<std::uint64_t>(bits)); return;
-            case marker::int64:  this->put_raw(static_cast<std::int64_t>(bits)); return;
-            case marker::byte:
-            case marker::character: this->put_raw(static_cast<std::uint8_t>(bits)); return;
-            default: this->fail(errc::unexpected_marker); return;
+        case marker::uint8: this->put_raw(static_cast<std::uint8_t>(bits)); return;
+        case marker::int8: this->put_raw(static_cast<std::int8_t>(bits)); return;
+        case marker::uint16: this->put_raw(static_cast<std::uint16_t>(bits)); return;
+        case marker::int16: this->put_raw(static_cast<std::int16_t>(bits)); return;
+        case marker::uint32: this->put_raw(static_cast<std::uint32_t>(bits)); return;
+        case marker::int32: this->put_raw(static_cast<std::int32_t>(bits)); return;
+        case marker::uint64: this->put_raw(static_cast<std::uint64_t>(bits)); return;
+        case marker::int64: this->put_raw(static_cast<std::int64_t>(bits)); return;
+        case marker::byte:
+        case marker::character: this->put_raw(static_cast<std::uint8_t>(bits)); return;
+        default: this->fail(errc::unexpected_marker); return;
         }
     }
 
     void put_float_payload(marker kind, double value) noexcept {
         switch (kind) {
-            case marker::float16: this->put_raw(encode_float16(static_cast<float>(value))); return;
-            case marker::float32: this->put_raw(static_cast<float>(value)); return;
-            case marker::float64: this->put_raw(value); return;
-            default: this->fail(errc::unexpected_marker); return;
+        case marker::float16: this->put_raw(encode_float16(static_cast<float>(value))); return;
+        case marker::float32: this->put_raw(static_cast<float>(value)); return;
+        case marker::float64: this->put_raw(value); return;
+        default: this->fail(errc::unexpected_marker); return;
         }
     }
 
@@ -253,10 +254,11 @@ public:
 
         marker element = declared;
         if constexpr (std::integral<T> && !std::same_as<T, char>) {
-            if constexpr (Options.compact_types) if (!values.empty()) {
-                const auto narrowed = basic_writer::narrowest_marker(values);
-                if (payload_width(narrowed) < payload_width(declared)) element = narrowed;
-            }
+            if constexpr (Options.compact_types)
+                if (!values.empty()) {
+                    const auto narrowed = basic_writer::narrowest_marker(values);
+                    if (payload_width(narrowed) < payload_width(declared)) element = narrowed;
+                }
         }
 
         this->put_marker(marker::array_begin);
@@ -269,7 +271,8 @@ public:
             // Native order is the wire order, so the payload goes out as one copy.
             this->put(std::as_bytes(values));
         } else {
-            for (const auto item : values) this->put_integer_payload(element, static_cast<std::uint64_t>(item));
+            for (const auto item : values)
+                this->put_integer_payload(element, static_cast<std::uint64_t>(item));
         }
     }
 
@@ -323,12 +326,12 @@ class array_scope {
     basic_writer<Options> *out = nullptr;
 
 public:
-    explicit array_scope(basic_writer<Options> &out) noexcept: out(&out) { this->out->begin_array(); }
+    explicit array_scope(basic_writer<Options> &out) noexcept : out(&out) { this->out->begin_array(); }
 
     array_scope(const array_scope &) = delete;
     array_scope &operator=(const array_scope &) = delete;
 
-    array_scope(array_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
+    array_scope(array_scope &&other) noexcept : out(std::exchange(other.out, nullptr)) {}
     array_scope &operator=(array_scope &&other) noexcept {
         if (this != &other) {
             if (this->out != nullptr) this->out->end_array();
@@ -342,7 +345,9 @@ public:
     }
 
     template<typename T>
-    void value(const T &item) const noexcept { this->out->value(item); }
+    void value(const T &item) const noexcept {
+        this->out->value(item);
+    }
 };
 
 template<writer_options Options>
@@ -350,12 +355,12 @@ class object_scope {
     basic_writer<Options> *out = nullptr;
 
 public:
-    explicit object_scope(basic_writer<Options> &out) noexcept: out(&out) { this->out->begin_object(); }
+    explicit object_scope(basic_writer<Options> &out) noexcept : out(&out) { this->out->begin_object(); }
 
     object_scope(const object_scope &) = delete;
     object_scope &operator=(const object_scope &) = delete;
 
-    object_scope(object_scope &&other) noexcept: out(std::exchange(other.out, nullptr)) {}
+    object_scope(object_scope &&other) noexcept : out(std::exchange(other.out, nullptr)) {}
     object_scope &operator=(object_scope &&other) noexcept {
         if (this != &other) {
             if (this->out != nullptr) this->out->end_object();
@@ -376,10 +381,14 @@ public:
 };
 
 template<writer_options Options>
-array_scope<Options> basic_writer<Options>::array() noexcept { return array_scope<Options> { *this }; }
+array_scope<Options> basic_writer<Options>::array() noexcept {
+    return array_scope<Options> { *this };
+}
 
 template<writer_options Options>
-object_scope<Options> basic_writer<Options>::object() noexcept { return object_scope<Options> { *this }; }
+object_scope<Options> basic_writer<Options>::object() noexcept {
+    return object_scope<Options> { *this };
+}
 
 /** The default: everything the reference encoder does. */
 using writer = basic_writer<>;
@@ -401,114 +410,117 @@ void basic_writer<Options>::range(const R &items) noexcept {
     using element = std::remove_cvref_t<std::ranges::range_value_t<R>>;
     constexpr bool packable = std::ranges::forward_range<R>
             && ((std::integral<element> && !std::same_as<element, bool> && !std::same_as<element, char>)
-                || std::floating_point<element>);
+                    || std::floating_point<element>);
 
     if constexpr (packable) {
-        if constexpr (Options.numeric_packing && Options.compact_types) if (!std::ranges::empty(items)) {
-            const auto count = static_cast<std::size_t>(std::ranges::distance(items));
-            std::size_t generic = 2;   // '[' and ']'
-            marker element_marker = marker::invalid;
+        if constexpr (Options.numeric_packing && Options.compact_types)
+            if (!std::ranges::empty(items)) {
+                const auto count = static_cast<std::size_t>(std::ranges::distance(items));
+                std::size_t generic = 2; // '[' and ']'
+                marker element_marker = marker::invalid;
 
-            if constexpr (std::floating_point<element>) {
-                bool all_fit_16 = true;
-                bool all_fit_32 = true;
-                for (const auto item : items) {
-                    const auto widened = static_cast<double>(item);
-                    all_fit_16 = all_fit_16 && fits_float16(widened);
-                    all_fit_32 = all_fit_32 && fits_float32(widened);
-                    generic += detail::generic_value_size(item);
-                }
-                element_marker = float_marker(all_fit_16, all_fit_32);
-            } else {
-                std::int64_t minimum = 0;
-                std::int64_t maximum = 0;
-                std::uint64_t unsigned_maximum = 0;
-                bool above_signed_range = false;
-                bool first = true;
-                for (const auto item : items) {
-                    if constexpr (std::is_signed_v<element>) {
-                        const auto widened = static_cast<std::int64_t>(item);
-                        minimum = first ? widened : std::min(minimum, widened);
-                        maximum = first ? widened : std::max(maximum, widened);
-                    } else {
-                        const auto widened = static_cast<std::uint64_t>(item);
-                        unsigned_maximum = std::max(unsigned_maximum, widened);
-                        if (widened > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-                            above_signed_range = true;
+                if constexpr (std::floating_point<element>) {
+                    bool all_fit_16 = true;
+                    bool all_fit_32 = true;
+                    for (const auto item : items) {
+                        const auto widened = static_cast<double>(item);
+                        all_fit_16 = all_fit_16 && fits_float16(widened);
+                        all_fit_32 = all_fit_32 && fits_float32(widened);
+                        generic += detail::generic_value_size(item);
+                    }
+                    element_marker = float_marker(all_fit_16, all_fit_32);
+                } else {
+                    std::int64_t minimum = 0;
+                    std::int64_t maximum = 0;
+                    std::uint64_t unsigned_maximum = 0;
+                    bool above_signed_range = false;
+                    bool first = true;
+                    for (const auto item : items) {
+                        if constexpr (std::is_signed_v<element>) {
+                            const auto widened = static_cast<std::int64_t>(item);
+                            minimum = first ? widened : std::min(minimum, widened);
+                            maximum = first ? widened : std::max(maximum, widened);
                         } else {
-                            const auto narrowed = static_cast<std::int64_t>(widened);
-                            minimum = first ? narrowed : std::min(minimum, narrowed);
-                            maximum = first ? narrowed : std::max(maximum, narrowed);
+                            const auto widened = static_cast<std::uint64_t>(item);
+                            unsigned_maximum = std::max(unsigned_maximum, widened);
+                            if (widened > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                                above_signed_range = true;
+                            } else {
+                                const auto narrowed = static_cast<std::int64_t>(widened);
+                                minimum = first ? narrowed : std::min(minimum, narrowed);
+                                maximum = first ? narrowed : std::max(maximum, narrowed);
+                            }
+                        }
+                        first = false;
+                        generic += detail::generic_value_size(item);
+                    }
+                    element_marker =
+                            above_signed_range ? integer_marker(unsigned_maximum) : integer_marker(minimum, maximum);
+                }
+
+                const auto count_marker =
+                        integer_marker(static_cast<std::int64_t>(count), static_cast<std::int64_t>(count));
+                // '[' '$' type '#', then the count with its own marker, then the payload.
+                const std::size_t header = 4 + (1 + payload_width(count_marker));
+                std::size_t packed = header + count * payload_width(element_marker);
+
+                // A contiguous range packed at the element's own width copies in one go. Consider
+                // it whenever the chosen marker would not, and take it if the size it costs is
+                // within what the caller allows.
+                if constexpr (std::ranges::contiguous_range<R> && strong_type_for<element>() != marker::invalid) {
+                    const std::size_t copyable = header + count * sizeof(element);
+                    const std::size_t best = std::min(packed, generic);
+                    if (copyable * 100 <= best * (100 + std::size_t { Options.copy_tolerance_percent })) {
+                        // Keep the chosen marker when it is already the element's width, so a
+                        // positive int32 range stays uint32 as the reference writes it.
+                        if (payload_width(element_marker) != sizeof(element)) {
+                            element_marker = strong_type_for<element>();
+                        }
+                        packed = copyable;
+                        generic = copyable + 1; // force the packed branch below
+                    }
+                }
+
+                if (packed < generic) {
+                    this->put_marker(marker::array_begin);
+                    this->put_marker(marker::strong_type);
+                    this->put_marker(element_marker);
+                    this->put_marker(marker::count);
+                    this->put_length(count);
+
+                    // When the chosen marker stores each element at exactly the width it already
+                    // occupies, the payload is in wire order and goes out in one copy rather than
+                    // a store per element. The marker need not be the element's own: a positive
+                    // int32 range packs as uint32, and two's complement makes those bytes
+                    // identical. A caller never asks for this - it is the writer's business, which
+                    // is the point of value() taking whatever range you have.
+                    if constexpr (std::ranges::contiguous_range<R>) {
+                        const bool same_width = payload_width(element_marker) == sizeof(element);
+                        const bool same_family = is_float(element_marker) == std::floating_point<element>;
+                        if (same_width && same_family) {
+                            this->put(std::as_bytes(std::span<const element> { std::ranges::data(items), count }));
+                            return;
                         }
                     }
-                    first = false;
-                    generic += detail::generic_value_size(item);
-                }
-                element_marker = above_signed_range ? integer_marker(unsigned_maximum)
-                                                    : integer_marker(minimum, maximum);
-            }
 
-            const auto count_marker = integer_marker(static_cast<std::int64_t>(count), static_cast<std::int64_t>(count));
-            // '[' '$' type '#', then the count with its own marker, then the payload.
-            const std::size_t header = 4 + (1 + payload_width(count_marker));
-            std::size_t packed = header + count * payload_width(element_marker);
-
-            // A contiguous range packed at the element's own width copies in one go. Consider
-            // it whenever the chosen marker would not, and take it if the size it costs is
-            // within what the caller allows.
-            if constexpr (std::ranges::contiguous_range<R> && strong_type_for<element>() != marker::invalid) {
-                const std::size_t copyable = header + count * sizeof(element);
-                const std::size_t best = std::min(packed, generic);
-                if (copyable * 100 <= best * (100 + std::size_t { Options.copy_tolerance_percent })) {
-                    // Keep the chosen marker when it is already the element's width, so a
-                    // positive int32 range stays uint32 as the reference writes it.
-                    if (payload_width(element_marker) != sizeof(element)) {
-                        element_marker = strong_type_for<element>();
+                    for (const auto item : items) {
+                        if constexpr (std::floating_point<element>) {
+                            this->put_float_payload(element_marker, static_cast<double>(item));
+                        } else if constexpr (std::is_signed_v<element>) {
+                            this->put_integer_payload(
+                                    element_marker, static_cast<std::uint64_t>(static_cast<std::int64_t>(item)));
+                        } else {
+                            this->put_integer_payload(element_marker, static_cast<std::uint64_t>(item));
+                        }
                     }
-                    packed = copyable;
-                    generic = copyable + 1;   // force the packed branch below
+                    return;
                 }
             }
-
-            if (packed < generic) {
-                this->put_marker(marker::array_begin);
-                this->put_marker(marker::strong_type);
-                this->put_marker(element_marker);
-                this->put_marker(marker::count);
-                this->put_length(count);
-
-                // When the chosen marker stores each element at exactly the width it already
-                // occupies, the payload is in wire order and goes out in one copy rather than
-                // a store per element. The marker need not be the element's own: a positive
-                // int32 range packs as uint32, and two's complement makes those bytes
-                // identical. A caller never asks for this - it is the writer's business, which
-                // is the point of value() taking whatever range you have.
-                if constexpr (std::ranges::contiguous_range<R>) {
-                    const bool same_width = payload_width(element_marker) == sizeof(element);
-                    const bool same_family = is_float(element_marker) == std::floating_point<element>;
-                    if (same_width && same_family) {
-                        this->put(std::as_bytes(std::span<const element> { std::ranges::data(items), count }));
-                        return;
-                    }
-                }
-
-                for (const auto item : items) {
-                    if constexpr (std::floating_point<element>) {
-                        this->put_float_payload(element_marker, static_cast<double>(item));
-                    } else if constexpr (std::is_signed_v<element>) {
-                        this->put_integer_payload(element_marker,
-                                                  static_cast<std::uint64_t>(static_cast<std::int64_t>(item)));
-                    } else {
-                        this->put_integer_payload(element_marker, static_cast<std::uint64_t>(item));
-                    }
-                }
-                return;
-            }
-        }
     }
 
     const auto scope = this->array();
-    for (const auto &item : items) this->value(item);
+    for (const auto &item : items)
+        this->value(item);
 }
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

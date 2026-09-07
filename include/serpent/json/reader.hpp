@@ -31,7 +31,6 @@
 
 namespace serpent::json {
 
-
 class reader;
 class array_iterator;
 class array_range;
@@ -41,11 +40,11 @@ class member_range;
 /** @brief A handle to one JSON value inside a text buffer. */
 class reader {
     std::string_view source;
-    const char *first = nullptr;   ///< this value's first character, whitespace already skipped
+    const char *first = nullptr; ///< this value's first character, whitespace already skipped
 
 public:
     constexpr reader() = default;
-    constexpr reader(std::string_view source, const char *first) noexcept: source(source), first(first) {}
+    constexpr reader(std::string_view source, const char *first) noexcept : source(source), first(first) {}
 
     /** Wraps a document, skipping leading whitespace. Performs no deep parsing. */
     [[nodiscard]] static reader over(std::string_view text) noexcept {
@@ -64,13 +63,13 @@ public:
     [[nodiscard]] kind type() const noexcept {
         if (this->first == nullptr || this->first >= this->limit()) return kind::invalid;
         switch (*this->first) {
-            case 'n': return kind::null;
-            case 't':
-            case 'f': return kind::boolean;
-            case '"': return kind::string;
-            case '[': return kind::array;
-            case '{': return kind::object;
-            default: break;
+        case 'n': return kind::null;
+        case 't':
+        case 'f': return kind::boolean;
+        case '"': return kind::string;
+        case '[': return kind::array;
+        case '{': return kind::object;
+        default: break;
         }
         if (*this->first == '-' || scanner::is_digit(*this->first)) return this->number_kind();
         return kind::invalid;
@@ -206,14 +205,16 @@ public:
 
     template<typename T>
     [[nodiscard]] std::optional<T> try_get() const noexcept {
-        if constexpr (std::same_as<T, bool>) return this->as_bool();
+        if constexpr (std::same_as<T, bool>)
+            return this->as_bool();
         else if constexpr (std::constructible_from<T, std::string> && !std::is_arithmetic_v<T>) {
             auto text = this->as_string();
             if (!text) return std::nullopt;
             return T { *std::move(text) };
-        }
-        else if constexpr (std::floating_point<T>) return this->as_float<T>();
-        else if constexpr (std::integral<T>) return this->as_int<T>();
+        } else if constexpr (std::floating_point<T>)
+            return this->as_float<T>();
+        else if constexpr (std::integral<T>)
+            return this->as_int<T>();
         else {
             T value {};
             if (!serializer<T>::read(*this, value)) return std::nullopt;
@@ -231,9 +232,7 @@ public:
 private:
     [[nodiscard]] constexpr const char *limit() const noexcept { return this->source.data() + this->source.size(); }
 
-    [[nodiscard]] scanner::cursor scan() const noexcept {
-        return scanner::cursor { this->source, this->first };
-    }
+    [[nodiscard]] scanner::cursor scan() const noexcept { return scanner::cursor { this->source, this->first }; }
 
     [[nodiscard]] std::string_view number_text() const noexcept {
         auto scan = this->scan();
@@ -272,18 +271,16 @@ struct key_value {
         return decoded;
     }
 
-    [[nodiscard]] bool key_is(std::string_view other) const noexcept {
-        return scanner::equals(this->key, other);
-    }
+    [[nodiscard]] bool key_is(std::string_view other) const noexcept { return scanner::equals(this->key, other); }
 };
 
 /** Forward iterator over the elements of an array. */
 class array_iterator {
 public:
-    using value_type        = reader;
-    using reference         = reader;
-    using difference_type   = std::ptrdiff_t;
-    using iterator_concept  = std::forward_iterator_tag;
+    using value_type = reader;
+    using reference = reader;
+    using difference_type = std::ptrdiff_t;
+    using iterator_concept = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
 
 private:
@@ -294,7 +291,7 @@ private:
 public:
     array_iterator() = default;
 
-    explicit array_iterator(const reader &container) noexcept: source(container.source) {
+    explicit array_iterator(const reader &container) noexcept : source(container.source) {
         if (container.type() != kind::array) return;
         scanner::cursor scan { this->source, container.first + 1 };
         scanner::skip_whitespace(scan);
@@ -343,21 +340,21 @@ public:
 /** Forward iterator over the key/value pairs of an object. */
 class member_iterator {
 public:
-    using value_type        = key_value;
-    using reference         = key_value;
-    using difference_type   = std::ptrdiff_t;
-    using iterator_concept  = std::forward_iterator_tag;
+    using value_type = key_value;
+    using reference = key_value;
+    using difference_type = std::ptrdiff_t;
+    using iterator_concept = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
 
 private:
     std::string_view source;
-    const char *cursor = nullptr;   ///< at the opening quote of the key
+    const char *cursor = nullptr; ///< at the opening quote of the key
     bool exhausted = true;
 
 public:
     member_iterator() = default;
 
-    explicit member_iterator(const reader &container) noexcept: source(container.source) {
+    explicit member_iterator(const reader &container) noexcept : source(container.source) {
         if (container.type() != kind::object) return;
         scanner::cursor scan { this->source, container.first + 1 };
         scanner::skip_whitespace(scan);
@@ -383,7 +380,7 @@ public:
         if (this->exhausted) return *this;
 
         scanner::cursor scan { this->source, this->cursor };
-        (void) scanner::scan_string(scan);
+        (void)scanner::scan_string(scan);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ':') {
             this->exhausted = true;
@@ -423,7 +420,7 @@ class array_range : public std::ranges::view_interface<array_range> {
 
 public:
     array_range() = default;
-    explicit array_range(array_iterator head) noexcept: head(head) {}
+    explicit array_range(array_iterator head) noexcept : head(head) {}
     [[nodiscard]] array_iterator begin() const noexcept { return this->head; }
     [[nodiscard]] array_iterator end() const noexcept { return {}; }
 };
@@ -433,25 +430,23 @@ class member_range : public std::ranges::view_interface<member_range> {
 
 public:
     member_range() = default;
-    explicit member_range(member_iterator head) noexcept: head(head) {}
+    explicit member_range(member_iterator head) noexcept : head(head) {}
     [[nodiscard]] member_iterator begin() const noexcept { return this->head; }
     [[nodiscard]] member_iterator end() const noexcept { return {}; }
 };
 
-inline array_range reader::array() const noexcept {
-    return array_range { array_iterator { *this } };
-}
+inline array_range reader::array() const noexcept { return array_range { array_iterator { *this } }; }
 
-inline member_range reader::items() const noexcept {
-    return member_range { member_iterator { *this } };
-}
+inline member_range reader::items() const noexcept { return member_range { member_iterator { *this } }; }
 
 inline std::size_t reader::size() const noexcept {
     std::size_t total = 0;
     if (this->is_object()) {
-        for ([[maybe_unused]] const auto entry : this->items()) ++total;
+        for ([[maybe_unused]] const auto entry : this->items())
+            ++total;
     } else if (this->is_array()) {
-        for ([[maybe_unused]] const auto entry : this->array()) ++total;
+        for ([[maybe_unused]] const auto entry : this->array())
+            ++total;
     }
     return total;
 }
@@ -482,8 +477,7 @@ inline reader reader::operator[](std::string_view key) const noexcept {
 
     scanner::skip_whitespace(scan);
     if (scan.position != scan.limit) {
-        return std::unexpected { error { errc::trailing_data,
-                                         static_cast<std::size_t>(scan.position - text.data()) } };
+        return std::unexpected { error { errc::trailing_data, static_cast<std::size_t>(scan.position - text.data()) } };
     }
     return {};
 }
@@ -500,4 +494,4 @@ template<typename T>
     return reader::over(text).try_get<T>();
 }
 
-}// namespace serpent::json
+} // namespace serpent::json

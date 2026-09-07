@@ -85,11 +85,13 @@ void scalars_and_escaping() {
     check_equal(json::encode(std::string { "a\"b" }), std::string { "\"a\\\"b\"" }, "quote is escaped");
     check_equal(json::encode(std::string { "a\\b" }), std::string { "\"a\\\\b\"" }, "backslash is escaped");
     check_equal(json::encode(std::string { "a\nb\tc" }), std::string { "\"a\\nb\\tc\"" }, "newline and tab");
-    check_equal(json::encode(std::string { "a\x01" "b" }), std::string { "\"a\\u0001b\"" }, "control character");
+    check_equal(json::encode(std::string { "a\x01"
+                                           "b" }),
+            std::string { "\"a\\u0001b\"" }, "control character");
     check_equal(json::encode(std::string { "a\x7f" }), std::string { "\"a\x7f\"" }, "delete is not escaped");
     // UTF-8 passes through rather than being expanded to \u escapes.
-    check_equal(json::encode(std::string { "h\xc3\xa9llo \xe2\x9c\x93" }), std::string { "\"h\xc3\xa9llo \xe2\x9c\x93\"" },
-                "utf-8 passes through");
+    check_equal(json::encode(std::string { "h\xc3\xa9llo \xe2\x9c\x93" }),
+            std::string { "\"h\xc3\xa9llo \xe2\x9c\x93\"" }, "utf-8 passes through");
     check_equal(json::encode(std::string { "" }), std::string { "\"\"" }, "empty string");
 
     // JSON cannot express these, so they become null rather than invalid output.
@@ -102,39 +104,39 @@ void containers() {
     check_equal(json::encode(std::vector<int> {}), std::string { "[]" }, "empty array");
     check_equal(json::encode(std::vector<int> { 1, 2, 3 }), std::string { "[1,2,3]" }, "compact array");
     check_equal(json::encode(std::vector<std::vector<int>> { { 1 }, { 2, 3 } }), std::string { "[[1],[2,3]]" },
-                "nested arrays");
-    check_equal(json::encode(std::map<std::string, int> { { "a", 1 }, { "b", 2 } }), std::string { "{\"a\":1,\"b\":2}" },
-                "map is an object");
+            "nested arrays");
+    check_equal(json::encode(std::map<std::string, int> { { "a", 1 }, { "b", 2 } }),
+            std::string { "{\"a\":1,\"b\":2}" }, "map is an object");
     check_equal(json::encode(std::vector<std::optional<int>> { 1, std::nullopt }), std::string { "[1,null]" },
-                "an empty optional is null");
+            "an empty optional is null");
 
-    check_equal(json::encode(point { 3, 4 }), std::string { "{\"x\":3,\"y\":4}" }, "the macro form writes JSON directly");
+    check_equal(
+            json::encode(point { 3, 4 }), std::string { "{\"x\":3,\"y\":4}" }, "the macro form writes JSON directly");
     // One definition. The same call site produces a generic array here, because BJData
     // measured it and found that smaller...
-    check_equal(json::encode(legacy { 7, { 1, 2, 3 } }),
-                std::string { "{\"code\":7,\"readings\":[1,2,3]}" },
-                "one templated to_json writes JSON");
+    check_equal(json::encode(legacy { 7, { 1, 2, 3 } }), std::string { "{\"code\":7,\"readings\":[1,2,3]}" },
+            "one templated to_json writes JSON");
     check_equal(std::string_view { hex(encode(legacy { 7, { 1, 2, 3 } })) },
-                "7b5504636f64655507550872656164696e67735b5501550255035d7d",
-                "and BJData, generically for three small values");
+            "7b5504636f64655507550872656164696e67735b5501550255035d7d",
+            "and BJData, generically for three small values");
 
     // ...and a packed one here, from the very same to_json body.
     const legacy larger { 7, { 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007 } };
     check_equal(std::string_view { hex(encode(larger)) },
-                "7b5504636f64655507550872656164696e67735b2475235508e803e903ea03eb03ec03ed03ee03ef037d",
-                "and a packed array once packing wins, with no change to the type");
+            "7b5504636f64655507550872656164696e67735b2475235508e803e903ea03eb03ec03ed03ee03ef037d",
+            "and a packed array once packing wins, with no change to the type");
     check_equal(json::encode(larger).substr(0, 24), std::string { "{\"code\":7,\"readings\":[10" },
-                "while JSON writes numbers either way");
+            "while JSON writes numbers either way");
 
     const auto from_text = json::decode<legacy>(R"({"code":9,"readings":[4,5]})");
     check(from_text.has_value() && from_text->code == 9 && from_text->readings.size() == 2,
-          "and the matching from_json reads JSON back");
+            "and the matching from_json reads JSON back");
     const auto from_binary = decode<legacy>(encode(larger));
     check(from_binary.has_value() && from_binary->readings.size() == 8 && from_binary->readings[7] == 1007,
-          "and reads a packed BJData array back from the same definition");
+            "and reads a packed BJData array back from the same definition");
 
     check_equal(json::encode(std::vector<point> { { 1, 2 }, { 3, 4 } }),
-                std::string { "[{\"x\":1,\"y\":2},{\"x\":3,\"y\":4}]" }, "array of structs");
+            std::string { "[{\"x\":1,\"y\":2},{\"x\":3,\"y\":4}]" }, "array of structs");
 
     // Binary has no JSON spelling and is written as an array of integers.
     const std::array<std::byte, 3> bytes { std::byte { 0xde }, std::byte { 0xad }, std::byte { 0x01 } };
@@ -142,16 +144,16 @@ void containers() {
 }
 
 void indentation() {
-    check_equal(json::encode(point { 3, 4 }, { .indent = 2 }),
-                std::string { "{\n  \"x\": 3,\n  \"y\": 4\n}" }, "indented object");
-    check_equal(json::encode(std::vector<int> { 1, 2 }, { .indent = 2 }),
-                std::string { "[\n  1,\n  2\n]" }, "indented array");
+    check_equal(json::encode(point { 3, 4 }, { .indent = 2 }), std::string { "{\n  \"x\": 3,\n  \"y\": 4\n}" },
+            "indented object");
+    check_equal(json::encode(std::vector<int> { 1, 2 }, { .indent = 2 }), std::string { "[\n  1,\n  2\n]" },
+            "indented array");
     // An empty container stays on one line, as the reference does.
     check_equal(json::encode(std::vector<int> {}, { .indent = 2 }), std::string { "[]" }, "indented empty array");
     check_equal(json::encode(std::vector<std::vector<int>> { { 1 } }, { .indent = 2 }),
-                std::string { "[\n  [\n    1\n  ]\n]" }, "indent nests");
-    check_equal(json::encode(point { 1, 2 }, { .indent = 4 }),
-                std::string { "{\n    \"x\": 1,\n    \"y\": 2\n}" }, "indent width is configurable");
+            std::string { "[\n  [\n    1\n  ]\n]" }, "indent nests");
+    check_equal(json::encode(point { 1, 2 }, { .indent = 4 }), std::string { "{\n    \"x\": 1,\n    \"y\": 2\n}" },
+            "indent width is configurable");
 }
 
 void from_documents() {
@@ -159,7 +161,7 @@ void from_documents() {
 
     // High precision is a number too wide for a double, so it stays unquoted.
     check_equal(json::encode(parse("4855143132333435363738393031323334353637383930", storage)),
-                std::string { "12345678901234567890" }, "high precision is an unquoted number");
+            std::string { "12345678901234567890" }, "high precision is an unquoted number");
 
     // A char is a one-character string.
     check_equal(json::encode(parse("4361", storage)), std::string { "\"a\"" }, "char is a string");
@@ -168,10 +170,10 @@ void from_documents() {
     check_equal(json::encode(parse("5b2455235503010203", storage)), std::string { "[1,2,3]" }, "typed array");
 
     // An N-D array is nested rather than flattened.
-    check_equal(json::encode(parse("5b2455235b550255035d010203040506", storage)),
-                std::string { "[[1,2,3],[4,5,6]]" }, "2x3 N-D array nests");
+    check_equal(json::encode(parse("5b2455235b550255035d010203040506", storage)), std::string { "[[1,2,3],[4,5,6]]" },
+            "2x3 N-D array nests");
     check_equal(json::encode(parse("5b2455235b5b550255035d5d010203040506", storage)),
-                std::string { "[[1,3,5],[2,4,6]]" }, "column-major N-D array nests in logical order");
+            std::string { "[[1,3,5],[2,4,6]]" }, "column-major N-D array nests in logical order");
 
     // A malformed document yields nothing rather than half a string.
     check(json::encode(parse("5b5501", storage)).empty(), "a truncated document produces no JSON");
@@ -206,7 +208,7 @@ void sinks_and_failures() {
     }
 }
 
-}// namespace
+} // namespace
 
 int main() {
     scalars_and_escaping();

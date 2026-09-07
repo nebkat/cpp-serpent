@@ -18,7 +18,6 @@
 
 namespace serpent::json::scanner {
 
-
 [[nodiscard]] constexpr bool is_space(char value) noexcept {
     return value == ' ' || value == '\t' || value == '\n' || value == '\r';
 }
@@ -43,7 +42,9 @@ struct cursor {
 
     constexpr cursor() = default;
     constexpr cursor(std::string_view text, const char *position) noexcept
-        : origin(text.data()), position(position), limit(text.data() + text.size()) {}
+    : origin(text.data())
+    , position(position)
+    , limit(text.data() + text.size()) {}
 
     [[nodiscard]] constexpr bool ok() const noexcept { return this->failure == errc::ok; }
     [[nodiscard]] constexpr bool available(std::size_t count) const noexcept {
@@ -75,7 +76,8 @@ struct cursor {
 };
 
 constexpr void skip_whitespace(cursor &scan) noexcept {
-    while (scan.available(1) && is_space(scan.peek())) scan.advance(1);
+    while (scan.available(1) && is_space(scan.peek()))
+        scan.advance(1);
 }
 
 /** A scanned string: its contents between the quotes, still escaped. */
@@ -114,54 +116,57 @@ struct string_span {
             if (!scan.need(1)) return result;
             const char kind = scan.take();
             switch (kind) {
-                case '"': case '\\': case '/': case 'b':
-                case 'f': case 'n': case 'r': case 't':
-                    break;
-                case 'u': {
-                    if (!scan.available(4)) {
+            case '"':
+            case '\\':
+            case '/':
+            case 'b':
+            case 'f':
+            case 'n':
+            case 'r':
+            case 't': break;
+            case 'u': {
+                if (!scan.available(4)) {
+                    scan.fail(errc::invalid_escape, escape_at);
+                    return result;
+                }
+                std::uint32_t code = 0;
+                for (int index = 0; index < 4; ++index) {
+                    const int digit = hex_value(scan.take());
+                    if (digit < 0) {
                         scan.fail(errc::invalid_escape, escape_at);
                         return result;
                     }
-                    std::uint32_t code = 0;
+                    code = (code << 4) | static_cast<std::uint32_t>(digit);
+                }
+                if (code >= 0xD800 && code <= 0xDBFF) {
+                    // A high surrogate must be followed by its low half. Checked without
+                    // need(), so running out here is reported as the bad escape it is
+                    // rather than as a truncated document.
+                    if (!scan.available(6) || scan.position[0] != '\\' || scan.position[1] != 'u') {
+                        scan.fail(errc::invalid_escape, escape_at);
+                        return result;
+                    }
+                    std::uint32_t low = 0;
                     for (int index = 0; index < 4; ++index) {
-                        const int digit = hex_value(scan.take());
+                        const int digit = hex_value(scan.position[2 + index]);
                         if (digit < 0) {
                             scan.fail(errc::invalid_escape, escape_at);
                             return result;
                         }
-                        code = (code << 4) | static_cast<std::uint32_t>(digit);
+                        low = (low << 4) | static_cast<std::uint32_t>(digit);
                     }
-                    if (code >= 0xD800 && code <= 0xDBFF) {
-                        // A high surrogate must be followed by its low half. Checked without
-                        // need(), so running out here is reported as the bad escape it is
-                        // rather than as a truncated document.
-                        if (!scan.available(6) || scan.position[0] != '\\' || scan.position[1] != 'u') {
-                            scan.fail(errc::invalid_escape, escape_at);
-                            return result;
-                        }
-                        std::uint32_t low = 0;
-                        for (int index = 0; index < 4; ++index) {
-                            const int digit = hex_value(scan.position[2 + index]);
-                            if (digit < 0) {
-                                scan.fail(errc::invalid_escape, escape_at);
-                                return result;
-                            }
-                            low = (low << 4) | static_cast<std::uint32_t>(digit);
-                        }
-                        if (low < 0xDC00 || low > 0xDFFF) {
-                            scan.fail(errc::invalid_escape, escape_at);
-                            return result;
-                        }
-                        scan.advance(6);
-                    } else if (code >= 0xDC00 && code <= 0xDFFF) {
-                        scan.fail(errc::invalid_escape, escape_at);   // a lone low surrogate
+                    if (low < 0xDC00 || low > 0xDFFF) {
+                        scan.fail(errc::invalid_escape, escape_at);
                         return result;
                     }
-                    break;
-                }
-                default:
-                    scan.fail(errc::invalid_escape, escape_at);
+                    scan.advance(6);
+                } else if (code >= 0xDC00 && code <= 0xDFFF) {
+                    scan.fail(errc::invalid_escape, escape_at); // a lone low surrogate
                     return result;
+                }
+                break;
+            }
+            default: scan.fail(errc::invalid_escape, escape_at); return result;
             }
             continue;
         }
@@ -191,22 +196,25 @@ struct string_span {
     if (!scan.available(1) || !is_digit(scan.peek())) return reject();
     if (scan.peek() == '0') {
         scan.advance(1);
-        if (scan.available(1) && is_digit(scan.peek())) return reject();   // no leading zeros
+        if (scan.available(1) && is_digit(scan.peek())) return reject(); // no leading zeros
     } else {
-        while (scan.available(1) && is_digit(scan.peek())) scan.advance(1);
+        while (scan.available(1) && is_digit(scan.peek()))
+            scan.advance(1);
     }
 
     if (scan.available(1) && scan.peek() == '.') {
         scan.advance(1);
         if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-        while (scan.available(1) && is_digit(scan.peek())) scan.advance(1);
+        while (scan.available(1) && is_digit(scan.peek()))
+            scan.advance(1);
     }
 
     if (scan.available(1) && (scan.peek() == 'e' || scan.peek() == 'E')) {
         scan.advance(1);
         if (scan.available(1) && (scan.peek() == '+' || scan.peek() == '-')) scan.advance(1);
         if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-        while (scan.available(1) && is_digit(scan.peek())) scan.advance(1);
+        while (scan.available(1) && is_digit(scan.peek()))
+            scan.advance(1);
     }
 
     return std::string_view { begin, static_cast<std::size_t>(scan.position - begin) };
@@ -260,7 +268,8 @@ constexpr void append_utf8(std::uint32_t code, Append &append) noexcept {
 template<typename Append>
 constexpr void decode_string(string_span text, Append append) noexcept {
     if (!text.escaped) {
-        for (const char value : text.contents) append(value);
+        for (const char value : text.contents)
+            append(value);
         return;
     }
 
@@ -281,26 +290,26 @@ constexpr void decode_string(string_span text, Append append) noexcept {
 
         const char kind = text.contents[++index];
         switch (kind) {
-            case '"':  append('"'); break;
-            case '\\': append('\\'); break;
-            case '/':  append('/'); break;
-            case 'b':  append('\b'); break;
-            case 'f':  append('\f'); break;
-            case 'n':  append('\n'); break;
-            case 'r':  append('\r'); break;
-            case 't':  append('\t'); break;
-            case 'u': {
-                std::uint32_t code = read_hex(index + 1);
-                index += 4;
-                if (code >= 0xD800 && code <= 0xDBFF) {
-                    const std::uint32_t low = read_hex(index + 3);
-                    index += 6;
-                    code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
-                }
-                append_utf8(code, append);
-                break;
+        case '"': append('"'); break;
+        case '\\': append('\\'); break;
+        case '/': append('/'); break;
+        case 'b': append('\b'); break;
+        case 'f': append('\f'); break;
+        case 'n': append('\n'); break;
+        case 'r': append('\r'); break;
+        case 't': append('\t'); break;
+        case 'u': {
+            std::uint32_t code = read_hex(index + 1);
+            index += 4;
+            if (code >= 0xD800 && code <= 0xDBFF) {
+                const std::uint32_t low = read_hex(index + 3);
+                index += 6;
+                code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
             }
-            default: break;
+            append_utf8(code, append);
+            break;
+        }
+        default: break;
         }
     }
 }
@@ -351,7 +360,7 @@ inline void skip_container(cursor &scan, bool object, int depth) noexcept {
     while (scan.ok()) {
         skip_whitespace(scan);
         if (object) {
-            (void) scan_string(scan);
+            (void)scan_string(scan);
             if (!scan.ok()) return;
             skip_whitespace(scan);
             if (!scan.need(1)) return;
@@ -387,20 +396,20 @@ inline void skip_value(cursor &scan, int depth) noexcept {
     if (!scan.need(1)) return;
 
     switch (scan.peek()) {
-        case '{': skip_container(scan, true, depth); return;
-        case '[': skip_container(scan, false, depth); return;
-        case '"': (void) scan_string(scan); return;
-        case 't': scan_literal(scan, "true"); return;
-        case 'f': scan_literal(scan, "false"); return;
-        case 'n': scan_literal(scan, "null"); return;
-        default:
-            if (scan.peek() == '-' || is_digit(scan.peek())) {
-                (void) scan_number(scan);
-                return;
-            }
-            scan.fail(errc::unexpected_character);
+    case '{': skip_container(scan, true, depth); return;
+    case '[': skip_container(scan, false, depth); return;
+    case '"': (void)scan_string(scan); return;
+    case 't': scan_literal(scan, "true"); return;
+    case 'f': scan_literal(scan, "false"); return;
+    case 'n': scan_literal(scan, "null"); return;
+    default:
+        if (scan.peek() == '-' || is_digit(scan.peek())) {
+            (void)scan_number(scan);
             return;
+        }
+        scan.fail(errc::unexpected_character);
+        return;
     }
 }
 
-}// namespace serpent::json::scanner
+} // namespace serpent::json::scanner

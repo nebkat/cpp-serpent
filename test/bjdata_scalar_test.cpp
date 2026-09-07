@@ -29,7 +29,8 @@ void scalars() {
     check_equal(parse("750001", storage).as_int<int>().value_or(0), 256, "u 256");
     check_equal(parse("497fff", storage).as_int<int>().value_or(0), -129, "I -129");
     check_equal(parse("6dffffffff", storage).as_int<std::uint32_t>().value_or(0), 4294967295u, "m 4294967295");
-    check_equal(parse("4d0000000001000000", storage).as_int<std::uint64_t>().value_or(0), 4294967296ull, "M 4294967296");
+    check_equal(
+            parse("4d0000000001000000", storage).as_int<std::uint64_t>().value_or(0), 4294967296ull, "M 4294967296");
 
     // Narrowing is range checked, not truncated.
     check(!parse("750001", storage).as_int<std::uint8_t>().has_value(), "u 256 does not fit uint8");
@@ -37,7 +38,8 @@ void scalars() {
     check_equal(parse("497fff", storage).as_int<std::int64_t>().value_or(0), -129, "I -129 widens");
 
     check(std::abs(parse("68003c", storage).as_float<double>().value_or(0.0) - 1.0) < 1e-9, "h 1.0");
-    check(std::abs(parse("44182d4454fb210940", storage).as_float<double>().value_or(0.0) - 3.141592653589793) < 1e-12, "D pi");
+    check(std::abs(parse("44182d4454fb210940", storage).as_float<double>().value_or(0.0) - 3.141592653589793) < 1e-12,
+            "D pi");
     // compactTypes means an integer marker may carry what was conceptually a float.
     check(std::abs(parse("5502", storage).as_float<double>().value_or(0.0) - 2.0) < 1e-12, "U 2 reads as a float");
 }
@@ -66,7 +68,8 @@ void strings() {
     check_equal(parse("53550568656c6c6f", storage).as_string().value_or("?"), "hello", "S hello");
     // The length prefix counts UTF-8 bytes, not code units.
     check_equal(parse("53550668c3a96c6c6f", storage).as_string().value_or("?"), "h\xc3\xa9llo", "S heollo utf-8");
-    check_equal(parse("53550668c3a96c6c6f", storage).as_string().value_or("").size(), std::size_t { 6 }, "S utf-8 byte length");
+    check_equal(parse("53550668c3a96c6c6f", storage).as_string().value_or("").size(), std::size_t { 6 },
+            "S utf-8 byte length");
 
     // High precision keeps its raw decimal digits.
     check_equal(parse("48550130", storage).as_string().value_or("?"), "0", "H 0");
@@ -97,7 +100,7 @@ void poisoning() {
     check(!parse("4d00000000", storage).as_int<std::uint64_t>().has_value(), "truncated uint64 payload");
 }
 
-}// namespace
+} // namespace
 
 int main() {
     scalars();

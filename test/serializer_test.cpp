@@ -234,7 +234,7 @@ void reflection_seam() {
     check_equal(converted("device_type", naming_style::pascal_case), std::string { "DeviceType" }, "snake to pascal");
     check_equal(converted("device_type", naming_style::kebab_case), std::string { "device-type" }, "snake to kebab");
     check_equal(converted("deviceType", naming_style::screaming_snake_case), std::string { "DEVICE_TYPE" },
-                "camel to screaming snake");
+            "camel to screaming snake");
 
     // A digit begins a word, so both spellings of a numbered field agree.
     check_equal(converted("value2x", naming_style::snake_case), std::string { "value_2x" }, "digit starts a word");
@@ -291,7 +291,7 @@ void both_formats() {
     check_equal(from_text->points.at(1).y, 4, "nested struct through JSON");
     check_equal(from_text->counts.at("b"), 2, "map member through JSON");
     check(from_text->highlight.has_value() && from_text->highlight->label == "hot",
-          "optional struct member through JSON");
+            "optional struct member through JSON");
 
     // A key absent from the JSON leaves the member at its default, exactly as for BJData.
     const auto partial = json::decode<point>(R"({"y":5})");
@@ -304,7 +304,7 @@ void both_formats() {
     // Non-intrusive and macro forms carry across too.
     check(json::decode<extent>(R"({"width":640,"height":480})")->width == 640, "non-intrusive form reads JSON");
     check(json::decode<segment>(json::encode(segment { { 1, 1 }, { 2, 2 }, "s" }))->label == "s",
-          "the convert form round-trips through JSON");
+            "the convert form round-trips through JSON");
 }
 
 void sizing() {
@@ -313,7 +313,7 @@ void sizing() {
     check_equal(measure(document {}), encode(document {}).size(), "measure agrees for a nested type");
 }
 
-}// namespace
+} // namespace
 
 int main() {
     macro_form();

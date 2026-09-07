@@ -41,13 +41,15 @@ class member_range;
  */
 class view {
     marker element = marker::invalid;
-    std::span<const std::byte> source {};   ///< the whole document, so bounds and offsets are absolute
-    const std::byte *payload = nullptr;     ///< first byte after this value's marker
+    std::span<const std::byte> source {}; ///< the whole document, so bounds and offsets are absolute
+    const std::byte *payload = nullptr; ///< first byte after this value's marker
 
 public:
     constexpr view() = default;
     constexpr view(marker element, std::span<const std::byte> source, const std::byte *payload) noexcept
-        : element(element), source(source), payload(payload) {}
+    : element(element)
+    , source(source)
+    , payload(payload) {}
 
     /** Wraps a buffer, reading its leading marker. Performs no deep parsing. */
     [[nodiscard]] static view over(std::span<const std::byte> buffer) noexcept {
@@ -67,27 +69,27 @@ public:
 
     [[nodiscard]] constexpr kind type() const noexcept {
         switch (this->element) {
-            case marker::null:           return kind::null;
-            case marker::boolean_true:
-            case marker::boolean_false:  return kind::boolean;
-            case marker::uint8:
-            case marker::int8:
-            case marker::uint16:
-            case marker::int16:
-            case marker::uint32:
-            case marker::int32:
-            case marker::uint64:
-            case marker::int64:
-            case marker::byte:           return kind::integer;
-            case marker::float16:
-            case marker::float32:
-            case marker::float64:        return kind::real;
-            case marker::character:
-            case marker::string:
-            case marker::high_precision: return kind::string;
-            case marker::array_begin:    return kind::array;
-            case marker::object_begin:   return kind::object;
-            default:                     return kind::invalid;
+        case marker::null: return kind::null;
+        case marker::boolean_true:
+        case marker::boolean_false: return kind::boolean;
+        case marker::uint8:
+        case marker::int8:
+        case marker::uint16:
+        case marker::int16:
+        case marker::uint32:
+        case marker::int32:
+        case marker::uint64:
+        case marker::int64:
+        case marker::byte: return kind::integer;
+        case marker::float16:
+        case marker::float32:
+        case marker::float64: return kind::real;
+        case marker::character:
+        case marker::string:
+        case marker::high_precision: return kind::string;
+        case marker::array_begin: return kind::array;
+        case marker::object_begin: return kind::object;
+        default: return kind::invalid;
         }
     }
 
@@ -130,10 +132,10 @@ public:
     [[nodiscard]] std::optional<T> as_float() const noexcept {
         if (this->available() < payload_width(this->element)) return std::nullopt;
         switch (this->element) {
-            case marker::float16: return static_cast<T>(decode_float16(detail::load<std::uint16_t>(this->payload)));
-            case marker::float32: return static_cast<T>(detail::load<float>(this->payload));
-            case marker::float64: return static_cast<T>(detail::load<double>(this->payload));
-            default: break;
+        case marker::float16: return static_cast<T>(decode_float16(detail::load<std::uint16_t>(this->payload)));
+        case marker::float32: return static_cast<T>(detail::load<float>(this->payload));
+        case marker::float64: return static_cast<T>(detail::load<double>(this->payload));
+        default: break;
         }
         if (this->element == marker::uint64) {
             return static_cast<T>(detail::load<std::uint64_t>(this->payload));
@@ -161,7 +163,8 @@ public:
         const auto info = this->container_header();
         if (this->element != marker::array_begin || !info.typed()) return std::nullopt;
         if (info.element != marker::byte && info.element != marker::uint8) return std::nullopt;
-        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body)) return std::nullopt;
+        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body))
+            return std::nullopt;
         return std::span<const std::byte> { info.body, static_cast<std::size_t>(info.count) };
     }
 
@@ -179,7 +182,8 @@ public:
         if (info.element != strong_type_for<T>()) return std::nullopt;
 
         const auto width = payload_width(info.element);
-        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body) / width) return std::nullopt;
+        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body) / width)
+            return std::nullopt;
         return nonstd::unaligned_little_span<const T> { info.body, static_cast<std::size_t>(info.count) };
     }
 
@@ -251,15 +255,18 @@ public:
 
     template<typename T>
     [[nodiscard]] std::optional<T> try_get() const noexcept {
-        if constexpr (std::same_as<T, bool>) return this->as_bool();
-        else if constexpr (std::same_as<T, std::string_view>) return this->as_string();
+        if constexpr (std::same_as<T, bool>)
+            return this->as_bool();
+        else if constexpr (std::same_as<T, std::string_view>)
+            return this->as_string();
         else if constexpr (std::constructible_from<T, std::string_view> && !std::is_arithmetic_v<T>) {
             const auto text = this->as_string();
             if (!text) return std::nullopt;
             return T { *text };
-        }
-        else if constexpr (std::floating_point<T>) return this->as_float<T>();
-        else if constexpr (std::integral<T>) return this->as_int<T>();
+        } else if constexpr (std::floating_point<T>)
+            return this->as_float<T>();
+        else if constexpr (std::integral<T>)
+            return this->as_int<T>();
         else {
             T value {};
             if (!serializer<T>::read(*this, value)) return std::nullopt;
@@ -275,7 +282,9 @@ public:
     }
 
 private:
-    [[nodiscard]] constexpr const std::byte *limit() const noexcept { return this->source.data() + this->source.size(); }
+    [[nodiscard]] constexpr const std::byte *limit() const noexcept {
+        return this->source.data() + this->source.size();
+    }
 
     [[nodiscard]] constexpr std::size_t available() const noexcept {
         return this->payload != nullptr && this->payload < this->limit()
@@ -309,10 +318,10 @@ struct key_value {
  */
 class array_iterator {
 public:
-    using value_type        = view;
-    using reference         = view;
-    using difference_type   = std::ptrdiff_t;
-    using iterator_concept  = std::forward_iterator_tag;
+    using value_type = view;
+    using reference = view;
+    using difference_type = std::ptrdiff_t;
+    using iterator_concept = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
 
 private:
@@ -323,7 +332,9 @@ private:
     bool counted = false;
     bool exhausted = true;
 
-    [[nodiscard]] constexpr const std::byte *limit() const noexcept { return this->source.data() + this->source.size(); }
+    [[nodiscard]] constexpr const std::byte *limit() const noexcept {
+        return this->source.data() + this->source.size();
+    }
 
     void normalise() noexcept {
         if (this->cursor == nullptr) {
@@ -331,7 +342,8 @@ private:
             return;
         }
         if (this->element == marker::invalid) {
-            while (this->cursor < this->limit() && to_marker(*this->cursor) == marker::noop) ++this->cursor;
+            while (this->cursor < this->limit() && to_marker(*this->cursor) == marker::noop)
+                ++this->cursor;
         }
         if (this->counted) {
             this->exhausted = this->remaining == 0 || this->cursor >= this->limit();
@@ -344,8 +356,11 @@ public:
     array_iterator() = default;
 
     array_iterator(std::span<const std::byte> source, const detail::header &info) noexcept
-        : source(source), cursor(info.body), element(info.element),
-          remaining(info.count), counted(!info.unbounded) {
+    : source(source)
+    , cursor(info.body)
+    , element(info.element)
+    , remaining(info.count)
+    , counted(!info.unbounded) {
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
@@ -409,10 +424,10 @@ public:
 /** Forward iterator over the key/value pairs of an object. */
 class member_iterator {
 public:
-    using value_type        = key_value;
-    using reference         = key_value;
-    using difference_type   = std::ptrdiff_t;
-    using iterator_concept  = std::forward_iterator_tag;
+    using value_type = key_value;
+    using reference = key_value;
+    using difference_type = std::ptrdiff_t;
+    using iterator_concept = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
 
 private:
@@ -423,7 +438,9 @@ private:
     bool counted = false;
     bool exhausted = true;
 
-    [[nodiscard]] constexpr const std::byte *limit() const noexcept { return this->source.data() + this->source.size(); }
+    [[nodiscard]] constexpr const std::byte *limit() const noexcept {
+        return this->source.data() + this->source.size();
+    }
 
     void normalise() noexcept {
         if (this->cursor == nullptr) {
@@ -431,7 +448,8 @@ private:
             return;
         }
         // Unlike a typed array, an object skips noops whether or not it has a strong type.
-        while (this->cursor < this->limit() && to_marker(*this->cursor) == marker::noop) ++this->cursor;
+        while (this->cursor < this->limit() && to_marker(*this->cursor) == marker::noop)
+            ++this->cursor;
 
         if (this->counted) {
             this->exhausted = this->remaining == 0 || this->cursor >= this->limit();
@@ -444,8 +462,11 @@ public:
     member_iterator() = default;
 
     member_iterator(std::span<const std::byte> source, const detail::header &info) noexcept
-        : source(source), cursor(info.body), element(info.element),
-          remaining(info.count), counted(!info.unbounded) {
+    : source(source)
+    , cursor(info.body)
+    , element(info.element)
+    , remaining(info.count)
+    , counted(!info.unbounded) {
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
@@ -524,7 +545,7 @@ class array_range : public std::ranges::view_interface<array_range> {
 
 public:
     array_range() = default;
-    explicit array_range(array_iterator head) noexcept: head(head) {}
+    explicit array_range(array_iterator head) noexcept : head(head) {}
 
     [[nodiscard]] array_iterator begin() const noexcept { return this->head; }
     [[nodiscard]] array_iterator end() const noexcept { return {}; }
@@ -535,7 +556,7 @@ class member_range : public std::ranges::view_interface<member_range> {
 
 public:
     member_range() = default;
-    explicit member_range(member_iterator head) noexcept: head(head) {}
+    explicit member_range(member_iterator head) noexcept : head(head) {}
 
     [[nodiscard]] member_iterator begin() const noexcept { return this->head; }
     [[nodiscard]] member_iterator end() const noexcept { return {}; }
@@ -558,9 +579,11 @@ inline std::size_t view::size() const noexcept {
 
     std::size_t total = 0;
     if (this->element == marker::object_begin) {
-        for ([[maybe_unused]] auto entry : this->items()) ++total;
+        for ([[maybe_unused]] auto entry : this->items())
+            ++total;
     } else {
-        for ([[maybe_unused]] auto entry : this->array()) ++total;
+        for ([[maybe_unused]] auto entry : this->array())
+            ++total;
     }
     return total;
 }
@@ -618,4 +641,4 @@ inline view view::operator[](std::string_view key) const noexcept {
     return {};
 }
 
-}// namespace serpent::bjdata
+} // namespace serpent::bjdata

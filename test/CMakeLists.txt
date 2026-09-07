@@ -3,7 +3,7 @@
 #   cmake -S . -B build && cmake --build build
 #   ctest --test-dir build --output-on-failure
 
-option(BJDATA_TEST_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
+option(SERPENT_TEST_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
 
 set(TESTS
     unaligned_ptr
@@ -25,7 +25,7 @@ foreach(TEST_NAME IN LISTS TESTS)
     target_compile_definitions(${TEST_NAME}_test PRIVATE
         SERPENT_FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures")
 
-    if(BJDATA_TEST_SANITIZE)
+    if(SERPENT_TEST_SANITIZE)
         target_compile_options(${TEST_NAME}_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${TEST_NAME}_test PRIVATE -fsanitize=address,undefined)
     endif()
