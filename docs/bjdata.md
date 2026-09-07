@@ -5,22 +5,34 @@ what makes reading it in place possible.
 
 ## Counted arrays
 
-By default an array of objects is written unbounded, `[ … ]`, which is what the reference
-encoder does. A reader then has no idea how many elements are coming and grows its container as
-it goes — fifteen allocations for ten thousand records.
+A sized array states its length — `[#n` rather than an unbounded `[ … ]` — so a reader knows
+how many elements are coming and sizes its container once instead of growing it.
 
 ```cpp
-constexpr serpent::bjdata::writer_options counted { .counted_containers = true };
-const auto bytes = bjdata::encode<counted>(values);
+bjdata::encode(values);   // [#n from three elements up
 ```
 
-Now a sized range writes its length, `[#n`, and decoding sizes the container once: **one
-allocation instead of fifteen, and faster for it**. On a 845 KB document the count costs three
-bytes.
+The count costs two bytes. What it buys depends on how many elements there are:
 
-It is off by default because it departs from the reference encoder, which only writes a count
-beside a type marker. A packed numeric array already carries one, so `std::vector<int>` and
-friends are sized on read with no option at all.
+| elements | extra bytes | allocations to decode |
+|---:|---:|---:|
+| 1 | +2 | 1 → 1 |
+| 2 | +2 | 2 → 1 |
+| 3 | +2 | 3 → 1 |
+| 1000 | +3 | 11 → 1 |
+
+At one element it saves nothing, so the default threshold is three, where two bytes buy two
+allocations. `writer_options::counted_containers_from` moves it.
+
+This is the one place the default output departs from the reference encoder, which writes a
+count only beside a type marker. `bjdata::reference_parity` restores it:
+
+```cpp
+bjdata::encode<bjdata::reference_parity>(values);   // unbounded, byte-for-byte the reference
+```
+
+A packed numeric array already carried a count, so `std::vector<int>` and friends are sized on
+read under either policy.
 
 ## Zero copy, concretely
 

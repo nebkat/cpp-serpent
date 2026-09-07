@@ -116,7 +116,7 @@ void containers() {
     // measured it and found that smaller...
     check_equal(json::encode(legacy { 7, { 1, 2, 3 } }), std::string { "{\"code\":7,\"readings\":[1,2,3]}" },
             "one templated to_json writes JSON");
-    check_equal(std::string_view { hex(encode(legacy { 7, { 1, 2, 3 } })) },
+    check_equal(std::string_view { hex(encode<reference_parity>(legacy { 7, { 1, 2, 3 } })) },
             "7b5504636f64655507550872656164696e67735b5501550255035d7d",
             "and BJData, generically for three small values");
 

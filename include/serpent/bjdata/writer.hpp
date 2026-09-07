@@ -46,15 +46,23 @@ struct writer_options {
      */
     unsigned copy_tolerance_percent = 0;
     /**
-     * Give a sized array its element count, as [#n rather than an unbounded [.
+     * Give a sized array its element count, as [#n rather than an unbounded [, once it holds
+     * at least this many elements.
      *
-     * Costs a few bytes and departs from the reference encoder, which only writes a count
-     * beside a type marker. In exchange a reader knows how many elements are coming and sizes
-     * its container once instead of growing it, which is the difference between one allocation
-     * and one per doubling.
+     * A reader that knows how many elements are coming sizes its container once instead of
+     * growing it. The count costs two bytes, and what it buys depends on how many elements
+     * there are: at one it saves nothing, at two it saves one allocation, at three it saves
+     * two, at a thousand it saves ten and a megabyte of copying. Three is where it stops being
+     * arguable.
+     *
+     * Set it to `never_counted` for output byte-identical to the reference encoder, which
+     * writes a count only beside a type marker.
      */
-    bool counted_containers = false;
+    std::size_t counted_containers_from = 3;
 };
+
+/** For writer_options::counted_containers_from: never write a bare count. */
+inline constexpr std::size_t never_counted = std::numeric_limits<std::size_t>::max();
 
 template<writer_options Options>
 class array_scope;
@@ -536,9 +544,9 @@ void basic_writer<Options>::range(const R &items) noexcept {
             }
     }
 
-    if constexpr (Options.counted_containers) {
-        if constexpr (std::ranges::sized_range<R>) {
-            const auto count = static_cast<std::uint64_t>(std::ranges::size(items));
+    if constexpr (std::ranges::sized_range<R>) {
+        const auto count = static_cast<std::uint64_t>(std::ranges::size(items));
+        if (Options.counted_containers_from != never_counted && count >= Options.counted_containers_from) {
             this->begin_counted_array(count);
             for (const auto &item : items)
                 this->value(item);

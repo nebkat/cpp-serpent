@@ -114,7 +114,7 @@ std::string digest(const view &value) {
  * and key encoding. High precision is the one value that must be re-emitted by marker, since
  * H reads back as an ordinary string.
  */
-void reencode(writer &out, view source) {
+void reencode(basic_writer<reference_parity> &out, view source) {
     switch (source.type()) {
     case kind::null: out.null(); return;
     case kind::boolean: out.value(source.as_bool() == true); return;
@@ -254,7 +254,7 @@ int main(int argc, char **argv) {
         {
             std::vector<std::byte> produced;
             container_sink out { produced };
-            writer target { out };
+            basic_writer<reference_parity> target { out };
             reencode(target, view::over(bytes));
             const auto finished = target.finish();
             check(finished.has_value(), name + ": re-encodes cleanly");

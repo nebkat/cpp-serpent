@@ -375,35 +375,31 @@ void containers_need_no_customization() {
 }
 
 /**
- * A counted array lets the reader size its container once instead of growing it.
+ * A sized array states its length, so the reader sizes its container once instead of growing it.
  *
- * Off by default, because the reference encoder only writes a count beside a type marker, and
- * the fixture suite holds the default output to that byte for byte.
+ * On by default from three elements up, where the two bytes it costs buy two allocations. Below
+ * that it buys less than it costs, and reference_parity turns it off entirely.
  */
 void counted_containers() {
-    constexpr serpent::bjdata::writer_options counted { .counted_containers = true };
+    const std::vector<point> two { { 1, 2 }, { 3, 4 } };
+    const std::vector<point> three { { 1, 2 }, { 3, 4 }, { 5, 6 } };
 
-    const std::vector<point> points { { 1, 2 }, { 3, 4 }, { 5, 6 } };
-    const auto unbounded = encode(points);
-    const auto with_count = encode<counted>(points);
+    check(hex(encode(two)).find("5b7b") == 0, "below the threshold an array stays unbounded");
+    check(hex(encode(three)).find("5b23") == 0, "at three elements it states its length");
+    check(hex(encode<reference_parity>(three)).find("5b7b") == 0, "reference_parity never states one");
+    check(encode(three).size() == encode<reference_parity>(three).size() + 2, "which costs two bytes");
 
-    check(with_count.size() > unbounded.size(), "the count costs a few bytes");
-    check(hex(unbounded).find("5b7b") == 0, "the default is still an unbounded array of objects");
-    check(hex(with_count).find("5b23") == 0, "the counted form writes [# before the elements");
-
-    const auto back = decode<std::vector<point>>(with_count);
+    const auto back = decode<std::vector<point>>(encode(three));
     check(back && back->size() == 3 && back->at(2).y == 6, "and it round-trips");
 
     // The point of the count: it is readable without walking the elements.
-    const auto counted_view = view::over(with_count);
-    const auto hint = counted_view.size_hint();
+    const auto hint = view::over(encode(three)).size_hint();
     check(hint && *hint == 3, "a counted array states its length");
-    check(!view::over(unbounded).size_hint(), "an unbounded one does not, rather than counting");
-    check(counted_view.size() == 3, "and size() agrees either way");
-    check(view::over(unbounded).size() == 3, "including when it has to walk");
+    check(!view::over(encode<reference_parity>(three)).size_hint(), "an unbounded one does not, rather than counting");
+    check(view::over(encode<reference_parity>(three)).size() == 3, "though size() will still walk it");
 
-    // A typed array already carried a count, so it needs no option to be sized on read.
-    const auto typed = encode(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });
+    // A packed numeric array already carried a count, whatever the threshold.
+    const auto typed = encode<reference_parity>(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });
     const auto typed_hint = view::over(typed).size_hint();
     check(typed_hint && *typed_hint == 5, "a packed numeric array states its length already");
 }

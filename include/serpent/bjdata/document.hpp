@@ -70,6 +70,9 @@ template<writer_options Options = writer_options {}, typename T>
     return target.finish().value_or(0);
 }
 
+/** Output byte-identical to the reference encoder: unbounded containers, nothing else changed. */
+inline constexpr writer_options reference_parity { .counted_containers_from = never_counted };
+
 /** Shorthand for the policy that does no compaction at all. */
 inline constexpr writer_options no_compaction { .compact_types = false, .numeric_packing = false };
 

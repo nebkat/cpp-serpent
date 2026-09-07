@@ -22,20 +22,19 @@ integer digit pairs — all live in its JSON text path. Its binary format touche
 
 Ten thousand structs of five fields.
 
-| | serpent (BJData) | serpent, counted | struct-mapping lib (BEVE) | DOM lib (CBOR) |
-|---|---:|---:|---:|---:|
-| encode | 0.61 ms | 0.61 ms | **0.25 ms** (2.4x faster) | 3.45 ms |
-| decode | 1.60 ms | 1.58 ms | **0.25 ms** (6.2x faster) | 6.07 ms |
-| allocations, decode | 15 | **1** | **1** | 140,025 |
-| bytes allocated | 1,834,952 | **560,000** | **560,000** | 10,364,344 |
-| output size | 844,691 B | 844,694 B | 828,964 B | 766,100 B |
+| | serpent (BJData) | struct-mapping lib (BEVE) | DOM lib (CBOR) |
+|---|---:|---:|---:|
+| encode | 0.61 ms | **0.25 ms** (2.4x faster) | 3.45 ms |
+| decode | 1.58 ms | **0.25 ms** (6.3x faster) | 6.07 ms |
+| allocations, decode | **1** | **1** | 140,025 |
+| bytes allocated | **560,000** | **560,000** | 10,364,344 |
+| output size | 844,694 B | 828,964 B | 766,100 B |
 
 So the gap is not the text parsing and it is not the tables.
 
-**Allocation behaviour is now identical** — one allocation, the same 560,000 bytes — once the
-array carries its length, which costs three bytes on this document. See
-[counted arrays](bjdata.md#counted-arrays); a packed numeric array already carries one, so
-`std::vector<int>` needs no option.
+**Allocation behaviour is identical** — one allocation, the same 560,000 bytes — because a
+sized array states its length, which costs three bytes on this document. See
+[counted arrays](bjdata.md#counted-arrays).
 
 **Time is still 6.2x on decode and 2.4x on encode**, and that is implementation headroom rather
 than anything structural. The remaining difference is per-field: the other library resolves each
