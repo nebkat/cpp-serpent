@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(serpent CXX)
 
 option(SERPENT_TEST_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
+option(SERPENT_BUILD_BENCHMARKS "Build the benchmarks, which fetch another library and a test corpus" OFF)
 
 # Reading and writing unaligned values has nothing to do with serialization, so it is its own
 # library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
@@ -54,4 +55,7 @@ target_compile_features(serpent INTERFACE cxx_std_23)
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(test)
     add_subdirectory(example)
+    if(SERPENT_BUILD_BENCHMARKS)
+        add_subdirectory(benchmark)
+    endif()
 endif()
