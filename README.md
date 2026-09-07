@@ -101,8 +101,8 @@ sign-extended 24-bit field.
 
 `writer` emits into a **sink**, which is anything with a member
 `write(std::span<const std::byte>)`. The return type is deliberately unconstrained, so the
-classes a firmware already has — ring buffers, sockets, flash record writers, OTA writers —
-are sinks as they stand, whether they return `void`, `bool`, `std::size_t` or
+classes an application already has — ring buffers, sockets, file and flash writers, loggers
+— are sinks as they stand, whether they return `void`, `bool`, `std::size_t` or
 `std::expected`.
 
 ```cpp
@@ -375,9 +375,8 @@ Three things JSON cannot represent, and what happens:
 | NaN, ±infinity | `null`, so the output is always valid JSON |
 | N-D arrays | nested, not flattened — a 2×3 becomes `[[1,2,3],[4,5,6]]` |
 
-> Note: `tools/python/util.py:201-231` in sunrise-firmware renders binary as **hex chunks**
-> rather than integers, so the firmware and that Python tooling will print the same document
-> differently. Worth reconciling if both ever feed the same consumer.
+> Note: other BJData tooling sometimes renders binary as a hex string instead. If something
+> downstream expects that, it will need telling.
 
 Numbers are rendered exactly as the reference implementation renders them, which is what lets
 the test suite compare our JSON to dart-bjdata's own JSON byte for byte.
@@ -421,7 +420,7 @@ Reads and writes **draft 3**: every marker (`Z T F N U i u I m l M L h d D C B S
 unbounded, counted and typed containers, dimension-array counts in all three forms and both
 orderings, and the noop rules (skipped in untyped arrays and in *all* objects, but not in
 `$`-typed arrays). `E` is explicitly rejected rather than skipped. `h` is decoded by bit
-manipulation rather than `_Float16`, which the xtensa backend cannot be relied on for.
+manipulation rather than `_Float16`, which not every backend provides.
 
 JSON is read and written in full, including surrogate-pair escapes.
 
@@ -440,13 +439,12 @@ accepts exactly what it does. In particular a strong type must be fixed width, s
 `$H`, `$Z`, `$T` and `$F` are rejected — which is what keeps every typed container O(1) to
 index and to skip.
 
-> **Note for a future firmware port.** nlohmann's `ubjson_prefix` returns `'Z'` for null,
-> `'T'`/`'F'` for booleans and `'S'` for strings, and sunrise-firmware's `app::fs::store_json`
-> writes with `use_type = true` — so a firmware-written array of strings is `[$S#…`, which
-> this reader rejects. Reading those files needs a leniency mode first: accept zero-width
-> strong types `Z`/`T`/`F` and variable-width `$S`/`$H` arrays (iteration only, no random
-> access). That is purely additional accepted grammar and drops into the same core without
-> changing the API.
+> **Reading nlohmann's output.** nlohmann's `ubjson_prefix` returns `'Z'` for null,
+> `'T'`/`'F'` for booleans and `'S'` for strings, so anything it wrote with `use_type = true`
+> spells an array of strings `[$S#…`, which this reader rejects. Reading such a document needs
+> a leniency mode: accept zero-width strong types `Z`/`T`/`F` and variable-width `$S`/`$H`
+> arrays, iteration only and no random access. That is purely additional accepted grammar and
+> drops into the same core without changing the API.
 
 ## Building and testing
 
@@ -487,7 +485,8 @@ large value that forces a wider marker, a size tie that must stay generic), sinc
 where a writer is easiest to get subtly wrong.
 
 ```sh
-cd ~/Work/Troo/dart-bjdata && dart compile exe bin/bjdata.dart -o /tmp/bjdatacli
+git clone https://github.com/nebkat/dart-bjdata && cd dart-bjdata
+dart compile exe bin/bjdata.dart -o /tmp/bjdatacli
 python3 test/generate_fixtures.py /tmp/bjdatacli
 ```
 
@@ -518,12 +517,20 @@ const auto text = to_json(view::over(encoded));
 That is deliberately explicit. A hidden intermediate inside `to_json` would allocate a whole
 document behind the caller's back.
 
-The `nonstd/` include paths deliberately match sunrise-firmware's
-`lib/common/include/nonstd/`, so these headers can be dropped in there unchanged.
-`unaligned.hpp` is a verbatim copy of the firmware's and must not fork.
+`unaligned/` is a separate library with its own target, `unaligned::unaligned`, because
+reading and writing unaligned values is useful with no serialization anywhere near it.
+Extracting it into its own repository is a directory move.
 
-One caveat for that move: `notation.hpp` uses `std::format`, which appears nowhere in the
-firmware — it is fmt-only. That header needs an fmt spelling, or should stay host-only.
+## Examples
+
+`example/` is built and run by `ctest`, so it cannot quietly stop compiling.
+
+| | |
+|---|---|
+| `quickstart.cpp` | one definition per type, carried by both formats in both directions |
+| `reading_without_copying.cpp` | a document built in a fixed buffer and read back with strings and arrays pointing into it |
+| `reflection.cpp` | annotations naming the keys, with the macro fallback every toolchain needs today |
+| `transcoding.cpp` | a stored document rendered as JSON, and one value lifted out verbatim |
 
 ## Formatting
 
@@ -538,9 +545,8 @@ AlignConsecutiveAssignments: None
 ```
 
 ```sh
-clang-format -i $(git ls-files '*.hpp' '*.cpp' | grep -v nonstd/unaligned.hpp)
+clang-format -i $(git ls-files '*.hpp' '*.cpp')
 ```
 
-`nonstd/unaligned.hpp` is excluded: it is a verbatim copy of the firmware's and must not
-fork. The generated `SERPENT_PASTE` chain is fenced with `// clang-format off`, since one
-`#define` per line reads better than the same text wrapped.
+The generated `SERPENT_PASTE` chain is fenced with `// clang-format off`, since one `#define`
+per line reads better than the same text wrapped.

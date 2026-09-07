@@ -13,7 +13,7 @@ so the reader is checked against an independent implementation rather than again
 transcribed by hand.
 
 Usage: generate_fixtures.py [path-to-bjdata-cli]
-  The CLI comes from ~/Work/Troo/dart-bjdata:
+  The CLI comes from https://github.com/nebkat/dart-bjdata:
       dart compile exe bin/bjdata.dart -o /tmp/bjdatacli
 """
 
@@ -106,7 +106,8 @@ def main() -> int:
     cli = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/bjdatacli")
     if not cli.exists():
         print(f"bjdata CLI not found at {cli}; build it with:", file=sys.stderr)
-        print("  cd ~/Work/Troo/dart-bjdata && dart compile exe bin/bjdata.dart -o /tmp/bjdatacli", file=sys.stderr)
+        print("  git clone https://github.com/nebkat/dart-bjdata && cd dart-bjdata", file=sys.stderr)
+        print("  dart compile exe bin/bjdata.dart -o /tmp/bjdatacli", file=sys.stderr)
         return 2
 
     FIXTURES.mkdir(parents=True, exist_ok=True)

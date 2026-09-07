@@ -9,6 +9,7 @@
 // forward iterators holding all the traversal state, and no allocation anywhere except
 // where a decoded string is asked for.
 
+#include <serpent/concepts.hpp>
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
 #include <serpent/json/scan.hpp>
@@ -207,7 +208,11 @@ public:
     [[nodiscard]] std::optional<T> try_get() const noexcept {
         if constexpr (std::same_as<T, bool>)
             return this->as_bool();
-        else if constexpr (std::constructible_from<T, std::string> && !std::is_arithmetic_v<T>) {
+        else if constexpr (std::same_as<T, std::string_view>) {
+            static_assert(always_false<T>,
+                    "a JSON string has to be decoded, so it cannot be borrowed as a string_view; "
+                    "read it into a std::string, or use decode_string_into");
+        } else if constexpr (detail::string_like<T> && std::constructible_from<T, std::string>) {
             auto text = this->as_string();
             if (!text) return std::nullopt;
             return T { *std::move(text) };

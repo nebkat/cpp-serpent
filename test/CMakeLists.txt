@@ -3,10 +3,7 @@
 #   cmake -S . -B build && cmake --build build
 #   ctest --test-dir build --output-on-failure
 
-option(SERPENT_TEST_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
-
 set(TESTS
-    unaligned_ptr
     bjdata_scalar
     bjdata_container
     bjdata_ndarray

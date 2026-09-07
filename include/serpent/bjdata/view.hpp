@@ -1,6 +1,7 @@
 #pragma once
 
 #include <serpent/bjdata/detail.hpp>
+#include <serpent/concepts.hpp>
 #include <serpent/error.hpp>
 #include <serpent/kind.hpp>
 #include <serpent/fwd.hpp>
@@ -259,7 +260,7 @@ public:
             return this->as_bool();
         else if constexpr (std::same_as<T, std::string_view>)
             return this->as_string();
-        else if constexpr (std::constructible_from<T, std::string_view> && !std::is_arithmetic_v<T>) {
+        else if constexpr (serpent::detail::string_like<T> && std::constructible_from<T, std::string_view>) {
             const auto text = this->as_string();
             if (!text) return std::nullopt;
             return T { *text };

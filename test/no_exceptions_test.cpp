@@ -1,6 +1,5 @@
-// The total accessors must remain usable with -fno-exceptions, which is how the firmware
-// may be built. Only the checked accessors (at, get, string, binary, span) are unavailable,
-// and they are never instantiated here.
+// The total accessors must remain usable with -fno-exceptions, as embedded builds often are. Only the checked accessors
+// (at, get, string, binary, span) are unavailable, and they are never instantiated here.
 
 #include "check.hpp"
 

@@ -18,6 +18,18 @@ namespace {
 
 enum class mode : std::uint8_t { off, automatic, on };
 
+/** Aggregates that C++20 would let you build straight from a std::string. */
+struct labelled {
+    std::string text;
+    SERPENT_DEFINE_TYPE(labelled, text)
+};
+
+struct first_string_member {
+    std::string name;
+    int count = 0;
+    SERPENT_DEFINE_TYPE(first_string_member, name, count)
+};
+
 // --- Form C: the macro, for a plain aggregate ---
 struct point {
     int x = 0;
@@ -39,8 +51,8 @@ struct segment {
 };
 
 // --- Form A: separate functions, for behaviour that differs by direction ---
-// Mirrors app/src/app/core/ethernet/user_config.hpp: an absent optional is omitted from the
-// output entirely, and a missing key on the way in falls back to a default-constructed value.
+// An absent optional is omitted from the output entirely, and a missing key on the way in
+// falls back to a default-constructed value.
 struct connection {
     std::string host = "localhost";
     std::optional<int> port {};
@@ -307,6 +319,29 @@ void both_formats() {
             "the convert form round-trips through JSON");
 }
 
+/**
+ * A struct is not a string, however constructible from one it happens to be.
+ *
+ * C++20 parenthesized aggregate initialization makes std::constructible_from<T, std::string>
+ * true for any aggregate whose members can take one, so a type whose first member is a string
+ * once looked like a string to the reader and failed to decode.
+ */
+void aggregates_are_not_strings() {
+    static_assert(std::constructible_from<labelled, std::string>, "the trap this guards against");
+    static_assert(!serpent::detail::string_like<labelled>, "but it is not a string");
+
+    const labelled original { "north ridge" };
+    const auto from_binary = decode<labelled>(encode(original));
+    const auto from_text = json::decode<labelled>(json::encode(original));
+    check(from_binary.has_value() && from_binary->text == original.text, "a lone string member reads from BJData");
+    check(from_text.has_value() && from_text->text == original.text, "and from JSON");
+
+    const first_string_member mixed { "n", 3 };
+    const auto mixed_text = json::decode<first_string_member>(json::encode(mixed));
+    check(mixed_text.has_value() && mixed_text->name == "n" && mixed_text->count == 3,
+            "a string first member does not swallow the object");
+}
+
 void sizing() {
     const point value { 3, 4 };
     check_equal(measure(value), encode(value).size(), "measure agrees with encode_TMP");
@@ -323,6 +358,7 @@ int main() {
     containers_and_nesting();
     key_order_and_absence();
     reflection_seam();
+    aggregates_are_not_strings();
     both_formats();
     sizing();
     return report("serializer");
