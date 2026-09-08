@@ -24,7 +24,7 @@ Ten thousand structs of five fields.
 
 | | serpent (BJData) | struct-mapping lib (BEVE) | DOM lib (CBOR) |
 |---|---:|---:|---:|
-| encode | 0.61 ms | **0.09 ms** (7.0x faster) | 3.57 ms |
+| encode | 0.28 ms | **0.09 ms** (3.1x faster) | 3.57 ms |
 | decode | 1.30 ms | **0.16 ms** (8.1x faster) | 6.43 ms |
 | allocations, decode | **1** | **1** | 140,025 |
 | bytes allocated | **560,000** | **560,000** | 10,364,344 |
@@ -36,7 +36,7 @@ So the gap is not the text parsing and it is not the tables.
 sized array states its length, which costs three bytes on this document. See
 [counted arrays](bjdata.md#counted-arrays).
 
-**Time is 8.1x on decode and 7.0x on encode**, and one thing has to be said about that number
+**Time is 8.1x on decode and 3.1x on encode**, and one thing has to be said about that number
 before the breakdown: it is bigger than it used to be, and not because anything got slower.
 
 Everything in this table is built with the same compiler. Measured under Clang the gap is 5.3x,
