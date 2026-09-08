@@ -22,13 +22,18 @@ integer digit pairs — all live in its JSON text path. Its binary format touche
 
 Ten thousand structs of five fields.
 
-| | serpent (BJData) | struct-mapping lib (BEVE) | DOM lib (CBOR) |
-|---|---:|---:|---:|
-| encode | 0.24 ms | **0.09 ms** (2.8x faster) | 3.43 ms |
-| decode | 0.38 ms | **0.15 ms** (2.6x faster) | 5.96 ms |
-| allocations, decode | **1** | **1** | 140,025 |
-| bytes allocated | **640,000** | **640,000** | 11,884,344 |
-| output size | 844,694 B | 828,964 B | 766,100 B |
+Ten thousand structs of five fields, both libraries in one process on one compiler.
+
+| | serpent (BJData) | struct-mapping lib (BEVE) | its CBOR | its MessagePack |
+|---|---:|---:|---:|---:|
+| encode | 0.23 ms | **0.09 ms** | 0.20 ms | 0.09 ms |
+| decode | 0.32 ms | **0.16 ms** | 0.18 ms | 0.08 ms |
+| allocations, decode | **1** | **1** | 1 | 1 |
+| output size | 844,694 B | 828,964 B | 764,692 B | 358,964 B |
+
+The last two columns are the same library writing *value-directed* formats — the kind BJData is,
+where a marker is chosen per value rather than fixed by the declared type. They are the fairer
+comparison, and against its CBOR we are within 1.2x on encode.
 
 ### It is not that the other format is cleverer
 
@@ -63,6 +68,15 @@ Four things, each found by measurement and each now fixed:
 
 None of that was the format. It was a reader built from handles that did not know what the
 caller wanted, and a writer assembling constants a byte at a time.
+
+### One measurement caveat worth knowing
+
+serpent's timings move with what the process did beforehand and the comparison library's do
+not: in a run doing nothing else, encode is 0.23 ms; in one that has already worked through the
+document benchmarks above, the same call measures 0.40 ms, while the other library sits at
+0.09 ms in both. The figures here are from the quiet run. Something in our working set survives
+less well across other work, and it is not yet understood — worth knowing if your own use is
+occasional rather than in a tight loop, because the cold number is the honest one there.
 
 ### What is left
 
