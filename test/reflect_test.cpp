@@ -239,6 +239,45 @@ void the_generated_reader_agrees_with_the_generic_one() {
     check(partial && partial->x == 7 && partial->y == 0, "an absent key leaves the default");
 }
 
+/** The same keys as point, named by hand, so it takes the general path. */
+struct by_hand {
+    int x = 0;
+    int y = 0;
+
+    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), by_hand> value) {
+        visitor.member("x", value.x);
+        visitor.member("y", value.y);
+    }
+};
+
+// A key the compiler knows is framed once at compile time. Where that framing would be wrong,
+// the general path has to take over, and this is what says so.
+struct[[= serpent::serializable {}]] awkward {
+    [[= serpent::key("a\"b")]] int quoted = 1;
+    [[= serpent::key("tab\there")]] int control = 2;
+    int plain = 3;
+};
+
+void a_constant_key_is_framed_once() {
+    // by_hand is declared at namespace scope below; it names the same keys the general way.
+    // Escapes: the constant path cannot pre-frame these, so it defers and they come out escaped.
+    check_equal(json::encode(awkward {}), R"({"a\"b":1,"tab\there":2,"plain":3})",
+            "a key needing escapes is still escaped");
+    const auto back = json::decode<awkward>(json::encode(awkward { 7, 8, 9 }));
+    check(back && back->quoted == 7 && back->control == 8 && back->plain == 9, "and reads back");
+
+    // Indenting: the framing has no room for the spacing, so it defers there too.
+    check_equal(json::encode(point { 1, 2 }, { .indent = 2 }), "{\n  \"x\": 1,\n  \"y\": 2\n}",
+            "indented output is unchanged");
+
+    // BJData frames the length marker, the length and the bytes together. The bytes it produces
+    // have to be exactly what the general path produces, so compare against a type that names
+    // the same keys by hand and therefore takes that path.
+    check(bjdata::encode(point { 3, 4 }) == bjdata::encode(by_hand { 3, 4 }),
+            "a framed key writes the same bytes as one written out");
+    check_equal(json::encode(point { 3, 4 }), json::encode(by_hand { 3, 4 }), "and the same JSON");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -305,6 +344,7 @@ void naming_styles() {
 }
 
 int main() {
+    a_constant_key_is_framed_once();
     the_generated_reader_agrees_with_the_generic_one();
     identifiers_become_keys();
     a_discriminant_names_the_type();
