@@ -11,6 +11,7 @@
 
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <variant>
 #include <vector>
@@ -214,6 +215,30 @@ void a_variant_can_mix_shapes() {
             "and the named object is still told from its twin");
 }
 
+/**
+ * BJData reads a reflected type through a reader generated for it rather than the member
+ * iterator, so everything the generic walk handles has to hold there too.
+ */
+void the_generated_reader_agrees_with_the_generic_one() {
+    // A key the type does not name is skipped, whatever it holds.
+    const auto extra = json::decode<point>(R"({"x":1,"note":{"nested":[1,2,3]},"y":2})");
+    check(extra && extra->x == 1 && extra->y == 2, "an unknown key is skipped, including a whole subtree");
+    const auto binary_extra = bjdata::decode<point>(bjdata::encode(extra.value()));
+    check(binary_extra && binary_extra->y == 2, "and the same through BJData");
+
+    // A strongly typed object: the members share one marker, so the values carry none.
+    const std::uint8_t typed[] = { '{', '$', 'U', '#', 'U', 2, 'U', 1, 'x', 7, 'U', 1, 'y', 9 };
+    const auto strong = bjdata::decode<point>(std::as_bytes(std::span { typed }));
+    check(strong && strong->x == 7 && strong->y == 9, "a strongly typed object reads");
+
+    // Reordered and partial, against the generated reader specifically.
+    check(bjdata::view::over(bjdata::encode(point { 1, 2 })).is_object(), "an object is what we wrote");
+    const auto reordered = json::decode<point>(R"({"y":20,"x":10})");
+    check(reordered && reordered->x == 10 && reordered->y == 20, "declaration order is not required");
+    const auto partial = json::decode<point>(R"({"x":7})");
+    check(partial && partial->x == 7 && partial->y == 0, "an absent key leaves the default");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -280,6 +305,7 @@ void naming_styles() {
 }
 
 int main() {
+    the_generated_reader_agrees_with_the_generic_one();
     identifiers_become_keys();
     a_discriminant_names_the_type();
     a_field_can_carry_the_tag();

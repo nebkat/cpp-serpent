@@ -234,8 +234,19 @@ void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
 // ---------------- the type both libraries convert ----------------
 
-// Written out rather than annotated, so the benchmark runs on any compiler. It produces the
-// same member() calls the annotation would, so it measures the same thing either way.
+// Defined the way serpent means types to be defined where the compiler allows it, since that
+// is the path being measured; written out elsewhere so the benchmark still runs.
+#if SERPENT_HAS_REFLECTION
+struct[[= serpent::serializable {}]] reading {
+    std::uint64_t timestamp = 0;
+    std::string station;
+    double celsius = 0;
+    double humidity = 0;
+    bool valid = false;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(reading, timestamp, station, celsius, humidity, valid)
+};
+#else
 struct reading {
     std::uint64_t timestamp = 0;
     std::string station;
@@ -253,6 +264,7 @@ struct reading {
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(reading, timestamp, station, celsius, humidity, valid)
 };
+#endif
 
 static std::vector<reading> sample_readings(std::size_t count) {
     std::vector<reading> values;

@@ -46,7 +46,9 @@ unset(CMAKE_REQUIRED_FLAGS)
 # to. So everything here is built with it where the compiler has it, and the parts that need it
 # are simply not built where it does not.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    add_compile_options(${SERPENT_REFLECTION_FLAGS})
+    # C++ only: a comparison library may bring a C file with it, and neither the standard nor
+    # the flag means anything there.
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${SERPENT_REFLECTION_FLAGS}>")
     add_link_options(${SERPENT_REFLECTION_FLAGS})
 endif()
 

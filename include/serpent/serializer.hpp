@@ -112,6 +112,10 @@ struct serializer {
             return visitor.ok();
         } else if constexpr (requires { from_json(source, value); }) {
             return from_json(source, value);
+        } else if constexpr (reflected_type<T> && requires { read_reflected(source, value); }) {
+            // A format may offer a reader generated for this type. Found by lookup on the
+            // source, so one that does not simply falls through to the generic walk below.
+            return read_reflected(source, value);
         } else if constexpr (reflected_type<T>) {
             if (!source.is_object()) return false;
             read_visitor<Source> visitor { source };

@@ -4,6 +4,7 @@
 
 #include <serpent/bjdata/document.hpp>
 #include <serpent/bjdata/marker.hpp>
+#include <serpent/bjdata/reflect.hpp>
 #include <serpent/bjdata/view.hpp>
 #include <serpent/bjdata/writer.hpp>
 #include <serpent/error.hpp>
