@@ -2,12 +2,14 @@
 
 #include <serpent/limits.hpp>
 
+#include <array>
 #include <bit>
 #include <concepts>
 #include <type_traits>
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <initializer_list>
 
 namespace serpent::bjdata {
@@ -321,5 +323,28 @@ template<typename T>
     else
         return marker::invalid;
 }
+
+namespace detail {
+
+/**
+ * A key exactly as it appears on the wire: its length marker, its length, then its bytes.
+ *
+ * One definition, used by the writer to emit a constant key in a single piece and by the
+ * reflected reader to recognise one without parsing it. They cannot drift apart.
+ */
+template<const std::string_view &Name>
+inline constexpr auto encoded_key = [] {
+    constexpr auto kind =
+            integer_marker(static_cast<std::int64_t>(Name.size()), static_cast<std::int64_t>(Name.size()));
+    std::array<std::byte, 1 + payload_width(kind) + Name.size()> bytes {};
+    bytes[0] = static_cast<std::byte>(kind);
+    for (std::size_t index = 0; index < payload_width(kind); ++index)
+        bytes[1 + index] = static_cast<std::byte>((Name.size() >> (8 * index)) & 0xFF);
+    for (std::size_t index = 0; index < Name.size(); ++index)
+        bytes[1 + payload_width(kind) + index] = static_cast<std::byte>(Name[index]);
+    return bytes;
+}();
+
+} // namespace detail
 
 } // namespace serpent::bjdata

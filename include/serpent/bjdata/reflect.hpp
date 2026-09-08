@@ -73,60 +73,88 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
             break;
         }
 
-        const auto key = detail::read_key(scanner);
-        if (!scanner.ok()) return false;
+        // Reading a value into a field, given the marker that precedes it. One definition,
+        // reached either by recognising the encoded key or by parsing it.
+        bool consumed = false;
+        const auto take = [&]<std::meta::info Member>(marker kind) {
+            const view held { kind, buffer, scanner.position };
+            auto &field = value.[:Member:];
 
-        marker kind = info.element;
-        if (kind == marker::invalid) {
-            if (!scanner.need(1)) return false;
-            kind = to_marker(scanner.peek());
-            if (!is_value(kind)) return false;
+            // A string is the one field whose length prefix would otherwise be read twice: once
+            // for the text, and again by skip_value to step over it.
+            using field_type = std::remove_cvref_t<decltype(field)>;
+            if constexpr (std::same_as<field_type, std::string>) {
+                if (kind == marker::string) {
+                    const auto length = detail::read_length(scanner);
+                    if (!scanner.ok() || !scanner.need(length)) return false;
+                    field.assign(reinterpret_cast<const char *>(scanner.position), static_cast<std::size_t>(length));
+                    scanner.advance(length);
+                    consumed = true;
+                    return true;
+                }
+            }
+
+            // The same field handling reflect_convert does; a tagged variant is read through the
+            // wrapper that carries its names, not as a bare variant.
+            if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
+                using declared = [:std::meta::type_of(Member):];
+                constexpr serpent::tagged resolved = serpent::detail::resolved_tag<declared, *tag>();
+                auto wrapper = make_tagged<resolved>(field);
+                if (!read_into(held, wrapper)) complete = false;
+            } else {
+                if (!read_into(held, field)) complete = false;
+            }
+            return true;
+        };
+
+        // Reads the marker that introduces a value, which a strongly typed object omits.
+        const auto value_marker = [&]() -> marker {
+            if (info.element != marker::invalid) return info.element;
+            if (!scanner.need(1)) return marker::invalid;
+            const auto kind = to_marker(scanner.peek());
+            if (!is_value(kind)) return marker::invalid;
             scanner.advance(1);
-        }
+            return kind;
+        };
 
-        const view held { kind, buffer, scanner.position };
-
-        // One compile-time comparison per field, each against a constant of known length. The
-        // first that matches consumes the entry; anything else is a key this type does not name.
+        // The key exactly as we would have written it, compared whole. A hit skips parsing the
+        // length marker, the length and the bytes separately.
         bool matched = false;
-        bool consumed = false; // a field that read and advanced in one pass needs no skip
+        marker kind = marker::invalid;
         template for (constexpr auto member : std::define_static_array(
                               std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
-                if (!matched && detail::key_matches<name>(key)) {
+                static constexpr auto encoded = detail::encoded_key<name>;
+                if (!matched && static_cast<std::size_t>(scanner.limit - scanner.position) >= encoded.size()
+                        && std::memcmp(scanner.position, encoded.data(), encoded.size()) == 0) {
                     matched = true;
-                    auto &field = value.[:member:];
+                    scanner.advance(encoded.size());
+                    kind = value_marker();
+                    if (kind == marker::invalid || !take.template operator()<member>(kind)) return false;
+                }
+            }
+        }
 
-                    // A string is the one field whose length prefix would otherwise be read
-                    // twice: once for the text, and again by skip_value to step over it.
-                    using field_type = std::remove_cvref_t<decltype(field)>;
-                    if constexpr (std::same_as<field_type, std::string>) {
-                        if (kind == marker::string) {
-                            const auto length = detail::read_length(scanner);
-                            if (!scanner.ok() || !scanner.need(length)) return false;
-                            field.assign(
-                                    reinterpret_cast<const char *>(scanner.position), static_cast<std::size_t>(length));
-                            scanner.advance(length);
-                            consumed = true;
-                        }
-                    }
+        // Not written the way we write it: parse the key properly and match it by name, so a
+        // document from another encoder still reads.
+        if (!matched) {
+            const auto key = detail::read_key(scanner);
+            if (!scanner.ok()) return false;
+            kind = value_marker();
+            if (kind == marker::invalid) return false;
 
-                    // The same field handling reflect_convert does; a tagged variant is read
-                    // through the wrapper that carries its names, not as a bare variant.
-                    if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(member);
-                            tag.has_value()) {
-                        using declared = [:std::meta::type_of(member):];
-                        constexpr serpent::tagged resolved = serpent::detail::resolved_tag<declared, *tag>();
-                        auto wrapper = make_tagged<resolved>(field);
-                        if (!consumed && !read_into(held, wrapper)) complete = false;
-                    } else {
-                        if (!consumed && !read_into(held, field)) complete = false;
+            template for (constexpr auto member : std::define_static_array(
+                                  std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+                if constexpr (!serpent::detail::has_annotation<skip>(member)) {
+                    static constexpr std::string_view name = serpent::detail::field_key<T, member>();
+                    if (!matched && detail::key_matches<name>(key)) {
+                        matched = true;
+                        if (!take.template operator()<member>(kind)) return false;
                     }
                 }
             }
         }
-        (void)matched;
 
         if (!consumed) {
             detail::skip_value(scanner, kind, 1);

@@ -265,23 +265,11 @@ public:
      *  assembled once at compile time and written in one piece. */
     template<const std::string_view &Name>
     void key_literal() noexcept {
-        static constexpr auto preamble = [] {
-            constexpr auto kind =
-                    integer_marker(static_cast<std::int64_t>(Name.size()), static_cast<std::int64_t>(Name.size()));
-            std::array<std::byte, 1 + payload_width(kind) + Name.size()> bytes {};
-            bytes[0] = static_cast<std::byte>(kind);
-            for (std::size_t index = 0; index < payload_width(kind); ++index)
-                bytes[1 + index] = static_cast<std::byte>((Name.size() >> (8 * index)) & 0xFF);
-            for (std::size_t index = 0; index < Name.size(); ++index)
-                bytes[1 + payload_width(kind) + index] = static_cast<std::byte>(Name[index]);
-            return bytes;
-        }();
-
         if (!this->inside_object()) {
             this->fail(errc::key_outside_object);
             return;
         }
-        this->put(preamble);
+        this->put(detail::encoded_key<Name>);
     }
 
     [[nodiscard]] array_scope<Options> array() noexcept;

@@ -226,6 +226,19 @@ void the_generated_reader_agrees_with_the_generic_one() {
     const auto binary_extra = bjdata::decode<point>(bjdata::encode(extra.value()));
     check(binary_extra && binary_extra->y == 2, "and the same through BJData");
 
+    // A key written the way we write it is recognised whole, without being parsed. One written
+    // any other legal way has to still read, which is what the parsing fallback is for: here the
+    // lengths use int8 markers rather than the uint8 we would emit.
+    const std::uint8_t foreign[] = { '{', 'i', 1, 'x', 'U', 4, 'i', 1, 'y', 'U', 6, '}' };
+    const auto other_encoder = bjdata::decode<point>(std::as_bytes(std::span { foreign }));
+    check(other_encoder && other_encoder->x == 4 && other_encoder->y == 6,
+            "a key whose length marker differs from ours still reads");
+
+    // Mixed in one document: the first key as we write it, the second as someone else would.
+    const std::uint8_t mixed[] = { '{', 'U', 1, 'x', 'U', 1, 'i', 1, 'y', 'U', 2, '}' };
+    const auto both_ways = bjdata::decode<point>(std::as_bytes(std::span { mixed }));
+    check(both_ways && both_ways->x == 1 && both_ways->y == 2, "and the two forms mix in one object");
+
     // A strongly typed object: the members share one marker, so the values carry none.
     const std::uint8_t typed[] = { '{', '$', 'U', '#', 'U', 2, 'U', 1, 'x', 7, 'U', 1, 'y', 9 };
     const auto strong = bjdata::decode<point>(std::as_bytes(std::span { typed }));

@@ -8,6 +8,7 @@
 #include <span>
 #include <string_view>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
