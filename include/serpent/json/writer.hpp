@@ -13,6 +13,7 @@
 #include <serpent/serializer.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <expected>
@@ -191,6 +192,44 @@ public:
     void high_precision(std::string_view digits) noexcept {
         this->begin_value();
         this->put_text(digits.empty() ? "0" : digits);
+    }
+
+    /**
+     * A constant key, framed once at compile time: the quotes, the bytes and the colon.
+     *
+     * Only for a name that needs no escaping and only when not indenting, so the general path
+     * below stays the one that decides what a key looks like.
+     */
+    template<const std::string_view &Name>
+    void key_literal() noexcept {
+        static constexpr bool plain = [] {
+            for (const char value : Name)
+                if (value == '"' || value == '\\' || static_cast<unsigned char>(value) < 0x20) return false;
+            return true;
+        }();
+
+        if (this->options.indent != 0 || !plain) {
+            this->key(Name);
+            return;
+        }
+
+        static constexpr auto framed = [] {
+            std::array<char, Name.size() + 3> text {};
+            text[0] = '"';
+            for (std::size_t index = 0; index < Name.size(); ++index)
+                text[1 + index] = Name[index];
+            text[Name.size() + 1] = '"';
+            text[Name.size() + 2] = ':';
+            return text;
+        }();
+
+        if (!this->inside_object()) {
+            this->fail(errc::key_outside_object);
+            return;
+        }
+        this->separate();
+        this->put_text(std::string_view { framed.data(), framed.size() });
+        this->pending_value = true;
     }
 
     void key(std::string_view name) noexcept {

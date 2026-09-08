@@ -383,7 +383,8 @@ void reflect_members(Visitor &visitor, Object &value) {
                 auto wrapper = make_tagged<resolved>(field);
                 visitor.member(detail::field_key<T, member>(), wrapper);
             } else {
-                visitor.member(detail::field_key<T, member>(), field);
+                static constexpr std::string_view name = detail::field_key<T, member>();
+                visitor.template member<name>(field);
             }
         }
     }

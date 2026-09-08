@@ -39,6 +39,19 @@ public:
         this->out->value(value);
     }
 
+    /**
+     * The same, for a key the compiler already knows.
+     *
+     * Every format frames a key the same way every time - a length and the bytes, or quotes and
+     * a colon - so for a constant name that framing is a constant too, and goes out in one
+     * piece instead of being assembled a byte at a time.
+     */
+    template<const std::string_view &Name, typename T>
+    void member(const T &value) noexcept {
+        this->out->template key_literal<Name>();
+        this->out->value(value);
+    }
+
     [[nodiscard]] Writer &target() const noexcept { return *this->out; }
 };
 
@@ -74,6 +87,12 @@ public:
     static constexpr bool is_reading = true;
 
     explicit read_visitor(Source source) noexcept : source(source), cursor(source.items().begin()) {}
+
+    /** The same, for a key the compiler already knows: its length is a constant to compare. */
+    template<const std::string_view &Name, typename T>
+    void member(T &value) {
+        this->member(Name, value);
+    }
 
     template<typename T>
     void member(std::string_view name, T &value) {
