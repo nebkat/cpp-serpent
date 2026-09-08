@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace serpent::bjdata {
@@ -88,6 +89,7 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
         // One compile-time comparison per field, each against a constant of known length. The
         // first that matches consumes the entry; anything else is a key this type does not name.
         bool matched = false;
+        bool consumed = false; // a field that read and advanced in one pass needs no skip
         template for (constexpr auto member : std::define_static_array(
                               std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
@@ -96,6 +98,20 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
                     matched = true;
                     auto &field = value.[:member:];
 
+                    // A string is the one field whose length prefix would otherwise be read
+                    // twice: once for the text, and again by skip_value to step over it.
+                    using field_type = std::remove_cvref_t<decltype(field)>;
+                    if constexpr (std::same_as<field_type, std::string>) {
+                        if (kind == marker::string) {
+                            const auto length = detail::read_length(scanner);
+                            if (!scanner.ok() || !scanner.need(length)) return false;
+                            field.assign(
+                                    reinterpret_cast<const char *>(scanner.position), static_cast<std::size_t>(length));
+                            scanner.advance(length);
+                            consumed = true;
+                        }
+                    }
+
                     // The same field handling reflect_convert does; a tagged variant is read
                     // through the wrapper that carries its names, not as a bare variant.
                     if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(member);
@@ -103,17 +119,19 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
                         using declared = [:std::meta::type_of(member):];
                         constexpr serpent::tagged resolved = serpent::detail::resolved_tag<declared, *tag>();
                         auto wrapper = make_tagged<resolved>(field);
-                        if (!read_into(held, wrapper)) complete = false;
+                        if (!consumed && !read_into(held, wrapper)) complete = false;
                     } else {
-                        if (!read_into(held, field)) complete = false;
+                        if (!consumed && !read_into(held, field)) complete = false;
                     }
                 }
             }
         }
         (void)matched;
 
-        detail::skip_value(scanner, kind, 1);
-        if (!scanner.ok()) return false;
+        if (!consumed) {
+            detail::skip_value(scanner, kind, 1);
+            if (!scanner.ok()) return false;
+        }
         if (counted && remaining > 0) --remaining;
     }
 
