@@ -278,6 +278,48 @@ void a_constant_key_is_framed_once() {
     check_equal(json::encode(point { 3, 4 }), json::encode(by_hand { 3, 4 }), "and the same JSON");
 }
 
+/**
+ * A sequence of reflected objects is read by a hook that walks the array once. It has to agree
+ * with the generic path on every shape an array can take, including ones we never write.
+ */
+void a_sequence_is_walked_once() {
+    const std::vector<point> many { { 1, 2 }, { 3, 4 }, { 5, 6 } };
+    const auto counted = bjdata::encode(many);
+    const auto back = bjdata::decode<std::vector<point>>(counted);
+    check(back && back->size() == 3 && back->at(2).y == 6, "a counted array of objects");
+
+    // Unbounded: what the reference policy writes, and what another implementation may send.
+    const auto unbounded = bjdata::encode<bjdata::reference_parity>(many);
+    const auto walked = bjdata::decode<std::vector<point>>(unbounded);
+    check(walked && walked->size() == 3 && walked->at(1).x == 3, "an unbounded array of objects");
+
+    check(bjdata::decode<std::vector<point>>(bjdata::encode(std::vector<point> {}))->empty(), "an empty array");
+
+    // Noops may appear between elements and must be stepped over.
+    const std::uint8_t noops[] = { '[', 'N', '{', 'U', 1, 'x', 'U', 7, 'U', 1, 'y', 'U', 8, '}', 'N', ']' };
+    const auto stepped = bjdata::decode<std::vector<point>>(std::as_bytes(std::span { noops }));
+    check(stepped && stepped->size() == 1 && stepped->at(0).x == 7, "noops between elements");
+
+    // An element that is not an object is a failure, not a silent empty.
+    const std::uint8_t wrong[] = { '[', '#', 'U', 1, 'U', 5 };
+    check(!bjdata::decode<std::vector<point>>(std::as_bytes(std::span { wrong })),
+            "an array of numbers is not an array of objects");
+
+    // Truncation must not be read as a short but valid array.
+    const std::uint8_t cut[] = { '[', '#', 'U', 2, '{', 'U', 1, 'x', 'U', 7, '}' };
+    check(!bjdata::decode<std::vector<point>>(std::as_bytes(std::span { cut })),
+            "a count promising more than is there fails");
+
+    // Nesting: the element type is itself read by the generated reader.
+    const std::vector<std::vector<point>> nested { { { 1, 2 } }, { { 3, 4 }, { 5, 6 } } };
+    const auto deep = bjdata::decode<std::vector<std::vector<point>>>(bjdata::encode(nested));
+    check(deep && deep->size() == 2 && deep->at(1).size() == 2 && deep->at(1).at(1).y == 6, "a sequence of sequences");
+
+    // And it must agree with the generic reader, which is what json::reader still uses.
+    const auto through_json = json::decode<std::vector<point>>(json::encode(many));
+    check(through_json && through_json->size() == 3 && through_json->at(2).x == 5, "the generic path agrees");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -344,6 +386,7 @@ void naming_styles() {
 }
 
 int main() {
+    a_sequence_is_walked_once();
     a_constant_key_is_framed_once();
     the_generated_reader_agrees_with_the_generic_one();
     identifiers_become_keys();
