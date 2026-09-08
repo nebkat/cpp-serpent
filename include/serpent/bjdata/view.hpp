@@ -442,7 +442,9 @@ public:
 class member_iterator {
 public:
     using value_type = key_value;
-    using reference = key_value;
+    // The entry is parsed once, on arrival, so dereferencing hands it back rather than
+    // rebuilding it - and a forward iterator is allowed to say so.
+    using reference = const key_value &;
     using difference_type = std::ptrdiff_t;
     using iterator_concept = std::forward_iterator_tag;
     using iterator_category = std::forward_iterator_tag;
@@ -510,7 +512,7 @@ public:
         this->normalise();
     }
 
-    [[nodiscard]] key_value operator*() const noexcept { return this->current; }
+    [[nodiscard]] const key_value &operator*() const noexcept { return this->current; }
 
     member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;

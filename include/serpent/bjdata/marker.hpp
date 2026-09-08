@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 
 namespace serpent::bjdata {
 
@@ -53,36 +54,41 @@ enum class marker : unsigned char {
     extension = 'E',
 };
 
-[[nodiscard]] constexpr marker to_marker(std::byte value) noexcept {
-    switch (static_cast<char>(value)) {
-    case 'Z':
-    case 'T':
-    case 'F':
-    case 'N':
-    case 'U':
-    case 'i':
-    case 'u':
-    case 'I':
-    case 'm':
-    case 'l':
-    case 'M':
-    case 'L':
-    case 'h':
-    case 'd':
-    case 'D':
-    case 'C':
-    case 'B':
-    case 'S':
-    case 'H':
-    case '[':
-    case ']':
-    case '{':
-    case '}':
-    case '$':
-    case '#':
-    case 'E': return static_cast<marker>(value);
-    default: return marker::invalid;
+/**
+ * The valid markers as two bit masks, derived from the enum rather than written out.
+ *
+ * Recognising one is a membership test on a sparse set of ASCII bytes. A switch compiles to a
+ * jump table and a bounds check, which is a load and a branch per call, and this is called
+ * several times for every member of every object.
+ */
+inline constexpr struct marker_set {
+    std::uint64_t low = 0; ///< bytes 0x20 - 0x5f
+    std::uint64_t high = 0; ///< bytes 0x60 - 0x9f
+
+    constexpr void add(marker value) {
+        const auto byte = static_cast<unsigned char>(value);
+        if (byte < 0x60)
+            this->low |= std::uint64_t { 1 } << (byte - 0x20);
+        else
+            this->high |= std::uint64_t { 1 } << (byte - 0x60);
     }
+} valid_markers = [] {
+    marker_set set;
+    for (const marker value : { marker::null, marker::boolean_true, marker::boolean_false, marker::noop, marker::uint8,
+                 marker::int8, marker::uint16, marker::int16, marker::uint32, marker::int32, marker::uint64,
+                 marker::int64, marker::float16, marker::float32, marker::float64, marker::character, marker::byte,
+                 marker::string, marker::high_precision, marker::array_begin, marker::array_end, marker::object_begin,
+                 marker::object_end, marker::strong_type, marker::count, marker::extension })
+        set.add(value);
+    return set;
+}();
+
+[[nodiscard]] constexpr marker to_marker(std::byte value) noexcept {
+    const auto byte = static_cast<unsigned char>(value);
+    const auto index = static_cast<unsigned>(byte) - 0x20u;
+    if (index >= 0x80u) return marker::invalid;
+    const std::uint64_t mask = index < 64 ? valid_markers.low >> index : valid_markers.high >> (index - 64);
+    return (mask & 1) != 0 ? static_cast<marker>(value) : marker::invalid;
 }
 
 /** Width of a marker's payload in bytes, or variable_width when it is length-prefixed. */
