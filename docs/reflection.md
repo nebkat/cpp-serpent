@@ -164,6 +164,25 @@ compiler it targets has caught up:
 `serpent::reflection_available` is the same answer as a `constexpr bool`. `example/reflection.cpp`
 shows a type written both ways.
 
+!!! warning "The annotation is not ignorable, so a shared header needs the guard"
+
+    On a compiler that does not know the syntax the annotation is a **parse error**, not an
+    attribute that is quietly dropped:
+
+    ```
+    error: expected ']' before '=' token
+    ```
+
+    So a header compiled by more than one toolchain cannot simply carry the annotation and let
+    older compilers skip it — it has to carry both forms behind `#if SERPENT_HAS_REFLECTION`.
+    Verified against GCC 15.2 (the ESP-IDF v6.1 toolchain), which rejects it, and GCC 16.1,
+    which accepts it.
+
+    GCC 16 **without** `-freflection` is the case to watch: it parses the annotation and then
+    ignores it, so the type is not reflected and the first thing to complain is the converter,
+    at the point of use. The message says so, but check `-freflection` is really on the command
+    line before believing the type is at fault.
+
 ## Reflection and a hand-written conversion are exclusive
 
 Annotating a type that already has a `json_convert`, or a `to_json` / `from_json` pair, is a

@@ -59,9 +59,11 @@ struct serializer {
             detail::reflect_convert(visitor, value);
         } else {
             static_assert(always_false<Writer>,
-                    "no json_convert for this type, no to_json overload accepting this writer, "
-                    "and it is not opted in to reflection; add one of those, or specialize "
-                    "serpent::serializer<T>");
+                    "this type says nothing about how to convert it: no json_convert, no to_json "
+                    "accepting this writer, and not opted in to reflection. Add one of those, or "
+                    "specialize serpent::serializer<T>. If you did annotate it, this build has no "
+                    "reflection - check serpent::reflection_available, and that the compiler was "
+                    "given -freflection");
         }
     }
 
@@ -123,9 +125,11 @@ struct serializer {
             return visitor.ok();
         } else {
             static_assert(always_false<Source>,
-                    "no json_convert for this type, no from_json overload accepting this source, "
-                    "and it is not opted in to reflection; add one of those, or specialize "
-                    "serpent::serializer<T>");
+                    "this type says nothing about how to convert it: no json_convert, no from_json "
+                    "accepting this source, and not opted in to reflection. Add one of those, or "
+                    "specialize serpent::serializer<T>. If you did annotate it, this build has no "
+                    "reflection - check serpent::reflection_available, and that the compiler was "
+                    "given -freflection");
             return false;
         }
     }

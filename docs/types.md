@@ -22,6 +22,10 @@ This is the form to reach for, and the only one that also gives you
 [discriminated variants](reflection.md#naming-a-type-on-the-wire). It needs GCC 16 with
 `-freflection`.
 
+A header compiled by more than one toolchain needs care: the annotation does not degrade to
+nothing on a compiler that cannot parse it, it fails to compile. Carry both forms behind
+`#if SERPENT_HAS_REFLECTION`, as `example/reflection.cpp` does.
+
 The forms below exist because most compilers cannot do this yet — GCC 14 and 15 are what
 the embedded toolchains ship, and neither has it. They are a compatibility path, not a
 preference: reach for them when your compiler leaves you no choice.
