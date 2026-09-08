@@ -4,11 +4,9 @@ Zero-copy **JSON** and **BJData** for C++23. One definition per type serves both
 both directions.
 
 ```cpp
-struct reading {
+struct [[= serpent::serializable {}]] reading {
     std::uint32_t at;
     double celsius;
-
-    SERPENT_DEFINE_TYPE(reading, at, celsius)
 };
 
 auto text  = json::encode(value);     // std::string
@@ -16,6 +14,19 @@ auto bytes = bjdata::encode(value);   // std::vector<std::byte>
 
 auto a = json::decode<reading>(text);
 auto b = bjdata::decode<reading>(bytes);
+```
+
+The compiler already knows what the fields are called, so on one that can tell you — GCC 16
+with `-freflection` — that annotation is the whole definition. On one that cannot, name them
+once yourself and nothing else changes:
+
+```cpp
+struct reading {
+    std::uint32_t at;
+    double celsius;
+
+    SERPENT_DEFINE_TYPE(reading, at, celsius)
+};
 ```
 
 ## What makes it different

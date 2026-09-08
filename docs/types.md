@@ -18,9 +18,13 @@ struct [[= serpent::serializable {}]] point {
 };
 ```
 
-This is the shortest form and the one to reach for first. It needs GCC 16 with `-freflection`
-— see [Reflection](reflection.md) for the naming rules and for what to do on compilers that
-are not there yet. Everything below works everywhere.
+This is the form to reach for, and the only one that also gives you
+[discriminated variants](reflection.md#naming-a-type-on-the-wire). It needs GCC 16 with
+`-freflection`.
+
+The three forms below exist because most compilers cannot do this yet — GCC 14 and 15 are what
+the embedded toolchains ship, and neither has it. They are a compatibility path, not a
+preference: reach for them when your compiler leaves you no choice.
 
 ### The macro
 

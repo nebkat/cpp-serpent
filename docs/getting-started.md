@@ -24,12 +24,10 @@ configure needs network access.
 namespace bjdata = serpent::bjdata;
 namespace json = serpent::json;
 
-struct station {
+struct [[= serpent::serializable {}]] station { // (1)!
     std::string name;
     std::optional<int> altitude;
     std::vector<double> samples;
-
-    SERPENT_DEFINE_TYPE(station, name, altitude, samples)
 };
 
 int main() {
@@ -43,7 +41,13 @@ int main() {
 }
 ```
 
-That is the whole surface for most uses: `encode`, `decode`, and one macro on your type.
+1.  Needs a compiler that can enumerate the fields for you: GCC 16 with `-freflection`. On any
+    other, drop the annotation and name them once instead —
+    `SERPENT_DEFINE_TYPE(station, name, altitude, samples)` inside the struct. Nothing else in
+    this program changes. See [Reflection](reflection.md).
+
+
+That is the whole surface for most uses: `encode`, `decode`, and one annotation on your type.
 
 ## Building this repository
 

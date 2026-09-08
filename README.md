@@ -12,11 +12,9 @@ both directions.
 namespace bjdata = serpent::bjdata;
 namespace json = serpent::json;
 
-struct reading {
+struct [[= serpent::serializable {}]] reading {
     std::uint32_t at;
     double celsius;
-
-    SERPENT_DEFINE_TYPE(reading, at, celsius)
 };
 
 const auto text = json::encode(value);      // {"at":1700000000,"celsius":4.5}
@@ -24,6 +22,19 @@ const auto bytes = bjdata::encode(value);   // the same value, compact binary
 
 const auto a = json::decode<reading>(text);
 const auto b = bjdata::decode<reading>(bytes);
+```
+
+The compiler already knows what the fields are called, so on one that can tell you — GCC 16
+with `-freflection` — that annotation is the whole definition. On one that cannot, name them
+once yourself and nothing else changes:
+
+```cpp
+struct reading {
+    std::uint32_t at;
+    double celsius;
+
+    SERPENT_DEFINE_TYPE(reading, at, celsius)
+};
 ```
 
 ## Why
