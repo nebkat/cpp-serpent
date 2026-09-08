@@ -24,8 +24,8 @@ Ten thousand structs of five fields.
 
 | | serpent (BJData) | struct-mapping lib (BEVE) | DOM lib (CBOR) |
 |---|---:|---:|---:|
-| encode | 0.60 ms | **0.25 ms** (2.4x faster) | 3.45 ms |
-| decode | 1.40 ms | **0.27 ms** (5.3x faster) | 6.07 ms |
+| encode | 0.61 ms | **0.09 ms** (7.0x faster) | 3.57 ms |
+| decode | 1.30 ms | **0.16 ms** (8.1x faster) | 6.43 ms |
 | allocations, decode | **1** | **1** | 140,025 |
 | bytes allocated | **560,000** | **560,000** | 10,364,344 |
 | output size | 844,694 B | 828,964 B | 766,100 B |
@@ -36,7 +36,17 @@ So the gap is not the text parsing and it is not the tables.
 sized array states its length, which costs three bytes on this document. See
 [counted arrays](bjdata.md#counted-arrays).
 
-**Time is still 5.3x on decode and 2.4x on encode.** Where that goes, on the decode side:
+**Time is 8.1x on decode and 7.0x on encode**, and one thing has to be said about that number
+before the breakdown: it is bigger than it used to be, and not because anything got slower.
+
+Everything in this table is built with the same compiler. Measured under Clang the gap is 5.3x,
+under GCC 16 it is 8.1x — the other library is a third quicker on the newer compiler and we are
+not. It is written almost entirely as templates resolved at compile time, which the newer
+optimiser rewards; our reader is a handful of ordinary functions walking a buffer, which it has
+little left to do with. Quoting the smaller figure by measuring the two under different
+compilers would have been flattering and wrong.
+
+Where our decode time goes, measured on the generic walk:
 
 | | ns | share |
 |---|---:|---:|
@@ -47,9 +57,14 @@ sized array states its length, which costs three bytes on this document. See
 
 Decoding values is almost free. The cost is traversal, and the first row is the important one:
 **the other library decodes the whole document in less time than it takes us merely to walk
-past it.** So the remaining gap is not a missing micro-optimisation — it is what a
-self-describing format costs to walk, one marker and one bounds check at a time, against a
-reader generated for one struct at compile time.
+past it.**
+
+Where the compiler can enumerate a type's fields, BJData skips the generic walk entirely and
+reads through [a reader generated for that type](reflection.md) — no iterator, no intermediate
+handle, one inlined comparison per field against a constant of known length. That is worth
+about a third, and it is included in the figure above. What is left is what a self-describing
+format costs to walk, one marker and one bounds check at a time, against a parser emitted for
+one struct.
 
 ## Your own types, as JSON
 
@@ -138,4 +153,7 @@ fast, and the whole-document benchmark caught exactly that: asking the on-demand
 root field count only touches the top level, so it had to be replaced with a real recursive
 traversal before the row meant anything.
 
-Measured on an Apple M4 Pro, macOS 26.5, Apple clang 21, `-O3 -DNDEBUG`, best of seven rounds.
+Measured on an Apple M4 Pro, macOS 26.5, `-O3 -DNDEBUG`, best of seven rounds. The binary table
+is GCC 16 with `-freflection`, which is the path serpent means you to use; the JSON and
+document tables are Apple clang 21. Every row within a table is the same compiler — comparing
+two libraries built by different ones says more about the compilers than the libraries.
