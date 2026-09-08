@@ -17,6 +17,7 @@
 #include <serpent/serializer.hpp>
 
 #include <cstring>
+#include <optional>
 #include <string_view>
 
 namespace serpent::bjdata {
@@ -39,15 +40,20 @@ template<std::string_view const &Name>
  * Found by argument-dependent lookup from serializer<T>::read, so a source that has no such
  * function - json::reader - simply does not take this path.
  */
+namespace detail {
+
+/**
+ * Reads an object's members, leaving the cursor immediately after it.
+ *
+ * The cursor starts on the byte after the opening brace. Consuming the object rather than
+ * merely reading it is what lets a sequence of these be walked once instead of twice.
+ */
 template<typename T>
     requires reflected_type<T>
-bool read_reflected(const view &source, T &value) {
-    if (!source.is_object()) return false;
+bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> buffer, T &value) {
+    const auto info = detail::parse_header(scanner, true);
+    if (!scanner.ok() || info.body == nullptr) return false;
 
-    const auto info = source.container_header();
-    if (info.body == nullptr) return false;
-
-    detail::cursor scanner { source.buffer(), info.body };
     std::uint64_t remaining = info.count;
     const bool counted = !info.unbounded;
     bool complete = true;
@@ -58,10 +64,13 @@ bool read_reflected(const view &source, T &value) {
 
         if (counted) {
             if (remaining == 0) break;
-        } else if (scanner.position >= scanner.limit || to_marker(*scanner.position) == marker::object_end) {
+            if (scanner.position >= scanner.limit) return false;
+        } else if (scanner.position >= scanner.limit) {
+            return false;
+        } else if (to_marker(*scanner.position) == marker::object_end) {
+            ++scanner.position; // consumed, so the caller resumes after the object
             break;
         }
-        if (scanner.position >= scanner.limit) break;
 
         const auto key = detail::read_key(scanner);
         if (!scanner.ok()) return false;
@@ -74,7 +83,7 @@ bool read_reflected(const view &source, T &value) {
             scanner.advance(1);
         }
 
-        const view held { kind, source.buffer(), scanner.position };
+        const view held { kind, buffer, scanner.position };
 
         // One compile-time comparison per field, each against a constant of known length. The
         // first that matches consumes the entry; anything else is a key this type does not name.
@@ -109,6 +118,75 @@ bool read_reflected(const view &source, T &value) {
     }
 
     return complete;
+}
+
+} // namespace detail
+
+/**
+ * Fills a reflected type from an object.
+ *
+ * Found by argument-dependent lookup from serializer<T>::read, so a source that has no such
+ * function - json::reader - simply does not take this path.
+ */
+template<typename T>
+    requires reflected_type<T>
+bool read_reflected(const view &source, T &value) {
+    if (!source.is_object()) return false;
+    detail::cursor scanner { source.buffer(), source.data() };
+    return detail::read_object_body(scanner, source.buffer(), value);
+}
+
+/**
+ * Fills a container of reflected objects, walking the document once.
+ *
+ * Without this the elements are read through the array iterator, which knows nothing of what
+ * the reader above consumed and skips each element again to find the next - so every record is
+ * parsed twice. Returns nothing for a shape it does not handle, leaving the generic path to it.
+ */
+template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
+    requires reflected_type<T> && requires(C &out) {
+        out.clear();
+        out.emplace_back();
+    }
+std::optional<bool> read_sequence(const view &source, C &out) {
+    if (!source.is_array()) return std::nullopt;
+
+    const auto info = source.container_header();
+    if (info.body == nullptr) return std::nullopt;
+    // A typed array of anything but objects is not a sequence of these.
+    if (info.typed() && info.element != marker::object_begin) return std::nullopt;
+
+    detail::cursor scanner { source.buffer(), info.body };
+    std::uint64_t remaining = info.count;
+    const bool counted = !info.unbounded;
+
+    out.clear();
+    if (counted) out.reserve(static_cast<std::size_t>(info.count));
+
+    while (scanner.ok()) {
+        while (scanner.position < scanner.limit && to_marker(*scanner.position) == marker::noop)
+            ++scanner.position;
+
+        if (counted) {
+            if (remaining == 0) break;
+            if (scanner.position >= scanner.limit) return false;
+        } else if (scanner.position >= scanner.limit) {
+            return false;
+        } else if (to_marker(*scanner.position) == marker::array_end) {
+            ++scanner.position;
+            break;
+        }
+
+        if (!info.typed()) {
+            if (to_marker(*scanner.position) != marker::object_begin) return false;
+            ++scanner.position;
+        }
+
+        auto &slot = out.emplace_back();
+        if (!detail::read_object_body(scanner, source.buffer(), slot)) return false;
+        if (counted && remaining > 0) --remaining;
+    }
+    return true;
 }
 
 #endif

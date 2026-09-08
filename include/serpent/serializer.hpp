@@ -341,6 +341,13 @@ bool read_into(Source source, T &value) {
                              target.emplace_back();
                          }) {
         if (!source.is_array()) return false;
+
+        // A format may offer a reader generated for this element type, which walks the document
+        // once instead of reading each element and then skipping it again to find the next.
+        if constexpr (requires { read_sequence(source, value); }) {
+            if (const auto handled = read_sequence(source, value)) return *handled;
+        }
+
         value.clear();
         // A document that states its length lets the container be sized once rather than grown.
         if constexpr (requires { source.size_hint(); } && requires(T &target) { target.reserve(std::size_t {}); }) {
