@@ -11,6 +11,7 @@
 #include <ranges>
 #include <span>
 
+#include <algorithm>
 #include <cstring>
 #include <string_view>
 #include <type_traits>
@@ -49,13 +50,68 @@ class byte_emitter {
      */
     static constexpr std::size_t buffer_capacity = 256;
     std::byte buffer[buffer_capacity] {};
-    std::size_t buffered = 0;
+
+    /**
+     * Where writes actually land.
+     *
+     * For a sink that can lend its own storage this points into the destination, so a document
+     * is written once instead of being gathered here and copied again - and the batch above is
+     * never touched. For any other sink it points at that batch.
+     */
+    std::byte *room = nullptr;
+    std::size_t room_size = 0;
+    std::size_t room_used = 0;
+
+    /** Asks the sink for more room. Null when it does not lend, which selects the batch. */
+    std::span<std::byte> (*lend_room)(void *, std::size_t) = nullptr;
+    void (*keep_room)(void *, std::size_t) = nullptr;
+
+    /**
+     * How much room to ask for, doubling up to a cap.
+     *
+     * Starting small keeps a short document from reserving kilobytes it will hand straight
+     * back; doubling keeps a long one from asking many times.
+     */
+    static constexpr std::size_t first_chunk = 256;
+    static constexpr std::size_t largest_chunk = 16384;
+    std::size_t next_chunk = first_chunk;
+
+    /** Hands back what was used and asks for the next chunk. */
+    bool renew_room(std::size_t at_least) noexcept {
+        this->keep_room(this->context, this->room_used);
+        this->next_chunk = std::min(this->next_chunk * 2, largest_chunk);
+        const auto next = this->lend_room(this->context, std::max(at_least, this->next_chunk));
+        if (next.empty()) {
+            this->fail(errc::sink_failed);
+            return false;
+        }
+        this->room = next.data();
+        this->room_size = next.size();
+        this->room_used = 0;
+        return true;
+    }
 
     /** Hands whatever is gathered to the sink. Clears first, so a failure cannot re-enter. */
     bool flush() noexcept {
-        if (this->buffered == 0) return true;
-        const std::size_t count = this->buffered;
-        this->buffered = 0;
+        if (this->lend_room != nullptr) {
+            // Already written into the destination; only the length needs settling, and then a
+            // fresh chunk to carry on in.
+            this->keep_room(this->context, this->room_used);
+            this->next_chunk = std::min(this->next_chunk * 2, largest_chunk);
+            const auto next = this->lend_room(this->context, this->next_chunk);
+            this->room = next.data();
+            this->room_size = next.size();
+            this->room_used = 0;
+            if (next.empty()) {
+                this->fail(errc::sink_failed);
+                return false;
+            }
+            return true;
+        }
+
+        if (this->room_used == 0) return true;
+        const std::size_t count = this->room_used;
+        this->room_used = 0;
         if (!this->write_bytes(this->context, std::span<const std::byte> { this->buffer, count })) {
             this->fail(errc::sink_failed);
             return false;
@@ -105,7 +161,18 @@ public:
     : write_bytes([](void *target, std::span<const std::byte> bytes) {
         return detail::put(*static_cast<S *>(target), bytes);
     })
-    , context(std::addressof(out)) {}
+    , context(std::addressof(out)) {
+        if constexpr (lending_sink<S>) {
+            this->lend_room = [](void *target, std::size_t bytes) { return static_cast<S *>(target)->lend(bytes); };
+            this->keep_room = [](void *target, std::size_t bytes) { static_cast<S *>(target)->keep(bytes); };
+            const auto first = out.lend(first_chunk);
+            this->room = first.data();
+            this->room_size = first.size();
+        } else {
+            this->room = this->buffer;
+            this->room_size = buffer_capacity;
+        }
+    }
 
     /** Also accepts a plain callable, so a lambda needs no sink wrapper. */
     template<typename F>
@@ -120,14 +187,22 @@ public:
             return static_cast<bool>((*static_cast<F *>(target))(bytes));
         }
     })
-    , context(std::addressof(callable)) {}
+    , context(std::addressof(callable)) {
+        this->room = this->buffer;
+        this->room_size = buffer_capacity;
+    }
 
     // Copying would give two emitters one sink and flush the batch twice.
     byte_emitter(const byte_emitter &) = delete;
     byte_emitter &operator=(const byte_emitter &) = delete;
 
     /** Flushes whatever is still gathered, so dropping a writer cannot silently truncate. */
-    ~byte_emitter() { this->flush(); }
+    ~byte_emitter() {
+        if (this->lend_room != nullptr)
+            this->keep_room(this->context, this->room_used);
+        else
+            this->flush();
+    }
 
     [[nodiscard]] bool ok() const noexcept { return this->failure == errc::ok; }
     [[nodiscard]] errc error_code() const noexcept { return this->failure; }
@@ -147,9 +222,9 @@ public:
      * pass a constant size almost every time, and that only pays if they can see the copy.
      */
     void put(std::span<const std::byte> bytes) noexcept {
-        if (this->failure == errc::ok && bytes.size() <= buffer_capacity - this->buffered) {
-            std::memcpy(this->buffer + this->buffered, bytes.data(), bytes.size());
-            this->buffered += bytes.size();
+        if (this->failure == errc::ok && bytes.size() <= this->room_size - this->room_used) {
+            std::memcpy(this->room + this->room_used, bytes.data(), bytes.size());
+            this->room_used += bytes.size();
             this->produced += bytes.size();
             return;
         }
@@ -158,8 +233,8 @@ public:
 
     /** One byte, without going through a span and the stack slot that implies. */
     void put_byte(std::byte value) noexcept {
-        if (this->failure == errc::ok && this->buffered < buffer_capacity) {
-            this->buffer[this->buffered++] = value;
+        if (this->failure == errc::ok && this->room_used < this->room_size) {
+            this->room[this->room_used++] = value;
             ++this->produced;
             return;
         }
@@ -174,6 +249,14 @@ public:
     [[gnu::noinline]] void put_overflowing(std::span<const std::byte> bytes) noexcept {
         if (!this->ok()) return;
 
+        if (this->lend_room != nullptr) {
+            if (!this->renew_room(bytes.size())) return;
+            std::memcpy(this->room + this->room_used, bytes.data(), bytes.size());
+            this->room_used += bytes.size();
+            this->produced += bytes.size();
+            return;
+        }
+
         if (!this->flush()) return;
         if (bytes.size() >= buffer_capacity) {
             // Larger than the batch, so gathering it would only add a copy.
@@ -183,14 +266,23 @@ public:
             }
         } else {
             std::memcpy(this->buffer, bytes.data(), bytes.size());
-            this->buffered = bytes.size();
+            this->room_used = bytes.size();
         }
         this->produced += bytes.size();
     }
 
     /** The single check at the end: the bytes written, or the first failure. */
     [[nodiscard]] std::expected<std::size_t, error> finish() noexcept {
-        this->flush();
+        if (this->lend_room != nullptr) {
+            // Settled: hand back the unused tail and disarm, so the destructor does not commit
+            // a second time and truncate what was just kept.
+            this->keep_room(this->context, this->room_used);
+            this->lend_room = nullptr;
+            this->room_used = 0;
+            this->room_size = 0;
+        } else {
+            this->flush();
+        }
         if (this->depth != 0) this->fail(errc::unterminated_container);
         if (!this->ok()) return std::unexpected { error { this->failure, this->produced } };
         return this->produced;

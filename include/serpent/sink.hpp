@@ -19,6 +19,20 @@ namespace serpent {
 template<typename S>
 concept sink = requires(S &out, std::span<const std::byte> bytes) { out.write(bytes); };
 
+/**
+ * A sink that can hand out its own memory to be written into.
+ *
+ * `lend(n)` returns somewhere with room for at least n bytes, or an empty span if it cannot;
+ * `keep(n)` says how much of it was used. A sink over contiguous storage can do this, and it
+ * saves the whole document being copied twice - once into the writer's batch and again into
+ * the sink - and saves carrying that batch around at all.
+ */
+template<typename S>
+concept lending_sink = sink<S> && requires(S &out, std::size_t bytes) {
+    { out.lend(bytes) } -> std::same_as<std::span<std::byte>>;
+    out.keep(bytes);
+};
+
 namespace detail {
 
 /** Writes to a sink, treating any bool-testable result as a success flag. */
@@ -49,6 +63,7 @@ class container_sink {
             "container_sink requires a container of a byte-sized, byte-aliasing element");
 
     Container *target = nullptr;
+    std::size_t lent = 0;
 
 public:
     explicit container_sink(Container &target) noexcept : target(&target) {}
@@ -57,6 +72,16 @@ public:
         const auto *first = reinterpret_cast<const element *>(bytes.data());
         this->target->insert(this->target->end(), first, first + bytes.size());
     }
+
+    /** Grows the container and lends out the new room, so the writer fills it in place. */
+    [[nodiscard]] std::span<std::byte> lend(std::size_t bytes) {
+        this->lent = this->target->size();
+        this->target->resize(this->lent + bytes);
+        return { reinterpret_cast<std::byte *>(this->target->data()) + this->lent, bytes };
+    }
+
+    /** Keeps that much of what was lent, and gives the rest back. */
+    void keep(std::size_t bytes) { this->target->resize(this->lent + bytes); }
 
     [[nodiscard]] const Container &container() const noexcept { return *this->target; }
 };
