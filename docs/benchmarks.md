@@ -24,8 +24,8 @@ Ten thousand structs of five fields.
 
 | | serpent (BJData) | struct-mapping lib (BEVE) | DOM lib (CBOR) |
 |---|---:|---:|---:|
-| encode | 0.61 ms | **0.25 ms** (2.4x faster) | 3.45 ms |
-| decode | 1.58 ms | **0.25 ms** (6.3x faster) | 6.07 ms |
+| encode | 0.60 ms | **0.25 ms** (2.4x faster) | 3.45 ms |
+| decode | 1.40 ms | **0.27 ms** (5.3x faster) | 6.07 ms |
 | allocations, decode | **1** | **1** | 140,025 |
 | bytes allocated | **560,000** | **560,000** | 10,364,344 |
 | output size | 844,694 B | 828,964 B | 766,100 B |
@@ -36,10 +36,20 @@ So the gap is not the text parsing and it is not the tables.
 sized array states its length, which costs three bytes on this document. See
 [counted arrays](bjdata.md#counted-arrays).
 
-**Time is still 6.2x on decode and 2.4x on encode**, and that is implementation headroom rather
-than anything structural. The remaining difference is per-field: the other library resolves each
-key at compile time, while serpent reads a key and compares it at run time for every field of
-every record.
+**Time is still 5.3x on decode and 2.4x on encode.** Where that goes, on the decode side:
+
+| | ns | share |
+|---|---:|---:|
+| walking the bytes at all — every record skipped, nothing decoded | 508k | 36% |
+| iterating the members of each object, above that | 411k | 29% |
+| decoding the values | 87k | 6% |
+| filling the struct | 376k | 27% |
+
+Decoding values is almost free. The cost is traversal, and the first row is the important one:
+**the other library decodes the whole document in less time than it takes us merely to walk
+past it.** So the remaining gap is not a missing micro-optimisation — it is what a
+self-describing format costs to walk, one marker and one bounds check at a time, against a
+reader generated for one struct at compile time.
 
 ## Your own types, as JSON
 
