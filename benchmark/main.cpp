@@ -234,6 +234,8 @@ void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
 // ---------------- the type both libraries convert ----------------
 
+// Written out rather than annotated, so the benchmark runs on any compiler. It produces the
+// same member() calls the annotation would, so it measures the same thing either way.
 struct reading {
     std::uint64_t timestamp = 0;
     std::string station;
@@ -241,7 +243,14 @@ struct reading {
     double humidity = 0;
     bool valid = false;
 
-    SERPENT_DEFINE_TYPE(reading, timestamp, station, celsius, humidity, valid)
+    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), reading> value) {
+        visitor.member("timestamp", value.timestamp);
+        visitor.member("station", value.station);
+        visitor.member("celsius", value.celsius);
+        visitor.member("humidity", value.humidity);
+        visitor.member("valid", value.valid);
+    }
+
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(reading, timestamp, station, celsius, humidity, valid)
 };
 

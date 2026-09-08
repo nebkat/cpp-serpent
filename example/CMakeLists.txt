@@ -1,10 +1,13 @@
 # The examples are built and run as tests, so they cannot quietly stop compiling.
 
 set(EXAMPLES
-    quickstart
     reading_without_copying
-    reflection
     transcoding)
+
+# These define a type, which means annotating it.
+if(SERPENT_HAS_REFLECTION_SUPPORT)
+    list(APPEND EXAMPLES quickstart reflection)
+endif()
 
 foreach(EXAMPLE IN LISTS EXAMPLES)
     add_executable(${EXAMPLE}_example "${EXAMPLE}.cpp")

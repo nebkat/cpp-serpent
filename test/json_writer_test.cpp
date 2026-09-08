@@ -22,10 +22,9 @@ namespace json = serpent::json;
 
 namespace {
 
-struct point {
+struct[[= serpent::serializable {}]] point {
     int x = 0;
     int y = 0;
-    SERPENT_DEFINE_TYPE(point, x, y)
 };
 
 /**

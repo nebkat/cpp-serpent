@@ -4,7 +4,7 @@
 // anything is read from.
 //
 // Two ways in. A writer emits directly, so a type using json_convert or
-// SERPENT_DEFINE_TYPE serialises to JSON with no intermediate at all: those take `auto
+// a reflected type serialises to JSON with no intermediate at all: those take `auto
 // &visitor` and never name the BJData writer. And write_TMP(sink, view) walks a document
 // that already exists, which is what you want for dumping a stored .bjd.
 

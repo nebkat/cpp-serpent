@@ -42,6 +42,14 @@ check_cxx_source_compiles([==[
 ]==] SERPENT_HAS_REFLECTION_SUPPORT)
 unset(CMAKE_REQUIRED_FLAGS)
 
+# Reflection is the way a type is defined; the macro and function forms are what you fall back
+# to. So everything here is built with it where the compiler has it, and the parts that need it
+# are simply not built where it does not.
+if(SERPENT_HAS_REFLECTION_SUPPORT)
+    add_compile_options(${SERPENT_REFLECTION_FLAGS})
+    add_link_options(${SERPENT_REFLECTION_FLAGS})
+endif()
+
 # Header only.
 add_library(serpent INTERFACE)
 add_library(serpent::serpent ALIAS serpent)

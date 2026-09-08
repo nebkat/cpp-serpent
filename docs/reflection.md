@@ -157,7 +157,7 @@ compiler it targets has caught up:
 #if SERPENT_HAS_REFLECTION
     // annotated definition
 #else
-    // SERPENT_DEFINE_TYPE, or a json_convert
+    // a json_convert naming the fields
 #endif
 ```
 

@@ -42,9 +42,8 @@ int main() {
 ```
 
 1.  Needs a compiler that can enumerate the fields for you: GCC 16 with `-freflection`. On any
-    other, drop the annotation and name them once instead —
-    `SERPENT_DEFINE_TYPE(station, name, altitude, samples)` inside the struct. Nothing else in
-    this program changes. See [Reflection](reflection.md).
+    other, drop the annotation and write a `json_convert` naming the three fields — see
+    [Your types](types.md#types-you-own). Nothing else in this program changes.
 
 
 That is the whole surface for most uses: `encode`, `decode`, and one annotation on your type.

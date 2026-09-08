@@ -22,22 +22,9 @@ This is the form to reach for, and the only one that also gives you
 [discriminated variants](reflection.md#naming-a-type-on-the-wire). It needs GCC 16 with
 `-freflection`.
 
-The three forms below exist because most compilers cannot do this yet — GCC 14 and 15 are what
+The forms below exist because most compilers cannot do this yet — GCC 14 and 15 are what
 the embedded toolchains ship, and neither has it. They are a compatibility path, not a
 preference: reach for them when your compiler leaves you no choice.
-
-### The macro
-
-For a plain aggregate, list the members:
-
-```cpp
-struct point {
-    int x = 0;
-    int y = 0;
-
-    SERPENT_DEFINE_TYPE(point, x, y)
-};
-```
 
 ### One function, both directions
 
@@ -180,7 +167,10 @@ struct setting {
     std::string name;
     std::variant<bool, std::int64_t, double, std::string> value;
 
-    SERPENT_DEFINE_TYPE(setting, name, value)
+    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), setting> value) {
+        visitor.member("name", value.name);
+        visitor.member("value", value.value);
+    }
 };
 ```
 

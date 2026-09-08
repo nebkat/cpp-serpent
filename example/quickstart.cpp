@@ -11,19 +11,15 @@
 namespace bjdata = serpent::bjdata;
 namespace json = serpent::json;
 
-struct reading {
+struct[[= serpent::serializable {}]] reading {
     std::uint32_t at = 0;
     double celsius = 0;
-
-    SERPENT_DEFINE_TYPE(reading, at, celsius)
 };
 
-struct station {
+struct[[= serpent::serializable {}]] station {
     std::string name;
     std::optional<int> altitude;
     std::vector<reading> readings;
-
-    SERPENT_DEFINE_TYPE(station, name, altitude, readings)
 };
 
 int main() {

@@ -7,12 +7,14 @@
 // annotations and the identifier-to-key conversion, sits outside the gate and compiles
 // everywhere.
 
+#include <serpent/concepts.hpp>
 #include <serpent/visitor.hpp>
 
 #include <array>
 #include <optional>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 
 #include <cstddef>
 
@@ -342,7 +344,7 @@ concept discriminated_type = std::is_class_v<T> && detail::is_discriminated<T>()
 namespace detail {
 
 /**
- * Generates the same member() calls SERPENT_DEFINE_TYPE would, from the type itself.
+ * Generates the member() calls a hand-written json_convert would, from the type itself.
  *
  * Deliberately not spelled json_convert. As an overload it would tie with a hand-written one
  * on a type that has both, and an ambiguous call makes the convertible_type probe silently

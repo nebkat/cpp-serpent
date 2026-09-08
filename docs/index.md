@@ -16,16 +16,19 @@ auto a = json::decode<reading>(text);
 auto b = bjdata::decode<reading>(bytes);
 ```
 
-The compiler already knows what the fields are called, so on one that can tell you — GCC 16
-with `-freflection` — that annotation is the whole definition. On one that cannot, name them
-once yourself and nothing else changes:
+The compiler already knows what the fields are called, so that annotation is the whole
+definition. It needs GCC 16 with `-freflection`; on a compiler without it, name the fields once
+yourself and nothing else changes:
 
 ```cpp
 struct reading {
     std::uint32_t at;
     double celsius;
 
-    SERPENT_DEFINE_TYPE(reading, at, celsius)
+    friend void json_convert(auto &visitor, serpent::conversion_object_t<decltype(visitor), reading> value) {
+        visitor.member("at", value.at);
+        visitor.member("celsius", value.celsius);
+    }
 };
 ```
 

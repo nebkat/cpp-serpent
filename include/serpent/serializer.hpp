@@ -429,13 +429,13 @@ bool read_into(Source source, T &value) {
             SERPENT_PASTE10, SERPENT_PASTE9, SERPENT_PASTE8, SERPENT_PASTE7, SERPENT_PASTE6, SERPENT_PASTE5, \
             SERPENT_PASTE4, SERPENT_PASTE3, SERPENT_PASTE2, SERPENT_PASTE1)(step, __VA_ARGS__))
 
-/** Defines both directions as a hidden friend. Place inside the type. */
-#define SERPENT_DEFINE_TYPE(Type, ...) \
-    friend void json_convert(auto &visitor, ::serpent::conversion_object_t<decltype(visitor), Type> value) { \
-        SERPENT_FOR_EACH(SERPENT_MEMBER, __VA_ARGS__) \
-    }
-
-/** Defines both directions as a free function. Place beside the type, in its namespace. */
+/**
+ * Defines both directions as a free function. Place beside the type, in its namespace.
+ *
+ * For a type whose definition you do not control and whose fields you cannot annotate. A type
+ * that is yours to annotate wants [[= serpent::serializable {}]] instead, which needs no list
+ * of members and stays right when one is added.
+ */
 #define SERPENT_DEFINE_TYPE_NON_INTRUSIVE(Type, ...) \
     inline void json_convert(auto &visitor, ::serpent::conversion_object_t<decltype(visitor), Type> value) { \
         SERPENT_FOR_EACH(SERPENT_MEMBER, __VA_ARGS__) \

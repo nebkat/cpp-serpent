@@ -3,6 +3,7 @@
 #   cmake -S . -B build && cmake --build build
 #   ctest --test-dir build --output-on-failure
 
+# Format-level suites, which name no types of their own.
 set(TESTS
     bjdata_scalar
     bjdata_container
@@ -10,9 +11,13 @@ set(TESTS
     bjdata_notation
     bjdata_writer
     json_reader
-    json_writer
-    serializer
-    fixture)
+    fixture
+    manual)
+
+# Suites that define types the way types are meant to be defined, by annotation.
+if(SERPENT_HAS_REFLECTION_SUPPORT)
+    list(APPEND TESTS json_writer serializer reflect)
+endif()
 
 foreach(TEST_NAME IN LISTS TESTS)
     add_executable(${TEST_NAME}_test "${TEST_NAME}_test.cpp")
@@ -33,20 +38,11 @@ endforeach()
 # The reflected path is a separate binary because it needs a newer standard and a compiler
 # flag; the rest of the suite must keep working without either.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    add_executable(reflect_test reflect_test.cpp)
-    target_link_libraries(reflect_test PRIVATE serpent)
-    target_include_directories(reflect_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
-    target_compile_options(reflect_test PRIVATE -Wall -Wextra ${SERPENT_REFLECTION_FLAGS})
-    target_link_options(reflect_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
-    add_test(NAME reflect COMMAND reflect_test)
-
     # Annotating a type that already has a hand-written conversion must be rejected, not
     # silently ranked. Excluded from the default build so only this test builds it, and
     # expected to fail: the diagnostic is the thing under test.
     add_executable(reflect_conflict_test EXCLUDE_FROM_ALL reflect_conflict_test.cpp)
     target_link_libraries(reflect_conflict_test PRIVATE serpent)
-    target_compile_options(reflect_conflict_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
-    target_link_options(reflect_conflict_test PRIVATE ${SERPENT_REFLECTION_FLAGS})
     add_test(NAME reflect_conflict
             COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target reflect_conflict_test)
     set_tests_properties(reflect_conflict PROPERTIES WILL_FAIL TRUE)

@@ -20,22 +20,19 @@ namespace {
 enum class mode : std::uint8_t { off, automatic, on };
 
 /** Aggregates that C++20 would let you build straight from a std::string. */
-struct labelled {
+struct[[= serpent::serializable {}]] labelled {
     std::string text;
-    SERPENT_DEFINE_TYPE(labelled, text)
 };
 
-struct first_string_member {
+struct[[= serpent::serializable {}]] first_string_member {
     std::string name;
     int count = 0;
-    SERPENT_DEFINE_TYPE(first_string_member, name, count)
 };
 
 // --- Form C: the macro, for a plain aggregate ---
-struct point {
+struct[[= serpent::serializable {}]] point {
     int x = 0;
     int y = 0;
-    SERPENT_DEFINE_TYPE(point, x, y)
 };
 
 // --- Form B: one function, both directions ---
@@ -113,7 +110,7 @@ std::optional<T> round_trip(const T &value) {
     return decode<T>(bytes);
 }
 
-void macro_form() {
+void annotated_form() {
     const auto bytes = encode(point { 3, 4 });
     check_equal(std::string_view { hex(bytes) }, "7b550178550355017955047d", "point encodes as {x:3,y:4}");
 
@@ -262,20 +259,23 @@ void reflection_seam() {
     static_assert(sizeof(key) > 0 && sizeof(skip) >= 1 && sizeof(serializable) >= 1);
     static_assert(naming {}.style == naming_style::as_written);
 
-    // Nothing is reflected on this toolchain, so the macro and function forms carry everything.
-    check_equal(reflection_available, false, "no reflection on this toolchain");
-    static_assert(!reflected_type<point>, "point is not reflected here");
-    static_assert(!enable_reflection<point>::value, "reflection is opt-in");
+    // Reflection is opt-in: a type that says nothing is not reflected, however plain it is.
+    struct unannotated {
+        int x;
+    };
+    static_assert(!reflected_type<unannotated>, "an aggregate is not reflected merely for being one");
+    static_assert(!enable_reflection<unannotated>::value, "and the trait says no until told otherwise");
 
-    // Which does not stop any of the supported forms from working.
-    check(round_trip(point { 1, 2 }).has_value(), "the macro form still carries the type");
+    // A type that does say so carries both formats through the annotation alone.
+    static_assert(reflected_type<point>, "an annotated type is reflected");
+    check(round_trip(point { 1, 2 }).has_value(), "and round-trips with nothing else written");
 }
 
 /**
  * One definition, two formats, both directions.
  *
  * json_convert never names either reader or either writer, so a type that uses it - which
- * is what SERPENT_DEFINE_TYPE writes - is carried by all four paths without being told about
+ * is what the annotation generates - is carried by every path without being told about
  * any of them.
  */
 void both_formats() {
@@ -405,9 +405,8 @@ void counted_containers() {
     check(typed_hint && *typed_hint == 5, "a packed numeric array states its length already");
 }
 
-struct circle {
+struct[[= serpent::serializable {}]] circle {
     int radius = 0;
-    SERPENT_DEFINE_TYPE(circle, radius)
 };
 
 /**
@@ -462,7 +461,7 @@ void sizing() {
 } // namespace
 
 int main() {
-    macro_form();
+    annotated_form();
     convert_form();
     separate_form();
     non_intrusive_form();
