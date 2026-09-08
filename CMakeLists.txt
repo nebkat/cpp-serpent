@@ -19,13 +19,17 @@ option(SERPENT_BUILD_BENCHMARKS "Build the benchmarks, which fetch another libra
 # Reading and writing unaligned values has nothing to do with serialization, so it is its own
 # library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
 include(FetchContent)
-# Consumed as a dependency, so its own tests are none of this build's business either.
-if(NOT SERPENT_BUILD_TESTS)
-    set(BUILD_TESTING OFF CACHE INTERNAL "")
-endif()
+# Consumed as a dependency, so its own tests are none of this build's business - it has its own
+# CI for those. Set directly rather than through BUILD_TESTING, which it may set for itself.
+set(UNALIGNED_BUILD_TESTS OFF CACHE INTERNAL "")
+
+# It declares the same C++ minimum, and links through to us, so one answer has to cover both -
+# otherwise turning ours off still leaves a -std flag on the consumer's command line.
+option(SERPENT_SET_CXX_STANDARD "Declare the C++23 minimum on consumers" ON)
+set(UNALIGNED_SET_CXX_STANDARD ${SERPENT_SET_CXX_STANDARD} CACHE INTERNAL "")
 FetchContent_Declare(unaligned
         GIT_REPOSITORY git@github.com:nebkat/cpp-unaligned.git
-        GIT_TAG v0.1.0
+        GIT_TAG v0.1.1
         GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(unaligned)
 
@@ -84,7 +88,6 @@ target_link_libraries(serpent INTERFACE unaligned::unaligned)
 # Declaring the minimum puts a -std flag on every consumer's command line, which is right for a
 # CMake-managed build and wrong for one that sets the standard itself with raw flags - ESP-IDF
 # passes -std=gnu++26, and whichever lands last wins. Turn this off there and set your own.
-option(SERPENT_SET_CXX_STANDARD "Declare the C++23 minimum on consumers" ON)
 if(SERPENT_SET_CXX_STANDARD)
     target_compile_features(serpent INTERFACE cxx_std_23)
 endif()
