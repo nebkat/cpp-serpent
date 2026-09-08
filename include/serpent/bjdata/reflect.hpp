@@ -52,7 +52,7 @@ namespace detail {
 template<typename T>
     requires reflected_type<T>
 bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> buffer, T &value) {
-    const auto info = detail::parse_header(scanner, true);
+    const auto info = detail::parse_object_prefix(scanner);
     if (!scanner.ok() || info.body == nullptr) return false;
 
     std::uint64_t remaining = info.count;

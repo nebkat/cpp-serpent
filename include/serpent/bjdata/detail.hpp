@@ -257,20 +257,32 @@ inline void read_dimension_list(cursor &source, counted_shape &shape) noexcept {
 }
 
 /** A parsed container header: everything between the opening brace and the first element. */
-struct header {
+/** What every container has. An object has only this: it cannot carry dimensions. */
+struct container_prefix {
     marker element = marker::invalid; ///< strong type, or invalid when heterogeneous
     std::uint64_t count = 0;
     bool unbounded = false;
     const std::byte *body = nullptr;
-    std::uint32_t extents[max_dimensions] {};
-    std::size_t rank = 0;
-    bool column_major = false;
 
     [[nodiscard]] constexpr bool typed() const noexcept { return this->element != marker::invalid; }
 };
 
-[[nodiscard]] inline header parse_header(cursor &source, bool object) noexcept {
-    header result;
+/** That, plus the shape an array may declare. */
+struct header : container_prefix {
+    std::uint32_t extents[max_dimensions] {};
+    std::size_t rank = 0;
+    bool column_major = false;
+};
+
+/**
+ * Reads a container's header into whichever of the two shapes the caller asked for.
+ *
+ * Reading an object into the prefix alone is worth having: the full header carries an array of
+ * extents that is zeroed on construction and copied on return, and an object never has any.
+ */
+template<typename Result>
+[[nodiscard]] inline Result parse_header_as(cursor &source, bool object) noexcept {
+    Result result;
 
     if (!source.need(1)) return result;
 
@@ -311,13 +323,24 @@ struct header {
     }
 
     result.count = shape.total;
-    result.rank = shape.rank;
-    result.column_major = shape.column_major;
-    for (std::size_t index = 0; index < shape.rank; ++index)
-        result.extents[index] = shape.extents[index];
+    if constexpr (requires { result.rank; }) {
+        result.rank = shape.rank;
+        result.column_major = shape.column_major;
+        for (std::size_t index = 0; index < shape.rank; ++index)
+            result.extents[index] = shape.extents[index];
+    }
 
     result.body = source.position;
     return result;
+}
+
+[[nodiscard]] inline header parse_header(cursor &source, bool object) noexcept {
+    return parse_header_as<header>(source, object);
+}
+
+/** For an object, where the shape fields would only be zeroed and copied for nothing. */
+[[nodiscard]] inline container_prefix parse_object_prefix(cursor &source) noexcept {
+    return parse_header_as<container_prefix>(source, true);
 }
 
 void skip_value(cursor &source, marker kind, int depth) noexcept;
