@@ -234,6 +234,12 @@ void the_generated_reader_agrees_with_the_generic_one() {
     check(other_encoder && other_encoder->x == 4 && other_encoder->y == 6,
             "a key whose length marker differs from ours still reads");
 
+    // Nothing obliges an encoder to spell a length in the fewest bytes. Here 1 is written as an
+    // int16, which no constant of ours can match, so it has to go through the parsing path.
+    const std::uint8_t wide_length[] = { '{', 'I', 1, 0, 'x', 'U', 4, 'I', 1, 0, 'y', 'U', 6, '}' };
+    const auto padded = bjdata::decode<point>(std::as_bytes(std::span { wide_length }));
+    check(padded && padded->x == 4 && padded->y == 6, "a length written wider than it needs to be still reads");
+
     // Mixed in one document: the first key as we write it, the second as someone else would.
     const std::uint8_t mixed[] = { '{', 'U', 1, 'x', 'U', 1, 'i', 1, 'y', 'U', 2, '}' };
     const auto both_ways = bjdata::decode<point>(std::as_bytes(std::span { mixed }));

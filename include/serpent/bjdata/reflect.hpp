@@ -126,8 +126,21 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                 static constexpr auto encoded = detail::encoded_key<name>;
+
+                // A length under 128 is the same byte whether its marker calls it uint8 or int8,
+                // so both spellings are recognised at once: the length and the name come from
+                // one constant, and either marker is allowed in front. Any other legal spelling
+                // of the same key - a length written wider than it needs to be, say - misses
+                // here and is parsed below, which is what makes the guess safe to make.
+                static constexpr bool short_length = encoded.size() == name.size() + 2 && name.size() < 128;
+                const bool lead_matches = short_length
+                        ? (*scanner.position == static_cast<std::byte>(marker::uint8)
+                                  || *scanner.position == static_cast<std::byte>(marker::int8))
+                        : *scanner.position == encoded[0];
+
                 if (!matched && static_cast<std::size_t>(scanner.limit - scanner.position) >= encoded.size()
-                        && std::memcmp(scanner.position, encoded.data(), encoded.size()) == 0) {
+                        && lead_matches
+                        && std::memcmp(scanner.position + 1, encoded.data() + 1, encoded.size() - 1) == 0) {
                     matched = true;
                     scanner.advance(encoded.size());
                     kind = value_marker();
