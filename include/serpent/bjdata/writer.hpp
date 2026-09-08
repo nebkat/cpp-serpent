@@ -151,10 +151,7 @@ public:
 
     // ---------------- raw output ----------------
 
-    void put_marker(marker value) noexcept {
-        const auto byte = static_cast<std::byte>(value);
-        this->put(std::span<const std::byte> { &byte, 1 });
-    }
+    void put_marker(marker value) noexcept { this->put_byte(static_cast<std::byte>(value)); }
 
     template<typename T>
     void put_raw(T value) noexcept {

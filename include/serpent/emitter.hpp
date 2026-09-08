@@ -137,19 +137,46 @@ public:
         if (this->ok()) this->failure = code;
     }
 
+    /**
+     * The common case: room in the batch, so a copy and two counters.
+     *
+     * Everything that is not that - flushing, a write too large to batch, a sink that has
+     * already failed - lives in put_overflowing, out of line. Kept apart deliberately: with the
+     * flush inlined here this whole function was too large to inline into its callers, so a
+     * one-byte marker became a call, and the copy inside it became a call to memcpy. Callers
+     * pass a constant size almost every time, and that only pays if they can see the copy.
+     */
     void put(std::span<const std::byte> bytes) noexcept {
-        if (!this->ok()) return;
-
-        if (bytes.size() <= buffer_capacity - this->buffered) {
+        if (this->failure == errc::ok && bytes.size() <= buffer_capacity - this->buffered) {
             std::memcpy(this->buffer + this->buffered, bytes.data(), bytes.size());
             this->buffered += bytes.size();
             this->produced += bytes.size();
             return;
         }
+        this->put_overflowing(bytes);
+    }
+
+    /** One byte, without going through a span and the stack slot that implies. */
+    void put_byte(std::byte value) noexcept {
+        if (this->failure == errc::ok && this->buffered < buffer_capacity) {
+            this->buffer[this->buffered++] = value;
+            ++this->produced;
+            return;
+        }
+        this->put_overflowing(std::span<const std::byte> { &value, 1 });
+    }
+
+    void put_text(std::string_view text) noexcept {
+        this->put(std::span<const std::byte> { reinterpret_cast<const std::byte *>(text.data()), text.size() });
+    }
+
+    /** Everything put() is not: a flush, an oversized write, or a sink that has failed. */
+    [[gnu::noinline]] void put_overflowing(std::span<const std::byte> bytes) noexcept {
+        if (!this->ok()) return;
 
         if (!this->flush()) return;
         if (bytes.size() >= buffer_capacity) {
-            // Larger than the buffer, so batching it would only add a copy.
+            // Larger than the batch, so gathering it would only add a copy.
             if (!this->write_bytes(this->context, bytes)) {
                 this->fail(errc::sink_failed);
                 return;
@@ -159,10 +186,6 @@ public:
             this->buffered = bytes.size();
         }
         this->produced += bytes.size();
-    }
-
-    void put_text(std::string_view text) noexcept {
-        this->put(std::span<const std::byte> { reinterpret_cast<const std::byte *>(text.data()), text.size() });
     }
 
     /** The single check at the end: the bytes written, or the first failure. */
