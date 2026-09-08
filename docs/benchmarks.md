@@ -24,47 +24,60 @@ Ten thousand structs of five fields.
 
 | | serpent (BJData) | struct-mapping lib (BEVE) | DOM lib (CBOR) |
 |---|---:|---:|---:|
-| encode | 0.28 ms | **0.09 ms** (3.1x faster) | 3.57 ms |
-| decode | 1.30 ms | **0.16 ms** (8.1x faster) | 6.43 ms |
+| encode | 0.24 ms | **0.09 ms** (2.8x faster) | 3.43 ms |
+| decode | 0.38 ms | **0.15 ms** (2.6x faster) | 5.96 ms |
 | allocations, decode | **1** | **1** | 140,025 |
-| bytes allocated | **560,000** | **560,000** | 10,364,344 |
+| bytes allocated | **640,000** | **640,000** | 11,884,344 |
 | output size | 844,694 B | 828,964 B | 766,100 B |
 
-So the gap is not the text parsing and it is not the tables.
+### It is not that the other format is cleverer
 
-**Allocation behaviour is identical** — one allocation, the same 560,000 bytes — because a
-sized array states its length, which costs three bytes on this document. See
-[counted arrays](bjdata.md#counted-arrays).
+The obvious explanation is wrong, and the byte traces say so. One record:
 
-**Time is 8.1x on decode and 3.1x on encode**, and one thing has to be said about that number
-before the breakdown: it is bigger than it used to be, and not because anything got slower.
+```
+BJData  73 B   {U·9 timestamp m ····      U·7 celsius h ··   …
+BEVE    83 B   ·· ·$ timestamp q ········    ·· celsius a ········ …
+CBOR    69 B   ·  i timestamp ·a eS·· …
+```
 
-Everything in this table is built with the same compiler. Measured under Clang the gap is 5.3x,
-under GCC 16 it is 8.1x — the other library is a third quicker on the newer compiler and we are
-not. It is written almost entirely as templates resolved at compile time, which the newer
-optimiser rewards; our reader is a handful of ordinary functions walking a buffer, which it has
-little left to do with. Quoting the smaller figure by measuring the two under different
-compilers would have been flattering and wrong.
+BEVE is the **least** compact of the four and the fastest. It writes the tag its C++ type
+dictates and a full-width payload — `uint64_t` is always eight bytes. BJData chooses a marker
+from the *value*: that `uint64` became a four-byte `m`, that `double` a two-byte `h`. CBOR and
+MessagePack narrow too and come out smaller still, because their type and length share one byte
+where BJData spends a marker plus a length.
 
-Where our decode time goes, measured on the generic walk:
+And choosing those markers is free. Encoding with `compact_types` off, so every marker comes
+from the type exactly as BEVE does, measures the same to within noise. The decisions were never
+the cost.
 
-| | ns | share |
-|---|---:|---:|
-| walking the bytes at all — every record skipped, nothing decoded | 508k | 36% |
-| iterating the members of each object, above that | 411k | 29% |
-| decoding the values | 87k | 6% |
-| filling the struct | 376k | 27% |
+### What the cost actually was
 
-Decoding values is almost free. The cost is traversal, and the first row is the important one:
-**the other library decodes the whole document in less time than it takes us merely to walk
-past it.**
+Four things, each found by measurement and each now fixed:
 
-Where the compiler can enumerate a type's fields, BJData skips the generic walk entirely and
-reads through [a reader generated for that type](reflection.md) — no iterator, no intermediate
-handle, one inlined comparison per field against a constant of known length. That is worth
-about a third, and it is included in the figure above. What is left is what a self-describing
-format costs to walk, one marker and one bounds check at a time, against a parser emitted for
-one struct.
+| | was |
+|---|---|
+| every record in a sequence was parsed **twice** — read, then skipped again to find the next | 1030 → 540 µs |
+| a key was framed at run time: length marker, length, bytes, as separate writes | 625 → 276 µs |
+| `put()` was too large to inline, so a one-byte marker became a call, and the copy inside it a call to `memcpy` | 273 → 237 µs |
+| a string's length prefix was read once for the text and again to step over it | 540 → 442 µs |
+
+None of that was the format. It was a reader built from handles that did not know what the
+caller wanted, and a writer assembling constants a byte at a time.
+
+### What is left
+
+The remaining ~2.7x is two things, one fixable and one not.
+
+**Fixable:** the other library turns a key into a field index with a compile-time perfect hash,
+then verifies with a fixed-length compare and dispatches through a jump table. serpent compares
+against each field's name in turn. For five fields that is a few compares against one hash — worth
+something, at the cost of a good deal of machinery.
+
+**Not fixable:** BEVE packs type, width and signedness into the bits of one tag byte, so
+`width = 1 << (tag >> 5)` and dispatch is arithmetic. BJData markers are ASCII letters chosen
+per value — `'U'`, `'i'`, `'m'`, `'D'` — with no structure to exploit, so every value costs a
+lookup where BEVE costs a shift. That is the format, and it is the price of a wire encoding you
+can read in a hex dump.
 
 ## Your own types, as JSON
 
