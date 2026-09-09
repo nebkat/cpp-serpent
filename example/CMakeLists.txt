@@ -6,7 +6,7 @@ set(EXAMPLES
 
 # These define a type, which means annotating it.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    list(APPEND EXAMPLES quickstart reflection)
+    list(APPEND EXAMPLES quickstart reflection splicing)
 endif()
 
 foreach(EXAMPLE IN LISTS EXAMPLES)
