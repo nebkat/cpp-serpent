@@ -295,7 +295,18 @@ bool read_alternative(Source source, Variant &value, std::index_sequence<Index..
 /** Reads one value into a destination, handling optionals and containers along the way. */
 template<typename Source, typename T>
 bool read_into(Source source, T &value) {
-    if constexpr (std::same_as<T, std::monostate>) {
+    if constexpr (std::is_enum_v<T>) {
+        // The counterpart of the write side: named values are matched, and anything else is
+        // read as the underlying number, which is what was written for it.
+        if constexpr (mapped_enum<T>) {
+            return read_mapped_enum(source, value);
+        } else {
+            std::underlying_type_t<T> number {};
+            if (!read_into(source, number)) return false;
+            value = static_cast<T>(number);
+            return true;
+        }
+    } else if constexpr (std::same_as<T, std::monostate>) {
         return source.is_valid() && source.is_null();
     } else if constexpr (detail::optional_like<T>) {
         if (!source.is_valid() || source.is_null()) {

@@ -40,6 +40,8 @@ struct [[= serpent::serializable {},
 | `skip {}` | a field | leaves it out of the document, both directions |
 | `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
 | `tagged("key")` | a variant field | the same, decided at the field instead of on the alternatives |
+| `as(...)` | an enumerator | what it is on the wire, where its identifier will not do |
+| `fallback {}` | an enumerator | the one to use when nothing matches, in both directions |
 
 Styles: `as_written`, `snake_case`, `screaming_snake_case`, `kebab_case`, `camel_case`,
 `pascal_case`.
@@ -118,6 +120,44 @@ A number is recovered as a number, and the objects are still told apart by name.
 the type-level `discriminant` too: alternatives that cannot carry one do not stop the ones that
 can from being named. A name that matches no alternative still fails, rather than falling
 through to the untagged attempt.
+
+## Enumerations
+
+An enumeration that says nothing goes out as its underlying number. Annotate it and the
+enumerators go by their identifiers instead:
+
+```cpp
+enum class [[= serpent::serializable {}]] nav_system { unknown, gps, glonass };
+```
+
+```json
+"glonass"
+```
+
+Where an identifier is not what the wire calls it, say so on the enumerator. Note the position:
+an enumerator's attribute follows its name.
+
+```cpp
+enum class [[= serpent::serializable {}]] fix_dimension {
+    none              [[= serpent::fallback {}, = serpent::as(nullptr)]],
+    two_dimensional   [[= serpent::as("2d")]],
+    three_dimensional [[= serpent::as("3d")]],
+};
+```
+
+`as` takes null, a boolean, a whole number, a real or a string, and they may be **mixed within
+one enumeration** — a stop-bit count that is `1`, `1.5` and `2` is written exactly so, and a
+word length maps to `5`, `6`, `7`, `8` regardless of its underlying values. The type's
+[naming rule](#adjusting-the-keys) applies to the identifiers it falls back on, so
+`notConnected` under `kebab_case` is `"not-connected"`.
+
+`fallback {}` names one enumerator as the answer when nothing else fits, in **both** directions:
+a value on the wire matching no enumerator reads as it, and an enumeration value that is not any
+enumerator — cast in from a number — writes as it. Without one, an unrecognised value fails to
+read rather than guessing.
+
+Two enumerations may give the same spelling different meanings, which a rule derived from the
+identifiers could not: `rtk_float` is `"float"` in one and `"rtk_float"` in another.
 
 ## A type you cannot annotate
 

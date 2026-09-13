@@ -339,6 +339,61 @@ void a_sequence_is_walked_once() {
     check(through_json && through_json->size() == 3 && through_json->at(2).x == 5, "the generic path agrees");
 }
 
+// An enumeration that says what its values are on the wire. Everything here is drawn from a
+// real mapping table: names that are not the identifier, the same spelling meaning different
+// things in two enumerations, numbers that are not the underlying values, an integer and a real
+// in one table, null, and a designated fallback.
+enum class[[= serpent::serializable {}]] fix_dimension {
+    none[[ = serpent::fallback {}, = serpent::as(nullptr) ]],
+    two_dimensional[[= serpent::as("2d")]],
+    three_dimensional[[= serpent::as("3d")]],
+};
+enum class[[= serpent::serializable {}]] rtk_fix_type {
+    none,
+    rtk_float[[= serpent::as("float")]],
+};
+enum class[[= serpent::serializable {}]] fix_type { none, rtk_float };
+enum class[[= serpent::serializable {}]] stop_bits {
+    one[[= serpent::as(1)]],
+    one_and_half[[= serpent::as(1.5)]],
+    two[[= serpent::as(2)]],
+};
+enum class[[= serpent::serializable {}]] nav_system { unknown[[= serpent::fallback {}]], gps };
+enum class[[ = serpent::serializable {}, = serpent::naming { serpent::naming_style::kebab_case } ]] link_state {
+    notConnected,
+};
+enum class plain_enum { first, second };
+
+template<typename E>
+void round_trips(E value, std::string_view expected, std::string_view what) {
+    check_equal(json::encode(value), std::string { expected }, what);
+    const auto back = json::decode<E>(json::encode(value));
+    check(back && *back == value, "and reads back");
+    const auto binary = bjdata::decode<E>(bjdata::encode(value));
+    check(binary && *binary == value, "in both formats");
+}
+
+void an_enum_can_say_what_it_is_on_the_wire() {
+    round_trips(fix_dimension::two_dimensional, R"("2d")", "a name that is not the identifier");
+    round_trips(fix_dimension::none, "null", "an enumerator that is null");
+    round_trips(rtk_fix_type::rtk_float, R"("float")", "one spelling in one enumeration");
+    round_trips(fix_type::rtk_float, R"("rtk_float")", "and the same spelling in another");
+    round_trips(stop_bits::one, "1", "a whole number");
+    round_trips(stop_bits::one_and_half, "1.5", "and a real beside it in the same table");
+    round_trips(link_state::notConnected, R"("not-connected")", "the type's naming rule applies");
+    round_trips(nav_system::gps, R"("gps")", "an unannotated enumerator is its identifier");
+
+    // The fallback, in both directions.
+    check(json::decode<nav_system>(R"("galileo")") == nav_system::unknown,
+            "a value matching no enumerator reads as the fallback");
+    check_equal(json::encode(static_cast<fix_dimension>(99)), "null", "and a value that is no enumerator writes as it");
+    check(!json::decode<stop_bits>("7"), "with no fallback declared, an unknown value fails");
+
+    // An enumeration that says nothing keeps going out as its number, and now reads back too.
+    check_equal(json::encode(plain_enum::second), "1", "an unannotated enumeration is a number");
+    check(json::decode<plain_enum>("1") == plain_enum::second, "which now reads back as well");
+}
+
 void identifiers_become_keys() {
     const point p { 3, 4 };
     check(json::encode(p) == R"({"x":3,"y":4})", "the identifiers are the keys");
@@ -405,6 +460,7 @@ void naming_styles() {
 }
 
 int main() {
+    an_enum_can_say_what_it_is_on_the_wire();
     a_sequence_is_walked_once();
     a_constant_key_is_framed_once();
     the_generated_reader_agrees_with_the_generic_one();

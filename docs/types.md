@@ -159,8 +159,9 @@ touch.
 ## What works out of the box
 
 Arithmetic types, `bool`, `std::string` and string-likes, `std::optional`, `std::variant`, any
-range, any keyed container with string keys, ranges of `std::byte` (as binary), and enums. None
-of these need opting in, in either direction.
+range, any keyed container with string keys, ranges of `std::byte` (as binary), and enums — which go out
+as their underlying number unless they
+[say otherwise](reflection.md#enumerations). None of these need opting in, in either direction.
 
 ## A field that can hold one of several types
 

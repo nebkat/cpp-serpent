@@ -9,6 +9,15 @@ namespace serpent {
 template<typename T, typename = void>
 struct serializer;
 
+/**
+ * Writes an enumeration that says what it is on the wire. Defined in reflect.hpp.
+ *
+ * Declared here so that emit_value can name it: false means the enumeration says nothing, and
+ * it goes out as its underlying number.
+ */
+template<typename Emitter, typename E>
+bool emit_mapped_enum(Emitter &out, E value);
+
 /** Reads one value into a destination. Defined in serializer.hpp. */
 template<typename Source, typename T>
 bool read_into(Source source, T &value);

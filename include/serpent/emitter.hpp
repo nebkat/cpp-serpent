@@ -328,7 +328,8 @@ void emit_value(Emitter &out, const T &item) {
     } else if constexpr (std::same_as<bare, std::nullptr_t> || std::same_as<bare, std::monostate>) {
         out.null();
     } else if constexpr (std::is_enum_v<bare>) {
-        emit_value(out, std::to_underlying(item));
+        // An enumeration that names its values writes those; one that says nothing is a number.
+        if (!emit_mapped_enum(out, item)) emit_value(out, std::to_underlying(item));
     } else if constexpr (std::floating_point<bare>) {
         out.real(static_cast<double>(item));
     } else if constexpr (std::integral<bare> && std::is_signed_v<bare>) {

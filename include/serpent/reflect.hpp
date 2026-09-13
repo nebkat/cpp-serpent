@@ -97,6 +97,50 @@ private:
     }
 };
 
+/**
+ * On an enumerator: what it is on the wire, where its identifier will not do.
+ *
+ * Takes null, a boolean, a whole number, a real or a string, and they may be mixed within one
+ * enumeration - a word length is 5, 6, 7, 8 and a stop-bit count is 1, 1.5, 2. An enumerator
+ * with no annotation of its own goes by its identifier, under the type's naming rule.
+ */
+struct as {
+    enum class kind : unsigned char { null, boolean, integer, real, text };
+
+    kind held = kind::text;
+    bool truth = false;
+    std::int64_t whole = 0;
+    double number = 0;
+    char letters[64] {};
+    std::size_t length = 0;
+
+    consteval as(std::nullptr_t) : held(kind::null) {}
+    consteval as(bool value) : held(kind::boolean), truth(value) {}
+    consteval as(int value) : held(kind::integer), whole(value) {}
+    consteval as(long long value) : held(kind::integer), whole(value) {}
+    consteval as(unsigned long long value) : held(kind::integer), whole(static_cast<std::int64_t>(value)) {}
+    consteval as(double value) : held(kind::real), number(value) {}
+    consteval as(const char *text) : held(kind::text) { this->copy(text); }
+    consteval as(std::string_view text) : held(kind::text) { this->copy(text); }
+
+    [[nodiscard]] constexpr std::string_view text() const { return { this->letters, this->length }; }
+
+private:
+    consteval void copy(std::string_view text) {
+        for (std::size_t index = 0; index < text.size() && index + 1 < sizeof(this->letters); ++index)
+            this->letters[index] = text[index];
+        this->length = text.size();
+    }
+};
+
+/**
+ * On an enumerator: the one to fall back to, in both directions.
+ *
+ * A value on the wire that matches no enumerator reads as this one, and an enumeration value
+ * that is not any enumerator - cast in from a number, say - writes as it.
+ */
+struct fallback {};
+
 enum class naming_style {
     as_written,
     snake_case,
@@ -390,6 +434,143 @@ void reflect_members(Visitor &visitor, Object &value) {
     }
 }
 
+/** Whether an enumeration says how it appears on the wire, rather than going out as a number. */
+template<typename T>
+consteval bool enum_is_mapped() {
+    if constexpr (!std::is_enum_v<T>) {
+        return false;
+    } else {
+        if (has_annotation<serializable>(^^T)) return true;
+        bool marked = false;
+        [&]<std::size_t... Index>(std::index_sequence<Index...>) {
+            ((marked = marked
+                             || !std::meta::annotations_of_with_type(
+                                     std::define_static_array(std::meta::enumerators_of(^^T))[Index], ^^as)
+                                     .empty()
+                             || !std::meta::annotations_of_with_type(
+                                     std::define_static_array(std::meta::enumerators_of(^^T))[Index], ^^fallback)
+                                     .empty()),
+                    ...);
+        }(std::make_index_sequence<std::define_static_array(std::meta::enumerators_of(^^T)).size()> {});
+        return marked;
+    }
+}
+
+/** What one enumerator is on the wire: its own annotation, else its identifier. */
+template<typename T, std::meta::info Enumerator>
+consteval as wire_form() {
+    if constexpr (constexpr auto given = annotation_of<as>(Enumerator); given.has_value()) {
+        return *given;
+    } else {
+        constexpr auto style = naming_for<T>();
+        if constexpr (style == naming_style::as_written) {
+            return as { std::define_static_string(std::meta::identifier_of(Enumerator)) };
+        } else {
+            constexpr auto converted = convert_case(std::meta::identifier_of(Enumerator), style);
+            return as { std::define_static_string(converted.view()) };
+        }
+    }
+}
+
+} // namespace detail
+
+/** An enumeration whose enumerators say what they are on the wire. */
+template<typename T>
+concept mapped_enum = std::is_enum_v<T> && detail::enum_is_mapped<T>();
+
+namespace detail {
+
+/** Writes one enumerator's wire form, whatever kind of value it is. */
+template<serpent::as Form, typename Emitter>
+void emit_wire_form(Emitter &out) {
+    if constexpr (Form.held == as::kind::null)
+        out.null();
+    else if constexpr (Form.held == as::kind::boolean)
+        out.boolean(Form.truth);
+    else if constexpr (Form.held == as::kind::integer)
+        out.integer(Form.whole);
+    else if constexpr (Form.held == as::kind::real)
+        out.real(Form.number);
+    else
+        out.string(Form.text());
+}
+
+/** Whether a source holds exactly this wire form. */
+template<serpent::as Form, typename Source>
+bool source_is(Source source) {
+    if constexpr (Form.held == as::kind::null)
+        return source.is_null();
+    else if constexpr (Form.held == as::kind::boolean)
+        return source.as_bool() == Form.truth;
+    else if constexpr (Form.held == as::kind::integer) {
+        const auto held = source.template as_int<std::int64_t>();
+        return held && *held == Form.whole;
+    } else if constexpr (Form.held == as::kind::real) {
+        const auto held = source.template as_float<double>();
+        return held && *held == Form.number;
+    } else {
+        const auto held = source.as_string();
+        return held && std::string_view { *held } == Form.text();
+    }
+}
+
+} // namespace detail
+
+/** Writes a mapped enumeration. False when the value is no enumerator and none is the fallback. */
+template<typename Emitter, typename E>
+bool emit_mapped_enum(Emitter &out, E value) {
+    if constexpr (!mapped_enum<E>) {
+        return false;
+    } else {
+        bool written = false;
+        template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+            if (!written && value == std::meta::extract<E>(enumerator)) {
+                written = true;
+                detail::emit_wire_form<detail::wire_form<E, enumerator>()>(out);
+            }
+        }
+        if (!written) {
+            template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+                if constexpr (detail::has_annotation<fallback>(enumerator)) {
+                    if (!written) {
+                        written = true;
+                        detail::emit_wire_form<detail::wire_form<E, enumerator>()>(out);
+                    }
+                }
+            }
+        }
+        return written;
+    }
+}
+
+/** Reads a mapped enumeration, taking the fallback enumerator when nothing matches. */
+template<typename Source, typename E>
+    requires mapped_enum<E>
+bool read_mapped_enum(Source source, E &value) {
+    if (!source.is_valid()) return false;
+
+    bool matched = false;
+    template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+        if (!matched && detail::source_is<detail::wire_form<E, enumerator>()>(source)) {
+            matched = true;
+            value = std::meta::extract<E>(enumerator);
+        }
+    }
+    if (!matched) {
+        template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+            if constexpr (detail::has_annotation<fallback>(enumerator)) {
+                if (!matched) {
+                    matched = true;
+                    value = std::meta::extract<E>(enumerator);
+                }
+            }
+        }
+    }
+    return matched;
+}
+
+namespace detail {
+
 /** The opted-in entry point, which is what serializer<T> looks for. */
 template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
     requires reflected_type<T>
@@ -407,6 +588,16 @@ concept reflected_type = false;
 
 template<typename T>
 concept discriminated_type = false;
+
+/** Without reflection an enumeration cannot say anything, so it is always its number. */
+template<typename T>
+concept mapped_enum = false;
+
+/** Never called: mapped_enum is false, so emit_value always writes the underlying number. */
+template<typename Emitter, typename E>
+bool emit_mapped_enum(Emitter &, E) {
+    return false;
+}
 
 namespace detail {
 

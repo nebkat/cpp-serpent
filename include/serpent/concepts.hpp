@@ -72,7 +72,7 @@ concept object_like = std::is_class_v<T> && !string_like<T> && !optional_like<T>
         && !map_like<T> && !std::ranges::input_range<T>;
 
 template<typename T>
-concept structurally_readable =
-        optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T> || keyed_insertable<T>;
+concept structurally_readable = optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T>
+        || keyed_insertable<T> || std::is_enum_v<T>;
 
 } // namespace serpent::detail
