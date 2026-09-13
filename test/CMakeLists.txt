@@ -12,7 +12,8 @@ set(TESTS
     bjdata_writer
     json_reader
     fixture
-    manual)
+    manual
+    value)
 
 # Suites that define types the way types are meant to be defined, by annotation.
 if(SERPENT_HAS_REFLECTION_SUPPORT)

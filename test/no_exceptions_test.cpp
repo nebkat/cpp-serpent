@@ -4,6 +4,7 @@
 #include "check.hpp"
 
 #include <serpent/bjdata.hpp>
+#include <serpent/value.hpp>
 
 #include <algorithm>
 #include <array>
@@ -59,6 +60,15 @@ int main() {
     writer bounded { small };
     bounded.value("a string that will not fit");
     check(!bounded.finish().has_value(), "a bounded sink fails without exceptions");
+
+    // The tree too, for everything that does not have to report a failure. at() is the one
+    // accessor it withholds here, as the readers do.
+    value built;
+    built["count"] = 2;
+    built["name"] = "b";
+    const auto tree = decode<value>(encode(built));
+    check(tree && *tree == built, "a tree round-trips without exceptions");
+    check((*tree)["missing"].is_null(), "and an absent member is null rather than a throw");
 
     return report("no_exceptions");
 }

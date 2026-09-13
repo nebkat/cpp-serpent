@@ -6,8 +6,9 @@ The point is what it does **not** do. Nothing is inflated from bytes into an obj
 then converted into your classes. You get forward iterators into the bytes you already have,
 and decoders that go straight from those into your types.
 
-A DOM-style value object you can build freely is a layer that could sit *on top* of
-this. It is not what this is built out of.
+A tree you can build freely sits *on top* of this, in [`<serpent/value.hpp>`](value.md), for the
+documents whose shape is not known until they are written. Nothing here includes it, and it is not
+what any of this is built out of.
 
 ## Three layers
 

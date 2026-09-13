@@ -44,7 +44,9 @@ struct reading {
 
 **There is no DOM.** Nothing is inflated from bytes into an intermediate object graph and then
 converted into your classes — you get forward iterators into the bytes you already have, and
-decoders that go straight from those into your types.
+decoders that go straight from those into your types. There is a tree for the documents whose
+shape is only known at run time, in a header nothing else includes, and that is the whole of its
+role.
 
 ```cpp
 auto document = json::reader::over(text);

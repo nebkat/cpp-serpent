@@ -56,6 +56,7 @@ nav:
       - Reflection: reflection.md
       - Reading: reading.md
       - Writing: writing.md
+      - A tree: value.md
   - Formats:
       - JSON: json.md
       - BJData: bjdata.md
