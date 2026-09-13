@@ -221,6 +221,33 @@ in, so neither type needs to know serpent exists:
 
 Both need reflection; without it, order remains the only tie-break.
 
+## Durations and times
+
+`<serpent/chrono.hpp>`, included separately so `<chrono>` stays out of translation units that do
+not want it, handles `std::chrono::duration`, `time_point` and `hh_mm_ss`:
+
+```cpp
+struct [[= serpent::serializable {}]] sample {
+    std::chrono::milliseconds elapsed;
+    std::chrono::sys_time<std::chrono::milliseconds> at;
+};
+```
+
+```json
+{"elapsed":1500,"at":1700000000000}
+```
+
+A duration travels as its count and nothing else. A time point is the duration since its clock's
+epoch, and a time of day the duration it was built from, so both follow whatever the duration
+does.
+
+!!! warning "The unit is in the type, not on the wire"
+
+    Nothing here can check that both ends named the same duration. Writing `milliseconds` and
+    reading `seconds` gives you the same number under a different name — silently wrong by a
+    factor of a thousand. Say which unit a field is in, in its name or in your schema, the way
+    you would for any other bare number.
+
 ## Missing and extra keys
 
 | Situation | Result |

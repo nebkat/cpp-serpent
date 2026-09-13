@@ -6,8 +6,10 @@
 #include "check.hpp"
 
 #include <serpent/bjdata.hpp>
+#include <serpent/chrono.hpp>
 #include <serpent/json.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -114,6 +116,45 @@ void a_type_that_is_not_an_object() {
     check(binary && binary->seconds == 42, "in both formats");
 }
 
+/** A duration is its count; a time point and a time of day defer to their duration. */
+struct timings {
+    std::chrono::milliseconds elapsed {};
+    std::chrono::sys_time<std::chrono::milliseconds> at {};
+    std::chrono::hh_mm_ss<std::chrono::seconds> when {};
+    std::chrono::duration<double> measured {};
+
+    friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), timings> value) {
+        visitor.member("elapsed", value.elapsed);
+        visitor.member("at", value.at);
+        visitor.member("when", value.when);
+        visitor.member("measured", value.measured);
+    }
+};
+
+void chrono_types() {
+    using namespace std::chrono;
+    const timings value { milliseconds { 1500 }, sys_time<milliseconds> { milliseconds { 1700000000000 } },
+        hh_mm_ss { seconds { 3661 } }, duration<double> { 2.5 } };
+
+    check_equal(json::encode(value), R"({"elapsed":1500,"at":1700000000000,"when":3661,"measured":2.5})",
+            "each is the number its type means, and no unit travels");
+
+    const auto back = json::decode<timings>(json::encode(value));
+    check(back && back->elapsed == value.elapsed, "a duration round-trips");
+    check(back && back->at == value.at, "a time point round-trips through its duration");
+    check(back && back->when.to_duration() == value.when.to_duration(), "and a time of day");
+    check(back && back->measured == value.measured, "including one whose representation is a real");
+
+    const auto binary = bjdata::decode<timings>(bjdata::encode(value));
+    check(binary && binary->at == value.at && binary->when.to_duration() == value.when.to_duration(),
+            "the same through BJData");
+
+    // The unit is the type's, so reading into a different one reinterprets the same number.
+    // Nothing can catch that, which is why it is worth saying out loud.
+    const auto as_seconds = json::decode<seconds>(json::encode(milliseconds { 1500 }));
+    check(as_seconds && as_seconds->count() == 1500, "a count read as another unit is that count, not that time");
+}
+
 /** decode() says whether it worked; try_decode() says why it did not. */
 void a_failed_decode_can_say_why() {
     const auto good = json::try_decode<labelled>(R"({"label":"a","count":2})");
@@ -145,6 +186,7 @@ void a_failed_decode_can_say_why() {
 int main() {
     one_function_both_directions();
     a_failed_decode_can_say_why();
+    chrono_types();
     directions_that_differ();
     a_type_that_is_not_yours();
     a_type_that_is_not_an_object();
