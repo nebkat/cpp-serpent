@@ -1,5 +1,6 @@
 #pragma once
 
+#include <serpent/concepts.hpp>
 #include <serpent/fwd.hpp>
 
 #include <concepts>
@@ -34,10 +35,9 @@ public:
     explicit write_visitor(Writer &out) noexcept : out(&out) {}
 
     template<typename T>
-    bool member(std::string_view name, const T &value) noexcept {
+    void member(std::string_view name, const T &value) noexcept {
         this->out->key(name);
         this->out->value(value);
-        return true;
     }
 
     /**
@@ -48,11 +48,26 @@ public:
      * piece instead of being assembled a byte at a time.
      */
     template<const std::string_view &Name, typename T>
-    bool member(const T &value) noexcept {
+    void member(const T &value) noexcept {
         this->out->template key_literal<Name>();
         this->out->value(value);
+    }
+
+    /** The same on the way out: whether a member may be absent only matters coming in. */
+    template<typename T>
+    bool member_if_present(std::string_view name, const T &value) noexcept {
+        this->member(name, value);
         return true;
     }
+
+    template<const std::string_view &Name, typename T>
+    bool member_if_present(const T &value) noexcept {
+        this->template member<Name>(value);
+        return true;
+    }
+
+    /** Nothing can be missing on the way out; the member is whatever the object holds. */
+    void missing(std::string_view) noexcept {}
 
     [[nodiscard]] Writer &target() const noexcept { return *this->out; }
 };
@@ -91,10 +106,39 @@ public:
 
     explicit read_visitor(Source source) noexcept : source(source), cursor(source.items().begin()) {}
 
+    /**
+     * A member the document has to carry.
+     *
+     * An optional is exempt, because absence is what it represents; say member_if_present for
+     * anything else the document is allowed to leave out. Absence is recorded, not thrown:
+     * the read is finished either way and ok() reports on it at the end.
+     */
+    template<typename T>
+    void member(std::string_view name, T &value) {
+        if (!this->take(name, value) && !detail::optional_like<std::remove_cvref_t<T>>) this->missing(name);
+    }
+
     /** The same, for a key the compiler already knows: its length is a constant to compare. */
     template<const std::string_view &Name, typename T>
-    bool member(T &value) {
-        return this->member(Name, value);
+    void member(T &value) {
+        this->member(Name, value);
+    }
+
+    /**
+     * A member the document may leave out, saying whether it did.
+     *
+     * The spelling for a member whose existing value is a default worth keeping. member() is
+     * the other answer, and is the one you get by not thinking about it, which is the way
+     * round it should be.
+     */
+    template<typename T>
+    bool member_if_present(std::string_view name, T &value) {
+        return this->take(name, value);
+    }
+
+    template<const std::string_view &Name, typename T>
+    bool member_if_present(T &value) {
+        return this->take(Name, value);
     }
 
     /** Records that a member the type insists on was not in the document. */
@@ -106,8 +150,14 @@ public:
     /** The first member that was required and not there, if any. */
     [[nodiscard]] std::string_view missing_member() const noexcept { return this->absent; }
 
+    [[nodiscard]] bool ok() const noexcept { return this->complete; }
+
+    /** How many of the type's members the document actually named. */
+    [[nodiscard]] std::size_t matched() const noexcept { return this->found; }
+
+private:
     template<typename T>
-    bool member(std::string_view name, T &value) {
+    bool take(std::string_view name, T &value) {
         if (this->cursor != iterator {}) {
             const auto entry = *this->cursor;
             if (entry.key_is(name)) {
@@ -123,11 +173,6 @@ public:
         if (!read_into(elsewhere, value)) this->complete = false;
         return true;
     }
-
-    [[nodiscard]] bool ok() const noexcept { return this->complete; }
-
-    /** How many of the type's members the document actually named. */
-    [[nodiscard]] std::size_t matched() const noexcept { return this->found; }
 };
 
 } // namespace serpent

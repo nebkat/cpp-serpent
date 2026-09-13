@@ -218,6 +218,15 @@ void key_order_and_absence() {
 
     check(!decode<point>(partial), "a partial object does not read");
 
+    // And says which member it wanted, in both formats. The generated reader knows only that
+    // one was missing, so naming it is a second walk taken on the way to the error.
+    const auto named = try_decode<point>(partial);
+    check(!named && named.error().code() == errc::missing_key && named.error().key() == "y",
+            "the failure names the member the document left out");
+    const auto from_text = json::try_decode<point>(R"({"x":7})");
+    check(!from_text && from_text.error().code() == errc::missing_key && from_text.error().key() == "y",
+            "and the same reading text");
+
     // Unless it says otherwise. lenient declares the same two members, one of which the
     // document may leave out, and then the default is what was asked for rather than a
     // half-specified value passing for a whole one.
@@ -238,6 +247,9 @@ void key_order_and_absence() {
     const auto maybe = decode<with_optional>(without);
     check(maybe && !maybe->note.has_value(), "an absent optional is nothing, not an error");
     check(!decode<with_insisted_optional>(without), "unless the type insists the key be stated");
+    const auto insisted = try_decode<with_insisted_optional>(without);
+    check(insisted.error().code() == errc::missing_key && insisted.error().key() == "note",
+            "an insisted-on optional names itself too");
 
     // Extra keys are ignored rather than rejected.
     std::vector<std::byte> extra;

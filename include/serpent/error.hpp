@@ -1,6 +1,7 @@
 #pragma once
 
 #include <exception>
+#include <string_view>
 
 #include <cstddef>
 #include <cstdlib>
@@ -28,7 +29,8 @@ enum class errc {
     object_dimension_count, ///< an object may not be counted by a dimension array
 
     type_mismatch, ///< the value is not of the requested type
-    out_of_range, ///< no such key or index, or the value does not fit the requested type
+    out_of_range, ///< no such index, or the value does not fit the requested type
+    missing_key, ///< a key the type requires is not in the document
 
     unexpected_character, ///< a character that cannot begin or continue a JSON value
     invalid_number, ///< not a JSON number: a leading zero, a bare '.', a missing exponent
@@ -59,6 +61,7 @@ enum class errc {
     case errc::object_dimension_count: return "an object may not be counted by a dimension array";
     case errc::type_mismatch: return "type mismatch";
     case errc::out_of_range: return "out of range";
+    case errc::missing_key: return "missing key";
     case errc::unexpected_character: return "unexpected character";
     case errc::invalid_number: return "invalid number";
     case errc::invalid_string: return "invalid string";
@@ -79,13 +82,29 @@ enum class errc {
 class error : public std::exception {
     errc value = errc::ok;
     std::size_t byte_offset = 0;
+    std::string_view subject {};
 
 public:
     error() = default;
     constexpr error(errc code, std::size_t offset) noexcept : value(code), byte_offset(offset) {}
 
+    /**
+     * With the key the error is about, where there is one.
+     *
+     * Borrowed, not copied: the key has to outlive the error. In practice it is a literal or a
+     * name reflection produced, both of which have static storage, so this is the same borrow
+     * every other view in the library makes.
+     */
+    constexpr error(errc code, std::size_t offset, std::string_view key) noexcept
+    : value(code)
+    , byte_offset(offset)
+    , subject(key) {}
+
     [[nodiscard]] constexpr errc code() const noexcept { return this->value; }
     [[nodiscard]] constexpr std::size_t offset() const noexcept { return this->byte_offset; }
+
+    /** The key this is about, or empty when it is not about one. */
+    [[nodiscard]] constexpr std::string_view key() const noexcept { return this->subject; }
 
     [[nodiscard]] const char *what() const noexcept override { return message(this->value); }
 };
@@ -94,12 +113,13 @@ public:
  * Raises a failure from the checked accessors. The total accessors never call this, so a
  * build with exceptions disabled keeps the whole poisoning API intact.
  */
-[[noreturn]] inline void raise(errc code, std::size_t offset) {
+[[noreturn]] inline void raise(errc code, std::size_t offset, std::string_view key = {}) {
 #if defined(__cpp_exceptions) && __cpp_exceptions
-    throw error { code, offset };
+    throw error { code, offset, key };
 #else
     (void)code;
     (void)offset;
+    (void)key;
     std::abort();
 #endif
 }

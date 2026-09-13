@@ -461,12 +461,15 @@ void reflect_members(Visitor &visitor, Object &value) {
                 visitor.member(detail::field_key<T, member>(), wrapper);
             } else {
                 static constexpr std::string_view name = detail::field_key<T, member>();
-                const bool present = visitor.template member<name>(field);
 
                 // Reading, a member the type insists on has to have been there. Keeping its
                 // default instead is how a half-specified document passes for a whole one.
-                if constexpr (std::remove_cvref_t<Visitor>::is_reading && detail::member_is_required<T, member>()) {
-                    if (!present) visitor.missing(name);
+                // Said outright rather than left to member(), which exempts every optional,
+                // including one this type has marked required.
+                if constexpr (detail::member_is_required<T, member>()) {
+                    if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
+                } else {
+                    (void)visitor.template member_if_present<name>(field);
                 }
             }
         }

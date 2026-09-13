@@ -194,7 +194,7 @@ public:
 
     [[nodiscard]] reader at(std::string_view key) const {
         auto result = (*this)[key];
-        if (!result.is_valid()) raise(errc::out_of_range, this->offset());
+        if (!result.is_valid()) raise(errc::missing_key, this->offset(), key);
         return result;
     }
 
@@ -519,7 +519,14 @@ template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::string_view text) {
     if (const auto checked = validate(text); !checked) return std::unexpected { checked.error() };
     auto value = reader::over(text).try_get<T>();
-    if (!value) return std::unexpected { error { errc::type_mismatch, 0 } };
+    if (!value) {
+        // A member the type needed and the document left out is the one mismatch that can say
+        // something specific, so it is worth the walk back over the document to name it.
+        if (const auto absent = first_missing_member<T>(reader::over(text)); !absent.empty()) {
+            return std::unexpected { error { errc::missing_key, 0, absent } };
+        }
+        return std::unexpected { error { errc::type_mismatch, 0 } };
+    }
     return std::expected<T, error> { std::move(*value) };
 }
 

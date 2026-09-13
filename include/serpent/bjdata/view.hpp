@@ -240,7 +240,7 @@ public:
 
     [[nodiscard]] view at(std::string_view key) const {
         auto result = (*this)[key];
-        if (!result.is_valid()) raise(errc::out_of_range, this->offset());
+        if (!result.is_valid()) raise(errc::missing_key, this->offset(), key);
         return result;
     }
 

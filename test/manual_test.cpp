@@ -30,6 +30,17 @@ struct labelled {
     }
 };
 
+/** A member whose existing value is a default worth keeping is said so outright. */
+struct lenient {
+    std::string label;
+    int count = 7;
+
+    friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), lenient> value) {
+        visitor.member("label", value.label);
+        visitor.member_if_present("count", value.count);
+    }
+};
+
 /** Two functions, for a type whose directions genuinely differ. */
 struct connection {
     std::string host = "localhost";
@@ -181,6 +192,19 @@ void a_failed_decode_can_say_why() {
     const auto cut = bjdata::try_decode<labelled>(std::span { bytes }.first(bytes.size() / 2));
     check(!cut, "a half a document fails");
     check(cut.error().code() == serpent::errc::unexpected_end, "and says so");
+
+    // A hand-written walk gets the same guarantee the annotated types do, from writing
+    // member() and nothing more: the member has to be there.
+    const auto short_of_a_member = json::try_decode<labelled>(R"({"label":"a"})");
+    check(!short_of_a_member, "a member the type names and the document leaves out is a failure");
+    check(short_of_a_member.error().code() == serpent::errc::missing_key
+                    && short_of_a_member.error().key() == "count",
+            "and the error names which member");
+
+    // The lenient spelling is the one that lets it through.
+    const auto tolerated = json::decode<lenient>(R"({"label":"a"})");
+    check(tolerated && tolerated->label == "a" && tolerated->count == 7,
+            "member_if_present keeps the value already there");
 }
 
 int main() {

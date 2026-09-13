@@ -278,9 +278,31 @@ struct [[= serpent::serializable {}]] calibration {
 The check costs one bit set per member and one comparison per object — reflection knows how many
 members there are, so the mask is a `std::uint64_t` and nothing is allocated or walked twice.
 
-!!! note "This comes from the annotations, so a hand-written conversion is unaffected"
+A hand-written `json_convert` gets the same guarantee from the same rule, without saying anything
+extra: `member()` insists, and exempts a `std::optional` for the reason above. The member that may
+be left out is the one that has to be spelled differently.
 
-    A `json_convert` or a `to_json`/`from_json` pair has no way to say which members are
-    required, so types defined that way keep the older, lenient behaviour: an absent key leaves
-    the member alone. If you want a type checked, annotate it.
+```cpp
+friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), settings> value) {
+    visitor.member("host", value.host);                   // must be there
+    visitor.member_if_present("retries", value.retries);  // keeps whatever it already held
+}
+```
+
+That way round on purpose: the strict answer is the one you get by not thinking about it, and
+leniency is a thing you ask for by name. A `to_json`/`from_json` pair writes its own body and is
+on its own, as it is for everything else.
+
+A failed read names the member it wanted:
+
+```cpp
+const auto decoded = serpent::json::try_decode<calibration>(text);
+if (!decoded && decoded.error().code() == serpent::errc::missing_key) {
+    log("the document has no %s", decoded.error().key());
+}
+```
+
+Naming it costs a second walk over the document, taken only on the way to reporting an error —
+the generated reader knows a member was missing, not which one, and the check that told it that
+costs a bit set per member. `decode()` skips all of it and returns nothing.
 

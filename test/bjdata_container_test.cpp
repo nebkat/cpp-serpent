@@ -237,7 +237,12 @@ void checked_accessors() {
         check(false, what);
     };
 
-    throws([&] { return document.at("missing"); }, errc::out_of_range, "at() on a missing key throws");
+    throws([&] { return document.at("missing"); }, errc::missing_key, "at() on a missing key throws");
+    try {
+        (void)document.at("missing");
+    } catch (const serpent::error &failure) {
+        check_equal(failure.key(), std::string_view { "missing" }, "and the error names the key");
+    }
     throws([&] { return document.at("b").at(9); }, errc::out_of_range, "at() past the end throws");
     throws([&] { return document.at("b").string(); }, errc::type_mismatch, "string() on an array throws");
     throws([&] { return document.at("a").span<std::uint8_t>(); }, errc::type_mismatch, "span() on a string throws");

@@ -136,6 +136,31 @@ struct serializer {
 };
 
 /**
+ * Which member the type wanted and the document did not have, for a read that already failed.
+ *
+ * Deliberately the generic walk, even where the format has a reader generated for the type: the
+ * generated one knows that a member was missing but not which, and this only ever runs on the
+ * way to reporting an error, where a second pass costs nothing anyone will notice. Empty when
+ * the read failed for some other reason, or when the type cannot be walked this way.
+ */
+template<typename T, typename Source>
+std::string_view first_missing_member(Source source) {
+    if constexpr ((convertible_type<T> || reflected_type<T>) && std::default_initializable<T>) {
+        if (!source.is_object()) return {};
+        T scratch {};
+        read_visitor<Source> visitor { source };
+        if constexpr (convertible_type<T>) {
+            json_convert(visitor, scratch);
+        } else {
+            detail::reflect_convert(visitor, scratch);
+        }
+        return visitor.missing_member();
+    } else {
+        return {};
+    }
+}
+
+/**
  * Recovers a sum type by asking each alternative, in declaration order, whether the value fits.
  *
  * The first that accepts it wins, so order is the tie-break where more than one could. A

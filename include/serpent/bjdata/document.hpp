@@ -73,7 +73,14 @@ template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
     auto value = view::over(buffer).try_get<T>();
-    if (!value) return std::unexpected { error { errc::type_mismatch, 0 } };
+    if (!value) {
+        // A member the type needed and the document left out is the one mismatch that can say
+        // something specific, so it is worth the walk back over the document to name it.
+        if (const auto absent = first_missing_member<T>(view::over(buffer)); !absent.empty()) {
+            return std::unexpected { error { errc::missing_key, 0, absent } };
+        }
+        return std::unexpected { error { errc::type_mismatch, 0 } };
+    }
     return std::expected<T, error> { std::move(*value) };
 }
 
