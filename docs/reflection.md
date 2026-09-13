@@ -38,6 +38,8 @@ struct [[= serpent::serializable {},
 | `naming {style}` | a type | derives every key from the identifiers |
 | `key("...")` | a field | overrides one key |
 | `skip {}` | a field | leaves it out of the document, both directions |
+| `required {}` | an optional field | the key must be present, though its value may be null |
+| `defaulted {}` | a plain field | the document may omit it, and it keeps its declared default |
 | `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
 | `tagged("key")` | a variant field | the same, decided at the field instead of on the alternatives |
 | `as(...)` | an enumerator | what it is on the wire, where its identifier will not do |

@@ -29,6 +29,22 @@ struct[[= serpent::serializable {}]] first_string_member {
     int count = 0;
 };
 
+/** The same members as point, one of which the document may leave out. */
+struct[[= serpent::serializable {}]] lenient {
+    int x = 0;
+    [[= serpent::defaulted {}]] int y = 0;
+};
+
+/** An optional is absent-tolerant; saying required makes the key mandatory, the value still not. */
+struct[[= serpent::serializable {}]] with_optional {
+    std::string name;
+    std::optional<int> note;
+};
+struct[[= serpent::serializable {}]] with_insisted_optional {
+    std::string name;
+    [[= serpent::required {}]] std::optional<int> note;
+};
+
 // --- Form C: the macro, for a plain aggregate ---
 struct[[= serpent::serializable {}]] point {
     int x = 0;
@@ -190,7 +206,7 @@ void key_order_and_absence() {
     check_equal(back->x, 10, "reordered x");
     check_equal(back->y, 20, "reordered y");
 
-    // A missing key leaves the member at its default rather than failing.
+    // A member the type insists on may not be left out.
     std::vector<std::byte> partial;
     container_sink partial_out { partial };
     writer partial_target { partial_out };
@@ -200,10 +216,28 @@ void key_order_and_absence() {
     }
     check(partial_target.finish().has_value(), "hand-built partial object");
 
-    const auto incomplete = decode<point>(partial);
-    check(incomplete.has_value(), "a partial object still reads");
-    check_equal(incomplete->x, 7, "present member");
-    check_equal(incomplete->y, 0, "absent member keeps its default");
+    check(!decode<point>(partial), "a partial object does not read");
+
+    // Unless it says otherwise. lenient declares the same two members, one of which the
+    // document may leave out, and then the default is what was asked for rather than a
+    // half-specified value passing for a whole one.
+    const auto forgiving = decode<lenient>(partial);
+    check(forgiving.has_value(), "a type that allows an absent member reads the same document");
+    check_equal(forgiving->x, 7, "present member");
+    check_equal(forgiving->y, 0, "and the absent one is the default it declared");
+
+    // An optional is absent-tolerant already, since absence is what it represents.
+    std::vector<std::byte> without;
+    container_sink without_out { without };
+    writer without_target { without_out };
+    {
+        const auto scope = without_target.object();
+        scope.member("name", "n");
+    }
+    check(without_target.finish().has_value(), "hand-built object with no optional");
+    const auto maybe = decode<with_optional>(without);
+    check(maybe && !maybe->note.has_value(), "an absent optional is nothing, not an error");
+    check(!decode<with_insisted_optional>(without), "unless the type insists the key be stated");
 
     // Extra keys are ignored rather than rejected.
     std::vector<std::byte> extra;
@@ -306,9 +340,9 @@ void both_formats() {
     check(from_text->highlight.has_value() && from_text->highlight->label == "hot",
             "optional struct member through JSON");
 
-    // A key absent from the JSON leaves the member at its default, exactly as for BJData.
-    const auto partial = json::decode<point>(R"({"y":5})");
-    check(partial.has_value() && partial->x == 0 && partial->y == 5, "an absent key keeps its default");
+    // A member the type needs may not be left out, in either format.
+    check(!json::decode<point>(R"({"y":5})"), "an absent member is an error in JSON");
+    check(!decode<point>(encode(first_string_member {})), "and in BJData");
 
     // And key order still does not matter.
     const auto reordered = json::decode<point>(R"({ "y" : 2 , "x" : 1 })");

@@ -250,8 +250,37 @@ does.
 
 ## Missing and extra keys
 
-| Situation | Result |
+A member the type needs has to be in the document. Keeping its default instead is how a
+half-specified document passes for a whole one, and nothing downstream can tell the difference
+between a field that said zero and a field that said nothing.
+
+| | |
 |---|---|
-| Key absent from the document | the member keeps whatever it already held |
-| Key present that your type does not name | ignored |
-| Keys in a different order | still read correctly, slightly slower |
+| a plain member is absent | **an error** |
+| a `std::optional` member is absent | it is empty — absence is what the type represents |
+| a member marked `[[= serpent::defaulted {}]]` is absent | it keeps the default it declared |
+| an optional marked `[[= serpent::required {}]]` is absent | **an error** — the key must be stated, though its value may be null |
+| a key is present that the type does not name | ignored |
+| the keys are in a different order | read correctly, slightly slower |
+
+So a format that gains a field can mark it `defaulted` and keep reading documents written before
+it existed, and a type that must be fully specified gets that for nothing.
+
+```cpp
+struct [[= serpent::serializable {}]] calibration {
+    double offset;                                   // must be there
+    double scale;                                    // must be there
+    [[= serpent::defaulted {}]] int revision = 1;    // added later; older documents may omit it
+    std::optional<std::string> note;                 // may be absent or null
+};
+```
+
+The check costs one bit set per member and one comparison per object — reflection knows how many
+members there are, so the mask is a `std::uint64_t` and nothing is allocated or walked twice.
+
+!!! note "This comes from the annotations, so a hand-written conversion is unaffected"
+
+    A `json_convert` or a `to_json`/`from_json` pair has no way to say which members are
+    required, so types defined that way keep the older, lenient behaviour: an absent key leaves
+    the member alone. If you want a type checked, annotate it.
+

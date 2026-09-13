@@ -59,6 +59,28 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
     const bool counted = !info.unbounded;
     bool complete = true;
 
+    // One bit per member, set as it is read, so that what the type insists on can be checked
+    // once at the end. An OR per member and a compare per object, nothing per byte.
+    static constexpr std::size_t member_count =
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))
+                    .size();
+    static_assert(member_count <= 64, "a type with more than 64 members needs a wider seen mask");
+
+    static constexpr std::uint64_t required_mask = [] {
+        std::uint64_t mask = 0;
+        std::size_t position = 0;
+        template for (constexpr auto member : std::define_static_array(
+                              std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member)
+                    && serpent::detail::member_is_required<T, member>()) {
+                mask |= std::uint64_t { 1 } << position;
+            }
+            ++position;
+        }
+        return mask;
+    }();
+    std::uint64_t seen = 0;
+
     while (scanner.ok()) {
         while (scanner.position < scanner.limit && to_marker(*scanner.position) == marker::noop)
             ++scanner.position;
@@ -121,6 +143,7 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
         // length marker, the length and the bytes separately.
         bool matched = false;
         marker kind = marker::invalid;
+        std::size_t position = 0;
         template for (constexpr auto member : std::define_static_array(
                               std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
@@ -142,16 +165,19 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
                         && lead_matches
                         && std::memcmp(scanner.position + 1, encoded.data() + 1, encoded.size() - 1) == 0) {
                     matched = true;
+                    seen |= std::uint64_t { 1 } << position;
                     scanner.advance(encoded.size());
                     kind = value_marker();
                     if (kind == marker::invalid || !take.template operator()<member>(kind)) return false;
                 }
             }
+            ++position;
         }
 
         // Not written the way we write it: parse the key properly and match it by name, so a
         // document from another encoder still reads.
         if (!matched) {
+            position = 0;
             const auto key = detail::read_key(scanner);
             if (!scanner.ok()) return false;
             kind = value_marker();
@@ -163,8 +189,10 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
                     static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                     if (!matched && detail::key_matches<name>(key)) {
                         matched = true;
+                        seen |= std::uint64_t { 1 } << position;
                         if (!take.template operator()<member>(kind)) return false;
                     }
+                    ++position;
                 }
             }
         }
@@ -176,6 +204,9 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
         if (counted && remaining > 0) --remaining;
     }
 
+    // A member the type insists on has to have been there; keeping its default instead is how a
+    // half-specified document passes for a whole one.
+    if ((seen & required_mask) != required_mask) return false;
     return complete;
 }
 

@@ -60,6 +60,23 @@ struct key {
 /** On a field: leave it out of the document entirely. */
 struct skip {};
 
+/**
+ * On an optional field: the key must be present, though its value may be null.
+ *
+ * An optional is absent-tolerant by default, because that is what the type is for. This is for
+ * the case where a document must state a value even if that value is nothing.
+ */
+struct required {};
+
+/**
+ * On a field: let the document leave it out, keeping whatever the member already held.
+ *
+ * A member that is absent is otherwise an error. This says the type would rather have its
+ * default than a failure - for a field added to a format that older writers do not send, or
+ * one a partial update is expected to omit.
+ */
+struct defaulted {};
+
 /** On a type: opt in to reflected serialization. */
 struct serializable {};
 
@@ -314,6 +331,22 @@ consteval tagged resolved_tag() {
     return result;
 }
 
+/**
+ * Whether a document has to carry this member.
+ *
+ * A plain member must be there, because nothing else can supply it and silently keeping a
+ * default is how a half-specified document passes for a whole one. An optional need not be,
+ * since absence is precisely what it can represent. Either may say otherwise.
+ */
+template<typename T, std::meta::info Member>
+consteval bool member_is_required() {
+    using declared = [:std::meta::type_of(Member):];
+    if constexpr (optional_like<declared>)
+        return has_annotation<required>(Member);
+    else
+        return !has_annotation<defaulted>(Member);
+}
+
 /** The wire key for one field: an explicit key, else the type's naming rule. */
 template<typename T, std::meta::info Member>
 consteval std::string_view field_key() {
@@ -428,7 +461,13 @@ void reflect_members(Visitor &visitor, Object &value) {
                 visitor.member(detail::field_key<T, member>(), wrapper);
             } else {
                 static constexpr std::string_view name = detail::field_key<T, member>();
-                visitor.template member<name>(field);
+                const bool present = visitor.template member<name>(field);
+
+                // Reading, a member the type insists on has to have been there. Keeping its
+                // default instead is how a half-specified document passes for a whole one.
+                if constexpr (std::remove_cvref_t<Visitor>::is_reading && detail::member_is_required<T, member>()) {
+                    if (!present) visitor.missing(name);
+                }
             }
         }
     }

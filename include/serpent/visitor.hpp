@@ -34,9 +34,10 @@ public:
     explicit write_visitor(Writer &out) noexcept : out(&out) {}
 
     template<typename T>
-    void member(std::string_view name, const T &value) noexcept {
+    bool member(std::string_view name, const T &value) noexcept {
         this->out->key(name);
         this->out->value(value);
+        return true;
     }
 
     /**
@@ -47,9 +48,10 @@ public:
      * piece instead of being assembled a byte at a time.
      */
     template<const std::string_view &Name, typename T>
-    void member(const T &value) noexcept {
+    bool member(const T &value) noexcept {
         this->out->template key_literal<Name>();
         this->out->value(value);
+        return true;
     }
 
     [[nodiscard]] Writer &target() const noexcept { return *this->out; }
@@ -82,6 +84,7 @@ class read_visitor {
     iterator cursor {};
     bool complete = true;
     std::size_t found = 0;
+    std::string_view absent {};
 
 public:
     static constexpr bool is_reading = true;
@@ -90,25 +93,35 @@ public:
 
     /** The same, for a key the compiler already knows: its length is a constant to compare. */
     template<const std::string_view &Name, typename T>
-    void member(T &value) {
-        this->member(Name, value);
+    bool member(T &value) {
+        return this->member(Name, value);
     }
 
+    /** Records that a member the type insists on was not in the document. */
+    void missing(std::string_view name) noexcept {
+        this->complete = false;
+        if (this->absent.empty()) this->absent = name;
+    }
+
+    /** The first member that was required and not there, if any. */
+    [[nodiscard]] std::string_view missing_member() const noexcept { return this->absent; }
+
     template<typename T>
-    void member(std::string_view name, T &value) {
+    bool member(std::string_view name, T &value) {
         if (this->cursor != iterator {}) {
             const auto entry = *this->cursor;
             if (entry.key_is(name)) {
                 if (!read_into(entry.value, value)) this->complete = false;
                 ++this->found;
                 ++this->cursor;
-                return;
+                return true;
             }
         }
         const auto elsewhere = this->source[name];
-        if (!elsewhere.is_valid()) return; // absent: keep the existing value
+        if (!elsewhere.is_valid()) return false; // absent: the caller decides whether that is allowed
         ++this->found;
         if (!read_into(elsewhere, value)) this->complete = false;
+        return true;
     }
 
     [[nodiscard]] bool ok() const noexcept { return this->complete; }

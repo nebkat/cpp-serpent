@@ -169,7 +169,7 @@ void a_field_can_carry_the_tag() {
     check(back && std::get<plain_circle>(back->body).radius == 9, "with its members intact");
 
     // Neither alternative opted in to reflection; naming them on the field is that opt-in.
-    const auto by_identifier = json::decode<drawing>(R"({"body":{"kind":"plain_point","x":1,"y":2}})");
+    const auto by_identifier = json::decode<drawing>(R"({"title":"b","body":{"kind":"plain_point","x":1,"y":2}})");
     check(by_identifier && by_identifier->body.index() == 0, "an alternative named by its own identifier");
     check(by_identifier && std::get<plain_point>(by_identifier->body).y == 2, "and read in full");
 
@@ -254,8 +254,7 @@ void the_generated_reader_agrees_with_the_generic_one() {
     check(bjdata::view::over(bjdata::encode(point { 1, 2 })).is_object(), "an object is what we wrote");
     const auto reordered = json::decode<point>(R"({"y":20,"x":10})");
     check(reordered && reordered->x == 10 && reordered->y == 20, "declaration order is not required");
-    const auto partial = json::decode<point>(R"({"x":7})");
-    check(partial && partial->x == 7 && partial->y == 0, "an absent key leaves the default");
+    check(!json::decode<point>(R"({"x":7})"), "a member the type needs may not be left out");
 }
 
 /** The same keys as point, named by hand, so it takes the general path. */
