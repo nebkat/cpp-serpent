@@ -505,4 +505,22 @@ template<typename T>
     return reader::over(text).try_get<T>();
 }
 
+/**
+ * Decodes, saying why when it cannot.
+ *
+ * A document that does not parse is reported with the kind and the byte offset validate()
+ * found; one that parses but does not fit the type is errc::type_mismatch, which carries no
+ * offset because nothing on the way in recorded where the shape stopped matching.
+ *
+ * It costs a second pass over the bytes, since validating and decoding are separate walks.
+ * decode() is the one to use when the answer is all you want.
+ */
+template<typename T>
+[[nodiscard]] std::expected<T, error> try_decode(std::string_view text) {
+    if (const auto checked = validate(text); !checked) return std::unexpected { checked.error() };
+    auto value = reader::over(text).try_get<T>();
+    if (!value) return std::unexpected { error { errc::type_mismatch, 0 } };
+    return std::expected<T, error> { std::move(*value) };
+}
+
 } // namespace serpent::json

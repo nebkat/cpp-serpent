@@ -1,5 +1,30 @@
 # Reading
 
+## When it fails, and why
+
+`decode` says whether it worked:
+
+```cpp
+if (const auto config = json::decode<link_config>(text)) { /* … */ }
+```
+
+`try_decode` says why it did not:
+
+```cpp
+const auto config = json::try_decode<link_config>(text);
+if (!config) {
+    log("bad config: %s at %zu", describe(config.error().code()), config.error().offset());
+}
+```
+
+A document that does not parse is reported with the kind and the byte offset — `unexpected_end`,
+`invalid_escape`, `invalid_number` and the rest. One that parses but is not this shape is
+`type_mismatch`, and carries no offset: nothing on the way in recorded where the shape stopped
+matching.
+
+It costs a second pass, because validating and decoding are separate walks. Reach for `decode`
+when the answer is all you want.
+
 ## Two handles, one shape
 
 | | | |

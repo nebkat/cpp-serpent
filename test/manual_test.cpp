@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace json = serpent::json;
@@ -113,8 +114,37 @@ void a_type_that_is_not_an_object() {
     check(binary && binary->seconds == 42, "in both formats");
 }
 
+/** decode() says whether it worked; try_decode() says why it did not. */
+void a_failed_decode_can_say_why() {
+    const auto good = json::try_decode<labelled>(R"({"label":"a","count":2})");
+    check(good && good->count == 2, "a document that fits gives the value");
+
+    // Malformed: the kind and where.
+    const auto truncated = json::try_decode<labelled>(R"({"label":"a","count":)");
+    check(!truncated, "a truncated document fails");
+    check(truncated.error().code() == serpent::errc::unexpected_end, "and says what was wrong");
+    check(truncated.error().offset() > 0, "and where it ran out");
+
+    const auto bad_escape = json::try_decode<labelled>(R"({"label":"a\q"})");
+    check(!bad_escape && bad_escape.error().code() == serpent::errc::invalid_escape, "an unknown escape is named");
+
+    // Well formed, but not this shape: named, with no offset to give.
+    const auto wrong_shape = json::try_decode<labelled>("[1,2,3]");
+    check(!wrong_shape && wrong_shape.error().code() == serpent::errc::type_mismatch,
+            "a document that parses but does not fit is a type mismatch");
+
+    // And the same through BJData, where a truncated buffer is the usual failure.
+    const auto bytes = bjdata::encode(labelled { "a", 2 });
+    const auto whole = bjdata::try_decode<labelled>(bytes);
+    check(whole && whole->label == "a", "binary round-trips through try_decode");
+    const auto cut = bjdata::try_decode<labelled>(std::span { bytes }.first(bytes.size() / 2));
+    check(!cut, "a half a document fails");
+    check(cut.error().code() == serpent::errc::unexpected_end, "and says so");
+}
+
 int main() {
     one_function_both_directions();
+    a_failed_decode_can_say_why();
     directions_that_differ();
     a_type_that_is_not_yours();
     a_type_that_is_not_an_object();
