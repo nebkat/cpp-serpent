@@ -178,7 +178,7 @@ public:
             this->put_text("null");
             return;
         }
-        this->put_text(detail::format_real(value));
+        this->put_text(detail::format_real(value).view());
     }
 
     void string(std::string_view text) noexcept {
