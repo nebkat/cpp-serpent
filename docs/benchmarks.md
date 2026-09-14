@@ -97,11 +97,12 @@ can read in a hex dump.
 
 | | serpent | struct-mapping lib | DOM lib |
 |---|---:|---:|---:|
-| decode | 3.18 ms | **0.52 ms** (6.1x faster) | 5.58 ms (1.8x slower) |
-| encode | 2.80 ms | **0.35 ms** (8.1x faster) | 4.45 ms (1.6x slower) |
-| allocations | 15 | 15 | 70,028 |
+| decode | 3.78 ms | **0.63 ms** (6.0x faster) | 7.35 ms (1.9x slower) |
+| encode | 1.51 ms | **0.29 ms** (5.3x faster) | 4.88 ms (3.2x slower) |
+| allocations, decode | **15** | 10,015 | 70,029 |
+| allocations, encode | **13** | 12 | 70,023 |
 
-**This is serpent's own use case and it loses it by 6-8x.** That gap is implementation headroom
+**This is serpent's own use case and it loses it by 5-6x.** That gap is implementation headroom
 rather than an architectural limit: the other library builds each key's `"name":` at compile
 time and emits it as one fixed-size copy, writes into a pre-padded buffer by index instead of
 through a call, and carries its own number conversion.
@@ -149,9 +150,13 @@ allocate through `malloc`, which the counter replaces `operator new` to measure 
 cannot see. Their real figure is not zero — it is unmeasured. Only serpent, the struct-mapping
 library and the DOM library are counted.
 
-The struct benchmarks show 15-20 allocations, which is container growth rather than per-value:
+The struct benchmarks show 13-15 allocations, which is container growth rather than per-value:
 the sample strings are short enough for the small-string optimization, so they never reach the
 allocator. Longer strings would allocate in every library.
+
+Writing JSON was the exception until recently, at 25,437 allocations for the same work - two
+intermediate strings per real, in the number formatting rather than in the writer. Composing
+into a fixed buffer took it to 13, and the encode itself from 2.66 ms to 1.51 ms.
 
 ## What this means
 
