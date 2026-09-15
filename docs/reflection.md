@@ -262,6 +262,42 @@ shows a type written both ways.
     at the point of use. The message says so, but check `-freflection` is really on the command
     line before believing the type is at fault.
 
+## What the compiler refuses to let you get wrong
+
+The list of members, and what each one is called on the wire, is knowable where reflection is —
+and nowhere else. So a mistake about the relationship between a type and its document is a build
+error rather than something you find by reading a document that came out wrong:
+
+| Refused | Because |
+|---|---|
+| two members that are the same key | one would overwrite the other reading, and both would be written |
+| an enumeration with two enumerators of the same wire value | whichever was written, only one could ever be read back |
+| more than one `fallback {}` | nothing says which |
+| a `serpent::enum_values` table that does not name every enumerator | the one it missed would quietly become the fallback |
+| `required {}` on a member that is not an optional | it is required already; the annotation says nothing |
+| `required {}` and `defaulted {}` together | they are opposites |
+| `skip {}` beside `key("…")` | a member that is not in the document has no key |
+| `as(…)` or `naming {…}` on a data member | both belong somewhere else |
+
+Each names what it found:
+
+```
+error: static assertion failed: two members of this type are the same key on the wire: port.
+One would overwrite the other reading, and both would be written; rename one with
+serpent::key, or leave one out with serpent::skip
+```
+
+```
+error: static assertion failed: this enumeration cannot be read back as it is written:
+off and standby are the same value on the wire
+```
+
+Two of these hold without reflection, because a `serpent::enum_values` table is ordinary data:
+duplicate entries and a second fallback are refused wherever the table compiles. The rest need
+the member or enumerator list, so **on a toolchain without reflection they are simply absent** —
+the code still builds and the mistake still ships. Build once with reflection somewhere, and it
+is caught.
+
 ## Reflection and a hand-written conversion are exclusive
 
 Annotating a type that already has a `json_convert`, or a `to_json` / `from_json` pair, is a

@@ -16,6 +16,7 @@
 #include <string_view>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 #include <cstddef>
 
@@ -236,6 +237,19 @@ struct enable_reflection : std::false_type {};
 
 namespace detail {
 
+/** Whether two enumerators would be indistinguishable on the wire. */
+consteval bool same_wire_form(const as &left, const as &right) {
+    if (left.held != right.held) return false;
+    switch (left.held) {
+    case as::kind::null: return true;
+    case as::kind::boolean: return left.truth == right.truth;
+    case as::kind::integer: return left.whole == right.whole;
+    case as::kind::real: return left.number == right.number;
+    case as::kind::text: return left.text() == right.text();
+    }
+    return false;
+}
+
 /** An enumeration that carries a table, whoever declared it. */
 template<typename E>
 concept tabulated_enum = std::is_enum_v<E> && requires { enum_values<E>::values; };
@@ -287,6 +301,31 @@ void emit_wire_form(Emitter &out) {
 template<serpent::as Form, typename Source>
 bool source_is(Source source) {
     return source_is(source, Form);
+}
+
+/** Whether two entries of a table would read back as each other. */
+template<typename E>
+    requires tabulated_enum<E>
+consteval bool table_forms_are_distinct() {
+    const auto &values = enum_values<E>::values;
+    for (std::size_t first = 0; first < std::size(values); ++first) {
+        if (values[first].is_excluded) continue;
+        for (std::size_t second = first + 1; second < std::size(values); ++second) {
+            if (values[second].is_excluded) continue;
+            if (same_wire_form(values[first].wire, values[second].wire)) return false;
+        }
+    }
+    return true;
+}
+
+/** Whether a table names at most one enumerator to fall back to. */
+template<typename E>
+    requires tabulated_enum<E>
+consteval bool table_fallback_is_unique() {
+    std::size_t count = 0;
+    for (const auto &entry : enum_values<E>::values)
+        if (entry.is_fallback) ++count;
+    return count <= 1;
 }
 
 /** Writes from a table. The fallback entry stands in for a value that is no enumerator. */
@@ -564,6 +603,90 @@ concept discriminated_type = std::is_class_v<T> && detail::is_discriminated<T>()
 
 namespace detail {
 
+// ---------------- what the compiler can check about a type's wire form ----------------
+//
+// All of this is reflection-only and all of it is a check rather than a capability: the list of
+// members, and what each is called on the wire, is knowable here and nowhere else. A mistake in
+// any of it would otherwise be found by reading a document that came out wrong.
+
+/** Every member's key, in declaration order, with the skipped ones left out. */
+template<typename T>
+consteval std::vector<std::string_view> wire_keys() {
+    std::vector<std::string_view> keys;
+    template for (constexpr auto member :
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+        if constexpr (!has_annotation<skip>(member)) keys.push_back(field_key<T, member>());
+    }
+    return keys;
+}
+
+/** Whether two members claim the same key, which a rename or a naming rule can do. */
+template<typename T>
+consteval bool keys_are_distinct() {
+    const auto keys = wire_keys<T>();
+    for (std::size_t first = 0; first < keys.size(); ++first)
+        for (std::size_t second = first + 1; second < keys.size(); ++second)
+            if (keys[first] == keys[second]) return false;
+    return true;
+}
+
+template<typename T>
+consteval std::string_view duplicate_key_message() {
+    const auto keys = wire_keys<T>();
+    std::string repeated;
+    for (std::size_t first = 0; first < keys.size(); ++first)
+        for (std::size_t second = first + 1; second < keys.size(); ++second)
+            if (keys[first] == keys[second] && repeated.find(std::string { keys[first] }) == std::string::npos) {
+                if (!repeated.empty()) repeated += ", ";
+                repeated += keys[first];
+            }
+    return std::define_static_string("two members of this type are the same key on the wire: "
+            + repeated
+            + ". One would overwrite the other reading, and both would be written; rename one with "
+              "serpent::key, or leave one out with serpent::skip");
+}
+
+/**
+ * Whether every annotation on a member can mean something where it is.
+ *
+ * An annotation that cannot apply is always a mistake about what it does, and silently doing
+ * nothing is the worst available answer.
+ */
+template<typename T>
+consteval std::string_view annotation_complaint() {
+    std::string complaint;
+    template for (constexpr auto member :
+            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+        constexpr std::string_view name = std::define_static_string(std::meta::identifier_of(member));
+        using declared = [:std::meta::type_of(member):];
+
+        if constexpr (has_annotation<required>(member) && has_annotation<defaulted>(member)) {
+            complaint += std::string { name } + " is required and defaulted at once; ";
+        } else if constexpr (has_annotation<required>(member) && !optional_like<declared>) {
+            complaint += std::string { name }
+                    + " is not an optional, so it is required already - serpent::required says only that "
+                      "an optional's key must be stated; ";
+        }
+        if constexpr (has_annotation<skip>(member) && has_annotation<key>(member)) {
+            complaint += std::string { name } + " is skipped and also renamed; ";
+        }
+        if constexpr (!std::meta::annotations_of_with_type(member, ^^as).empty()) {
+            complaint += std::string { name } + " carries serpent::as, which belongs on an enumerator; ";
+        }
+        if constexpr (!std::meta::annotations_of_with_type(member, ^^naming).empty()) {
+            complaint += std::string { name } + " carries serpent::naming, which belongs on the type; ";
+        }
+    }
+    if (complaint.empty()) return {};
+    complaint.resize(complaint.size() - 2); // the trailing separator
+    return std::define_static_string("an annotation on this type cannot mean anything where it is: " + complaint);
+}
+
+template<typename T>
+consteval bool annotations_make_sense() {
+    return annotation_complaint<T>().empty();
+}
+
 /**
  * Generates the member() calls a hand-written json_convert would, from the type itself.
  *
@@ -580,6 +703,9 @@ namespace detail {
  */
 template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
 void reflect_members(Visitor &visitor, Object &value) {
+    static_assert(keys_are_distinct<T>(), duplicate_key_message<T>());
+    static_assert(annotations_make_sense<T>(), annotation_complaint<T>());
+
     if constexpr (detail::is_discriminated<T>()) {
         // Written as though it were a member, read as nothing: the selector is not a field, and
         // by the time a value is being read something has already used it to choose this type.
@@ -704,6 +830,41 @@ consteval as wire_form() {
     }
 }
 
+/** Whether two enumerators of an annotated enumeration collide on the wire. */
+template<typename E>
+consteval std::string_view annotated_enum_complaint() {
+    std::vector<std::string_view> forms;
+    std::vector<std::string_view> names;
+    std::string complaint;
+    std::size_t fallbacks = 0;
+
+    template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+        constexpr as form = wire_form<E, enumerator>();
+        constexpr std::string_view name = std::define_static_string(std::meta::identifier_of(enumerator));
+        if constexpr (has_annotation<fallback>(enumerator)) ++fallbacks;
+
+        template for (constexpr auto other : std::define_static_array(std::meta::enumerators_of(^^E))) {
+            constexpr as other_form = wire_form<E, other>();
+            constexpr std::string_view other_name = std::define_static_string(std::meta::identifier_of(other));
+            if constexpr (std::meta::extract<E>(enumerator) != std::meta::extract<E>(other)
+                    && same_wire_form(form, other_form) && name < other_name) {
+                complaint += std::string { name } + " and " + std::string { other_name }
+                        + " are the same value on the wire; ";
+            }
+        }
+    }
+    if (fallbacks > 1) complaint += "more than one enumerator is the fallback; ";
+    if (complaint.empty()) return {};
+    complaint.resize(complaint.size() - 2); // the trailing separator
+    return std::define_static_string("this enumeration cannot be read back as it is written: " + complaint);
+}
+
+template<typename E>
+consteval bool annotated_enum_is_sound() {
+    return annotated_enum_complaint<E>().empty();
+}
+
+
 } // namespace detail
 
 namespace detail {
@@ -809,6 +970,17 @@ consteval std::string_view incomplete_table_message() {
     return {};
 }
 
+/** An annotated enumeration cannot exist here, so there is nothing to find fault with. */
+template<typename E>
+consteval bool annotated_enum_is_sound() {
+    return true;
+}
+
+template<typename E>
+consteval std::string_view annotated_enum_complaint() {
+    return {};
+}
+
 /** Never defined: annotated_enum is false, so every call to these is discarded. */
 template<typename Emitter, typename E>
 bool emit_annotated_enum(Emitter &out, E value);
@@ -855,6 +1027,13 @@ bool emit_mapped_enum(Emitter &out, E value) {
             "did not mean");
     if constexpr (detail::tabulated_enum<E>) {
         static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
+        static_assert(detail::table_forms_are_distinct<E>(),
+                "two entries of this serpent::enum_values table are the same value on the wire, so "
+                "one could never be read back");
+        static_assert(detail::table_fallback_is_unique<E>(),
+                "more than one entry of this serpent::enum_values table is the fallback");
+    } else {
+        static_assert(detail::annotated_enum_is_sound<E>(), detail::annotated_enum_complaint<E>());
     }
     if constexpr (detail::tabulated_enum<E>) {
         return detail::emit_table_enum(out, value);
@@ -875,6 +1054,13 @@ bool read_mapped_enum(Source source, E &value) {
             "did not mean");
     if constexpr (detail::tabulated_enum<E>) {
         static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
+        static_assert(detail::table_forms_are_distinct<E>(),
+                "two entries of this serpent::enum_values table are the same value on the wire, so "
+                "one could never be read back");
+        static_assert(detail::table_fallback_is_unique<E>(),
+                "more than one entry of this serpent::enum_values table is the fallback");
+    } else {
+        static_assert(detail::annotated_enum_is_sound<E>(), detail::annotated_enum_complaint<E>());
     }
     if constexpr (detail::tabulated_enum<E>) {
         return detail::read_table_enum(source, value);

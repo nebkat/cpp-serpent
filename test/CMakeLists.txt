@@ -39,22 +39,22 @@ endforeach()
 # The reflected path is a separate binary because it needs a newer standard and a compiler
 # flag; the rest of the suite must keep working without either.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    # Annotating a type that already has a hand-written conversion must be rejected, not
-    # silently ranked. Excluded from the default build so only this test builds it, and
-    # expected to fail: the diagnostic is the thing under test.
-    add_executable(reflect_conflict_test EXCLUDE_FROM_ALL reflect_conflict_test.cpp)
-    target_link_libraries(reflect_conflict_test PRIVATE serpent)
-    add_test(NAME reflect_conflict
-            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target reflect_conflict_test)
-    set_tests_properties(reflect_conflict PROPERTIES WILL_FAIL TRUE)
-
-    # A serpent::enum_values table that does not name every enumerator must be rejected. Needs
-    # reflection because the enumerator list is what it is checked against.
-    add_executable(enum_incomplete_test EXCLUDE_FROM_ALL enum_incomplete_test.cpp)
-    target_link_libraries(enum_incomplete_test PRIVATE serpent)
-    add_test(NAME enum_incomplete
-            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target enum_incomplete_test)
-    set_tests_properties(enum_incomplete PROPERTIES WILL_FAIL TRUE)
+    # What the compiler can see about a type's wire form, it must refuse to let you get wrong.
+    # Each of these is expected to FAIL to build - the diagnostic is the thing under test - so
+    # they are excluded from the default build and only this suite asks for them.
+    #
+    #   reflect_conflict    a type both annotated and hand-written, which would rank silently
+    #   enum_incomplete     a table that has fallen behind the enumeration it is for
+    #   duplicate_key       two members that are the same key on the wire
+    #   enum_ambiguous      two enumerators that are the same value on the wire
+    #   annotation_misuse   an annotation that cannot mean anything where it is
+    foreach(REFUSED IN ITEMS reflect_conflict enum_incomplete duplicate_key enum_ambiguous annotation_misuse)
+        add_executable(${REFUSED}_test EXCLUDE_FROM_ALL "${REFUSED}_test.cpp")
+        target_link_libraries(${REFUSED}_test PRIVATE serpent)
+        add_test(NAME ${REFUSED}
+                COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target ${REFUSED}_test)
+        set_tests_properties(${REFUSED} PROPERTIES WILL_FAIL TRUE)
+    endforeach()
 endif()
 
 # The library must also compile with exceptions off, where only the total accessors exist.
