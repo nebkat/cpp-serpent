@@ -161,6 +161,43 @@ read rather than guessing.
 Two enumerations may give the same spelling different meanings, which a rule derived from the
 identifiers could not: `rtk_float` is `"float"` in one and `"rtk_float"` in another.
 
+## An enumeration you cannot annotate
+
+An annotation cannot go on an enumeration declared in someone else's header, so the table goes
+in a specialization instead. It carries exactly what the annotations carry — a value per
+enumerator, of any of the kinds `as` takes, and one fallback:
+
+```cpp
+template<>
+struct serpent::enum_values<uart_stop_bits_t> {
+    static constexpr serpent::enum_entry<uart_stop_bits_t> values[] {
+        { UART_STOP_BITS_1,   1,   serpent::fallback {} },
+        { UART_STOP_BITS_1_5, 1.5 },
+        { UART_STOP_BITS_2,   2   },
+        { UART_STOP_BITS_MAX, serpent::skip {} },   // a sentinel, never on the wire
+    };
+};
+```
+
+Both forms run the same lookup, so null, the mixed kinds and the fallback behave identically
+whichever way an enumeration was mapped. **The table needs no reflection at all** — it is the
+way to map an enumeration on a toolchain that has none.
+
+!!! tip "A table is held to its type"
+
+    Where reflection *is* available, the table is checked against the enumerators the compiler
+    can see, and one it does not name is a compile error naming the one it missed:
+
+    ```
+    error: static assertion failed: this serpent::enum_values table does not name every
+    enumerator of its type. Not named: UART_PARITY_MARK. Give each a value, or say
+    { enumerator, serpent::skip {} } to keep it off the wire deliberately
+    ```
+
+    Ownership only blocks *attaching* an annotation to an enumerator; it does not block
+    enumerating them. So an enumerator added by an SDK upgrade is caught at the build that
+    picks it up, rather than quietly reading and writing as the fallback.
+
 ## A type you cannot annotate
 
 You cannot put an annotation on someone else's type, so the opt-in is a trait instead. It

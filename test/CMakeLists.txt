@@ -47,6 +47,14 @@ if(SERPENT_HAS_REFLECTION_SUPPORT)
     add_test(NAME reflect_conflict
             COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target reflect_conflict_test)
     set_tests_properties(reflect_conflict PROPERTIES WILL_FAIL TRUE)
+
+    # A serpent::enum_values table that does not name every enumerator must be rejected. Needs
+    # reflection because the enumerator list is what it is checked against.
+    add_executable(enum_incomplete_test EXCLUDE_FROM_ALL enum_incomplete_test.cpp)
+    target_link_libraries(enum_incomplete_test PRIVATE serpent)
+    add_test(NAME enum_incomplete
+            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target enum_incomplete_test)
+    set_tests_properties(enum_incomplete PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # The library must also compile with exceptions off, where only the total accessors exist.

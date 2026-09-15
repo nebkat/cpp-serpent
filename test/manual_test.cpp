@@ -16,6 +16,32 @@
 #include <string>
 #include <vector>
 
+// Enumerations from someone else's header, which cannot carry an annotation. Declared here as
+// they would be there: plain, unannotated, and out of reach.
+enum foreign_parity { parity_none = 0x0, parity_even = 0x2, parity_odd = 0x3 };
+enum foreign_stop_bits { stop_bits_1 = 0x1, stop_bits_1_5 = 0x2, stop_bits_2 = 0x3, stop_bits_max };
+
+template<>
+struct serpent::enum_values<foreign_parity> {
+    static constexpr serpent::enum_entry<foreign_parity> values[] {
+        { parity_none, "none", serpent::fallback {} },
+        { parity_even, "even" },
+        { parity_odd, "odd" },
+    };
+};
+
+template<>
+struct serpent::enum_values<foreign_stop_bits> {
+    static constexpr serpent::enum_entry<foreign_stop_bits> values[] {
+        { stop_bits_1, 1 },
+        { stop_bits_1_5, 1.5 },
+        { stop_bits_2, 2 },
+        // A sentinel the header carries and the wire has no use for. Named so the table is
+        // complete; excluded so it is never read or written.
+        { stop_bits_max, serpent::skip {} },
+    };
+};
+
 namespace json = serpent::json;
 namespace bjdata = serpent::bjdata;
 using serpent::conversion_object_t;
@@ -241,6 +267,34 @@ void containers_that_hand_out_proxies() {
     check(names_back && *names_back == names, "an ordinary container is unaffected");
 }
 
+/**
+ * An enumeration whose declaration is not yours to annotate.
+ *
+ * The same four things the annotations do - a value per enumerator, values that are not the
+ * underlying ones, kinds mixed within one enumeration, and a fallback in both directions -
+ * reached through a table instead. Tested here rather than beside the annotated ones because
+ * it needs no reflection, which is half its point.
+ */
+void enumerations_that_are_not_yours() {
+    check_equal(json::encode(parity_even), std::string { "\"even\"" }, "a named enumerator");
+    check_equal(json::encode(stop_bits_1_5), std::string { "1.5" }, "a real beside integers in one table");
+    check_equal(json::encode(stop_bits_2), std::string { "2" }, "and an integer in the same one");
+
+    check(json::decode<foreign_parity>("\"odd\"") == parity_odd, "read back by name");
+    check(json::decode<foreign_stop_bits>("1.5") == stop_bits_1_5, "read back as a real");
+
+    // The fallback works the way the annotation does: in both directions.
+    check(json::decode<foreign_parity>("\"mark\"") == parity_none, "an unknown value reads as the fallback");
+    // 1 rather than something larger: an unscoped enumeration with no fixed underlying type
+    // holds only the range its enumerators need, so a wilder value would not be one of its
+    // values at all.
+    check_equal(json::encode(static_cast<foreign_parity>(1)), std::string { "\"none\"" },
+            "and a value that is no enumerator writes it");
+
+    check(bjdata::decode<foreign_stop_bits>(bjdata::encode(stop_bits_1_5)) == stop_bits_1_5,
+            "round-trips through binary, where the markers differ");
+}
+
 int main() {
     one_function_both_directions();
     a_failed_decode_can_say_why();
@@ -249,5 +303,6 @@ int main() {
     a_type_that_is_not_yours();
     a_type_that_is_not_an_object();
     containers_that_hand_out_proxies();
+    enumerations_that_are_not_yours();
     return report("manual");
 }

@@ -12,6 +12,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -158,6 +159,50 @@ private:
  */
 struct fallback {};
 
+/**
+ * One enumerator of an enumeration you did not declare: its value, what it is on the wire, and
+ * whether it is the one to fall back to.
+ *
+ * The third argument is spelled the same as the annotation - serpent::fallback {} - because it
+ * means the same thing, in both directions.
+ */
+template<typename E>
+struct enum_entry {
+    E value {};
+    as wire { nullptr };
+    bool is_fallback = false;
+    bool is_excluded = false;
+
+    consteval enum_entry(E value, as wire) : value(value), wire(wire) {}
+    consteval enum_entry(E value, as wire, fallback) : value(value), wire(wire), is_fallback(true) {}
+
+    /** An enumerator that is deliberately not on the wire - a sentinel, a count, a _MAX. */
+    consteval enum_entry(E value, skip) : value(value), is_excluded(true) {}
+};
+
+/**
+ * @brief The opt-in for an enumeration whose declaration is not yours to annotate.
+ *
+ * The counterpart of enable_reflection for a type: an annotation cannot be put on an
+ * enumeration declared in someone else's header, so the table goes here instead and carries
+ * exactly what the annotations carry - a value per enumerator, of any of the kinds `as` takes,
+ * and one fallback.
+ *
+ *     template<>
+ *     struct serpent::enum_values<uart_stop_bits_t> {
+ *         static constexpr serpent::enum_entry<uart_stop_bits_t> values[] {
+ *             { UART_STOP_BITS_1,   1,   serpent::fallback {} },
+ *             { UART_STOP_BITS_1_5, 1.5 },
+ *             { UART_STOP_BITS_2,   2   },
+ *         };
+ *     };
+ *
+ * Unlike the annotations this needs no reflection, so it is the way to map an enumeration on a
+ * toolchain that has none.
+ */
+template<typename E>
+struct enum_values;
+
 enum class naming_style {
     as_written,
     snake_case,
@@ -186,6 +231,105 @@ struct naming {
  */
 template<typename T>
 struct enable_reflection : std::false_type {};
+
+// ---------------- what an enumerator is on the wire ----------------
+
+namespace detail {
+
+/** An enumeration that carries a table, whoever declared it. */
+template<typename E>
+concept tabulated_enum = std::is_enum_v<E> && requires { enum_values<E>::values; };
+
+/**
+ * Writes one enumerator's wire form, whatever kind of value it is.
+ *
+ * One body for both ways an enumeration can be mapped. The annotated path passes a constant, so
+ * the switch folds there and only the branch that value calls for is emitted.
+ */
+template<typename Emitter>
+void emit_wire_form(Emitter &out, const as &form) {
+    switch (form.held) {
+    case as::kind::null: out.null(); return;
+    case as::kind::boolean: out.boolean(form.truth); return;
+    case as::kind::integer: out.integer(form.whole); return;
+    case as::kind::real: out.real(form.number); return;
+    case as::kind::text: out.string(form.text()); return;
+    }
+}
+
+/** Whether a source holds exactly this wire form. */
+template<typename Source>
+bool source_is(Source source, const as &form) {
+    switch (form.held) {
+    case as::kind::null: return source.is_null();
+    case as::kind::boolean: return source.as_bool() == form.truth;
+    case as::kind::integer: {
+        const auto held = source.template as_int<std::int64_t>();
+        return held && *held == form.whole;
+    }
+    case as::kind::real: {
+        const auto held = source.template as_float<double>();
+        return held && *held == form.number;
+    }
+    case as::kind::text: {
+        const auto held = source.as_string();
+        return held && std::string_view { *held } == form.text();
+    }
+    }
+    return false;
+}
+
+template<serpent::as Form, typename Emitter>
+void emit_wire_form(Emitter &out) {
+    emit_wire_form(out, Form);
+}
+
+template<serpent::as Form, typename Source>
+bool source_is(Source source) {
+    return source_is(source, Form);
+}
+
+/** Writes from a table. The fallback entry stands in for a value that is no enumerator. */
+template<typename Emitter, typename E>
+    requires tabulated_enum<E>
+bool emit_table_enum(Emitter &out, E value) {
+    for (const auto &entry : enum_values<E>::values) {
+        if (!entry.is_excluded && entry.value == value) {
+            emit_wire_form(out, entry.wire);
+            return true;
+        }
+    }
+    for (const auto &entry : enum_values<E>::values) {
+        if (entry.is_fallback && !entry.is_excluded) {
+            emit_wire_form(out, entry.wire);
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Reads from a table, taking the fallback entry when nothing matches. */
+template<typename Source, typename E>
+    requires tabulated_enum<E>
+bool read_table_enum(Source source, E &value) {
+    if (!source.is_valid()) return false;
+
+    for (const auto &entry : enum_values<E>::values) {
+        if (!entry.is_excluded && source_is(source, entry.wire)) {
+            value = entry.value;
+            return true;
+        }
+    }
+    for (const auto &entry : enum_values<E>::values) {
+        if (entry.is_fallback && !entry.is_excluded) {
+            value = entry.value;
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace detail
 
 // ---------------- key naming ----------------
 
@@ -498,6 +642,52 @@ consteval bool enum_is_mapped() {
     }
 }
 
+/**
+ * Whether a table names every enumerator of the type it is for.
+ *
+ * Reflection can enumerate an enumeration whoever declared it - only *annotating* one needs
+ * ownership - so a table written for a foreign type can still be held to its type. Without this
+ * an enumerator added upstream, which is what an SDK upgrade does, would quietly start reading
+ * and writing as the fallback.
+ */
+template<typename E>
+consteval bool table_names_every_enumerator() {
+    bool complete = true;
+    template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+        bool found = false;
+        for (const auto &entry : enum_values<E>::values)
+            found = found || entry.value == std::meta::extract<E>(enumerator);
+        complete = complete && found;
+    }
+    return complete;
+}
+
+/**
+ * The diagnostic for a table that has fallen behind its type, naming what it missed.
+ *
+ * Built here rather than written as a literal so the message says which enumerator - the point
+ * of the check is an enumerator you did not know had appeared, so being told its name is most of
+ * the value.
+ */
+template<typename E>
+consteval std::string_view incomplete_table_message() {
+    std::string missing;
+    template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+        bool found = false;
+        for (const auto &entry : enum_values<E>::values)
+            found = found || entry.value == std::meta::extract<E>(enumerator);
+        if (!found) {
+            if (!missing.empty()) missing += ", ";
+            missing += std::meta::identifier_of(enumerator);
+        }
+    }
+    return std::define_static_string("this serpent::enum_values table does not name every enumerator of "
+            "its type. Not named: "
+            + missing
+            + ". Give each a value, or say { enumerator, serpent::skip {} } to keep it off the wire "
+              "deliberately");
+}
+
 /** What one enumerator is on the wire: its own annotation, else its identifier. */
 template<typename T, std::meta::info Enumerator>
 consteval as wire_form() {
@@ -516,52 +706,24 @@ consteval as wire_form() {
 
 } // namespace detail
 
-/** An enumeration whose enumerators say what they are on the wire. */
-template<typename T>
-concept mapped_enum = std::is_enum_v<T> && detail::enum_is_mapped<T>();
-
 namespace detail {
 
-/** Writes one enumerator's wire form, whatever kind of value it is. */
-template<serpent::as Form, typename Emitter>
-void emit_wire_form(Emitter &out) {
-    if constexpr (Form.held == as::kind::null)
-        out.null();
-    else if constexpr (Form.held == as::kind::boolean)
-        out.boolean(Form.truth);
-    else if constexpr (Form.held == as::kind::integer)
-        out.integer(Form.whole);
-    else if constexpr (Form.held == as::kind::real)
-        out.real(Form.number);
-    else
-        out.string(Form.text());
-}
-
-/** Whether a source holds exactly this wire form. */
-template<serpent::as Form, typename Source>
-bool source_is(Source source) {
-    if constexpr (Form.held == as::kind::null)
-        return source.is_null();
-    else if constexpr (Form.held == as::kind::boolean)
-        return source.as_bool() == Form.truth;
-    else if constexpr (Form.held == as::kind::integer) {
-        const auto held = source.template as_int<std::int64_t>();
-        return held && *held == Form.whole;
-    } else if constexpr (Form.held == as::kind::real) {
-        const auto held = source.template as_float<double>();
-        return held && *held == Form.number;
-    } else {
-        const auto held = source.as_string();
-        return held && std::string_view { *held } == Form.text();
-    }
-}
+/** An enumeration whose own enumerators carry annotations. */
+template<typename T>
+concept annotated_enum = std::is_enum_v<T> && detail::enum_is_mapped<T>();
 
 } // namespace detail
 
-/** Writes a mapped enumeration. False when the value is no enumerator and none is the fallback. */
+namespace detail {
+
+} // namespace detail
+
+namespace detail {
+
+/** Writes an annotated enumeration. False when the value is no enumerator and none is the fallback. */
 template<typename Emitter, typename E>
-bool emit_mapped_enum(Emitter &out, E value) {
-    if constexpr (!mapped_enum<E>) {
+bool emit_annotated_enum(Emitter &out, E value) {
+    if constexpr (!annotated_enum<E>) {
         return false;
     } else {
         bool written = false;
@@ -585,10 +747,10 @@ bool emit_mapped_enum(Emitter &out, E value) {
     }
 }
 
-/** Reads a mapped enumeration, taking the fallback enumerator when nothing matches. */
+/** Reads an annotated enumeration, taking the fallback enumerator when nothing matches. */
 template<typename Source, typename E>
-    requires mapped_enum<E>
-bool read_mapped_enum(Source source, E &value) {
+    requires annotated_enum<E>
+bool read_annotated_enum(Source source, E &value) {
     if (!source.is_valid()) return false;
 
     bool matched = false;
@@ -611,8 +773,6 @@ bool read_mapped_enum(Source source, E &value) {
     return matched;
 }
 
-namespace detail {
-
 /** The opted-in entry point, which is what serializer<T> looks for. */
 template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
     requires reflected_type<T>
@@ -631,17 +791,30 @@ concept reflected_type = false;
 template<typename T>
 concept discriminated_type = false;
 
-/** Without reflection an enumeration cannot say anything, so it is always its number. */
-template<typename T>
-concept mapped_enum = false;
+namespace detail {
 
-/** Never called: mapped_enum is false, so emit_value always writes the underlying number. */
-template<typename Emitter, typename E>
-bool emit_mapped_enum(Emitter &, E) {
-    return false;
+/** Without reflection an enumeration cannot annotate itself; a table is still open to it. */
+template<typename T>
+concept annotated_enum = false;
+
+/** Nothing can be checked against: without reflection the enumerator list is not knowable. */
+template<typename E>
+consteval bool table_names_every_enumerator() {
+    return true;
 }
 
-namespace detail {
+/** Never read: the check above always passes here, so the assertion it belongs to never fires. */
+template<typename E>
+consteval std::string_view incomplete_table_message() {
+    return {};
+}
+
+/** Never defined: annotated_enum is false, so every call to these is discarded. */
+template<typename Emitter, typename E>
+bool emit_annotated_enum(Emitter &out, E value);
+
+template<typename Source, typename E>
+bool read_annotated_enum(Source source, E &value);
 
 // Never defined: the concepts above are false, so every call to these is discarded. They exist
 // so that the discarded branches still name something.
@@ -663,5 +836,51 @@ consteval std::string_view first_discriminant_key();
 } // namespace detail
 
 #endif
+
+/**
+ * An enumeration that says what it is on the wire rather than going out as a number.
+ *
+ * Either by annotating its enumerators, or by a serpent::enum_values table where the
+ * declaration is not yours to annotate.
+ */
+template<typename T>
+concept mapped_enum = detail::annotated_enum<T> || detail::tabulated_enum<T>;
+
+/** Writes a mapped enumeration. False when the value is no enumerator and none is the fallback. */
+template<typename Emitter, typename E>
+bool emit_mapped_enum(Emitter &out, E value) {
+    static_assert(!(detail::tabulated_enum<E> && detail::annotated_enum<E>),
+            "this enumeration is annotated and also has a serpent::enum_values table. The table "
+            "would be used and the annotations would do nothing; remove whichever of the two you "
+            "did not mean");
+    if constexpr (detail::tabulated_enum<E>) {
+        static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
+    }
+    if constexpr (detail::tabulated_enum<E>) {
+        return detail::emit_table_enum(out, value);
+    } else if constexpr (detail::annotated_enum<E>) {
+        return detail::emit_annotated_enum(out, value);
+    } else {
+        return false;
+    }
+}
+
+/** Reads a mapped enumeration, taking the fallback when nothing matches. */
+template<typename Source, typename E>
+    requires mapped_enum<E>
+bool read_mapped_enum(Source source, E &value) {
+    static_assert(!(detail::tabulated_enum<E> && detail::annotated_enum<E>),
+            "this enumeration is annotated and also has a serpent::enum_values table. The table "
+            "would be used and the annotations would do nothing; remove whichever of the two you "
+            "did not mean");
+    if constexpr (detail::tabulated_enum<E>) {
+        static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
+    }
+    if constexpr (detail::tabulated_enum<E>) {
+        return detail::read_table_enum(source, value);
+    } else {
+        return detail::read_annotated_enum(source, value);
+    }
+}
 
 } // namespace serpent
