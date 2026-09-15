@@ -394,8 +394,16 @@ bool read_into(Source source, T &value) {
             if (const auto hint = source.size_hint()) value.reserve(*hint);
         }
         for (const auto element : source.array()) {
-            auto &slot = value.emplace_back();
-            if (!read_into(element, slot)) return false;
+            // A container that hands back a proxy rather than a reference - std::vector<bool> -
+            // has nothing to read into, so the element is read beside it and then pushed.
+            if constexpr (std::is_lvalue_reference_v<decltype(value.emplace_back())>) {
+                auto &slot = value.emplace_back();
+                if (!read_into(element, slot)) return false;
+            } else {
+                std::ranges::range_value_t<T> slot {};
+                if (!read_into(element, slot)) return false;
+                value.push_back(std::move(slot));
+            }
         }
         return true;
     } else if constexpr (requires(T &target) {

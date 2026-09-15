@@ -14,6 +14,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace json = serpent::json;
 namespace bjdata = serpent::bjdata;
@@ -207,6 +208,39 @@ void a_failed_decode_can_say_why() {
             "member_if_present keeps the value already there");
 }
 
+/**
+ * A container that hands out a proxy rather than a reference.
+ *
+ * std::vector<bool> is the one in the standard library, and it reaches the element paths in
+ * both directions: nothing to bind a reference to on the way in, and something that is not the
+ * element type on the way out.
+ */
+void containers_that_hand_out_proxies() {
+    const std::vector<bool> flags { true, false, true, true };
+
+    check_equal(json::encode(flags), std::string { "[true,false,true,true]" }, "written as booleans");
+
+    const auto text_back = json::decode<std::vector<bool>>(json::encode(flags));
+    check(text_back && *text_back == flags, "and read back from text");
+
+    const auto bytes = bjdata::encode(flags);
+    const auto binary_back = bjdata::decode<std::vector<bool>>(bytes);
+    check(binary_back && *binary_back == flags, "and through binary");
+
+    // T and F are not valid strong types, so this stays a counted untyped array rather than
+    // becoming a packed one.
+    const auto document = bjdata::view::over(bytes);
+    check(document.is_array() && document.size() == 4, "an array of four");
+    check(document[0].as_bool().value_or(false) && !document[1].as_bool().value_or(true),
+            "whose elements are booleans, not numbers");
+
+    // The element of an ordinary container is still taken by reference, not copied through its
+    // value type - which a range of strings is what would notice.
+    const std::vector<std::string> names { "alpha", "beta" };
+    const auto names_back = bjdata::decode<std::vector<std::string>>(bjdata::encode(names));
+    check(names_back && *names_back == names, "an ordinary container is unaffected");
+}
+
 int main() {
     one_function_both_directions();
     a_failed_decode_can_say_why();
@@ -214,5 +248,6 @@ int main() {
     directions_that_differ();
     a_type_that_is_not_yours();
     a_type_that_is_not_an_object();
+    containers_that_hand_out_proxies();
     return report("manual");
 }

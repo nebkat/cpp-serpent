@@ -336,7 +336,7 @@ void writer::bytes(const R &items) noexcept {
 template<std::ranges::input_range R>
 void writer::range(const R &items) noexcept {
     const auto scope = this->array();
-    for (const auto &item : items)
+    for (detail::range_element_t<decltype(items)> item : items)
         emit_value(*this, item);
 }
 

@@ -71,6 +71,19 @@ template<typename T>
 concept object_like = std::is_class_v<T> && !string_like<T> && !optional_like<T> && !variant_like<T> && !byte_range<T>
         && !map_like<T> && !std::ranges::input_range<T>;
 
+/**
+ * How to name an element of a range while walking it.
+ *
+ * A container hands out references to what it holds, and those are taken as they are. A range
+ * whose reference is a prvalue - std::vector<bool>'s bit proxy, or a view that computes its
+ * elements - hands out something that is not the element type at all, so there the element is
+ * materialised and everything downstream sees the type the range says it holds.
+ */
+template<typename R>
+using range_element_t = std::conditional_t<std::is_reference_v<std::ranges::range_reference_t<R>>,
+        std::ranges::range_reference_t<R>,
+        std::ranges::range_value_t<R>>;
+
 template<typename T>
 concept structurally_readable = optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T>
         || keyed_insertable<T> || std::is_enum_v<T>;

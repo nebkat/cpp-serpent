@@ -566,7 +566,7 @@ void basic_writer<Options>::range(const R &items) noexcept {
         const auto count = static_cast<std::uint64_t>(std::ranges::size(items));
         if (Options.counted_containers_from != never_counted && count >= Options.counted_containers_from) {
             this->begin_counted_array(count);
-            for (const auto &item : items)
+            for (serpent::detail::range_element_t<decltype(items)> item : items)
                 this->value(item);
             this->end_counted_array();
             return;
@@ -574,7 +574,7 @@ void basic_writer<Options>::range(const R &items) noexcept {
     }
 
     const auto scope = this->array();
-    for (const auto &item : items)
+    for (serpent::detail::range_element_t<decltype(items)> item : items)
         this->value(item);
 }
 
