@@ -5,6 +5,9 @@
 #include <serpent/bjdata.hpp>
 #include <serpent/json.hpp>
 
+#include <deque>
+#include <list>
+#include <set>
 #include <map>
 #include <ranges>
 #include <optional>
@@ -242,6 +245,40 @@ void non_intrusive_form() {
  * that: the write side chooses by whether the key converts to a string, so the read side must
  * ask the same question rather than assume every keyed container is an object.
  */
+/**
+ * Every container shape must read back in the shape it was written.
+ *
+ * Four bugs of one kind were found by conversion rather than by the suite - a type that wrote
+ * one way and read another, or did not read at all - so the shapes are walked here together
+ * instead of waiting for the next one to surface.
+ */
+void every_container_shape_round_trips() {
+    const auto both_ways = [](const auto &sample, std::string_view expected, std::string_view what) {
+        using held = std::remove_cvref_t<decltype(sample)>;
+        check_equal(json::encode(sample), std::string { expected }, what);
+        const auto text_back = json::decode<held>(json::encode(sample));
+        check(text_back && *text_back == sample, what);
+        const auto binary_back = decode<held>(encode(sample));
+        check(binary_back && *binary_back == sample, what);
+    };
+
+    both_ways(std::vector<int> { 1, 2 }, "[1,2]", "a growable sequence");
+    both_ways(std::deque<int> { 1, 2 }, "[1,2]", "one that grows at both ends");
+    both_ways(std::list<int> { 1, 2 }, "[1,2]", "one that is not contiguous");
+    both_ways(std::array<int, 2> { 1, 2 }, "[1,2]", "one whose size is fixed");
+    both_ways(std::set<int> { 1, 2 }, "[1,2]", "one that grows by insert rather than at the back");
+    both_ways(std::map<std::string, int> { { "x", 1 } }, R"({"x":1})", "a text-keyed map");
+
+    // A fixed sequence is its length: a document of another length is not this type, and filling
+    // what fits would leave the rest holding whatever a default-constructed one had.
+    check(!json::decode<std::array<int, 2>>("[1]").has_value(), "a short document does not fill a fixed array");
+    check(!json::decode<std::array<int, 2>>("[1,2,3]").has_value(), "nor does a long one");
+
+    // A byte array is binary, not a sequence of numbers, in a format that has binary.
+    check(view::over(encode(std::array<std::byte, 3> { std::byte { 1 } })).is_binary(),
+            "a fixed byte sequence is still binary");
+}
+
 void maps_whose_keys_are_not_text() {
     const std::map<std::pair<int, int>, std::string> corners {
         { { 0, 0 }, "origin" },
@@ -752,6 +789,7 @@ int main() {
     non_intrusive_form();
     containers_and_nesting();
     maps_whose_keys_are_not_text();
+    every_container_shape_round_trips();
     members_into_an_open_object();
     members_named_from_outside();
     inherited_members();

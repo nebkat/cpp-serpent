@@ -57,12 +57,37 @@ concept back_insertable = requires(T &target) {
     target.emplace_back();
 };
 
+/**
+ * A sequence whose size is fixed: std::array, a C array, a span over storage that exists.
+ *
+ * It is written like any other range, so it has to be readable like one - but its elements are
+ * already there and cannot be grown, so they are assigned in place rather than appended.
+ */
+template<typename T>
+concept fixed_sequence = std::ranges::sized_range<T> && !back_insertable<T> && !string_like<T> && !byte_range<T>
+        && !map_like<T> && requires(T &target) {
+               { *std::ranges::begin(target) = std::ranges::range_value_t<T> {} };
+           };
+
 /** A keyed container that can be cleared and filled. */
 template<typename T>
 concept keyed_insertable = requires(T &target) {
     target.clear();
     target.emplace(typename T::key_type {}, typename T::mapped_type {});
 };
+
+/**
+ * A container that takes elements one at a time but not at the back: a set, in any of its forms.
+ *
+ * It is written as an array like any other range, so it has to read back as one - and it grows,
+ * but by insert rather than by push_back, which is the only reason it needs a branch of its own.
+ */
+template<typename T>
+concept insertable = !back_insertable<T> && !map_like<T> && !keyed_insertable<T> && !string_like<T>
+        && requires(T &target) {
+               target.clear();
+               target.insert(std::ranges::range_value_t<T> {});
+           };
 
 /**
  * A type filled from the shape of the document alone, with no help from the type itself.
@@ -105,6 +130,6 @@ using range_element_t = std::conditional_t<std::is_reference_v<std::ranges::rang
 
 template<typename T>
 concept structurally_readable = optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T>
-        || keyed_insertable<T> || pair_like<T> || std::is_enum_v<T>;
+        || keyed_insertable<T> || pair_like<T> || fixed_sequence<T> || insertable<T> || std::is_enum_v<T>;
 
 } // namespace serpent::detail

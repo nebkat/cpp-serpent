@@ -461,6 +461,30 @@ bool read_into(Source source, T &value) {
             }
         }
         return true;
+    } else if constexpr (detail::insertable<T>) {
+        // Grows like a sequence but not at the back, so it cannot use the branch above and would
+        // otherwise be a type that writes and cannot be read.
+        if (!source.is_array()) return false;
+        value.clear();
+        for (const auto element : source.array()) {
+            std::ranges::range_value_t<T> item {};
+            if (!read_into(element, item)) return false;
+            value.insert(std::move(item));
+        }
+        return true;
+    } else if constexpr (detail::fixed_sequence<T>) {
+        // Its elements exist already, so they are assigned rather than appended - and its length
+        // is part of what it is, so a document of another length is not this type. Filling what
+        // fits would leave the rest holding whatever a default-constructed one had, silently.
+        if (!source.is_array()) return false;
+        auto slot = std::ranges::begin(value);
+        const auto limit = std::ranges::end(value);
+        for (const auto element : source.array()) {
+            if (slot == limit) return false;
+            if (!read_into(element, *slot)) return false;
+            ++slot;
+        }
+        return slot == limit;
     } else if constexpr (detail::pair_like<T>) {
         if (!source.is_array() || source.size() != 2) return false;
         auto elements = source.array().begin();

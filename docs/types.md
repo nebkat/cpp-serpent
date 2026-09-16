@@ -248,6 +248,23 @@ does.
     factor of a thousand. Say which unit a field is in, in its name or in your schema, the way
     you would for any other bare number.
 
+## Containers
+
+Every container shape reads back in the shape it was written, and the two directions decide by
+the same question so they cannot drift apart:
+
+| | on the wire | read back by |
+|---|---|---|
+| `vector`, `deque`, `list` | an array | growing at the back |
+| `set`, `unordered_set` | an array | inserting |
+| `array`, and anything else of fixed size | an array | assigning the slots it already has |
+| `map` with text keys | an object | by key |
+| `map` with any other key | an array of two-element arrays | by pairs |
+| `vector<byte>`, `array<byte, N>` | binary, where the format has it | in place |
+
+A fixed-size sequence is its length: a document of another length is refused rather than filled
+as far as it goes, since the rest would otherwise keep whatever a default-constructed one held.
+
 ## A map whose keys are not text
 
 A document's keys are text, so a map whose key type is not travels as a sequence of two-element
