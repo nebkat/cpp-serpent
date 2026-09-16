@@ -158,6 +158,38 @@ a value on the wire matching no enumerator reads as it, and an enumeration value
 enumerator — cast in from a number — writes as it. Without one, an unrecognised value fails to
 read rather than guessing.
 
+### Absent, null, unrecognised
+
+Four things a document can do to an enumeration member, and they stay four:
+
+| The document | The member gets |
+|---|---|
+| leaves the key out | whatever its own initialiser said, if it may be left out at all |
+| says a value the enumeration names | that enumerator |
+| says a value it does not name | the `fallback {}`, or the read fails if there is none |
+| says `null` | an enumerator annotated `as(nullptr)`, else the `fallback {}`, else the read fails |
+
+The default is at the member and the fallback is on the enumeration, which is the right way
+round: the default is what *this field* means when unsaid, so two structs holding the same
+enumeration may disagree about it, and it lives in the initialiser where a C++ programmer looks
+for it.
+
+```cpp
+struct [[= serpent::serializable {}]] listener {
+    [[= serpent::defaulted {}]] auth_method auth = auth_method::hotspot;
+};
+```
+
+!!! note "Null is a value the table does not name, so a fallback catches it"
+
+    Only a fallback does. Without one, `null` fails the read exactly as a plain `int` member
+    does when the document says `null` — serpent's answer for a field where null is *meaningful*
+    is `std::optional`, which reads it as empty and needs no enumerator spent on it.
+
+    So a fallback is a total function from every wire value to an enumerator, null included.
+    If you want null to mean one enumerator and unrecognised values another, say
+    `as(nullptr)` on the one null means; it is matched before the fallback is considered.
+
 Two enumerations may give the same spelling different meanings, which a rule derived from the
 identifiers could not: `rtk_float` is `"float"` in one and `"rtk_float"` in another.
 
