@@ -188,6 +188,45 @@ void containers_and_nesting() {
     check(blank.has_value() && !blank->highlight.has_value(), "an absent optional struct stays absent");
 }
 
+/**
+ * A type's members written into an object the caller opened, plus fields only it knows.
+ *
+ * The document has to stay flat: writing the value as a member would nest it, and a nested
+ * document is a different document.
+ */
+void members_into_an_open_object() {
+    std::vector<std::byte> bytes;
+    container_sink out { bytes };
+    writer target { out };
+    {
+        const auto object = target.object();
+        serpent::write_members(target, point { 3, 4 });
+        object.member("label", "corner");
+    }
+    check(target.finish().has_value(), "flattened object");
+
+    const auto document = view::over(bytes);
+    check_equal(document.size(), std::size_t { 3 }, "the type's members and the caller's, side by side");
+    check_equal(document["x"].as_int<int>().value_or(0), 3, "a member of the type");
+    check_equal(document["label"].as_string().value_or("?"), "corner", "and one only the caller knew");
+
+    // The inverse: the type reads its own members and ignores the rest.
+    point recovered {};
+    check(serpent::read_members(document, recovered), "the type reads back out of the wider object");
+    check(recovered.x == 3 && recovered.y == 4, "unchanged");
+
+    // A scope can be named without spelling out an options set the caller never chose.
+    const auto write_through_scope = [](const object_scope<> &scope) { scope.member("via", "scope"); };
+    std::vector<std::byte> second;
+    container_sink second_out { second };
+    writer second_target { second_out };
+    {
+        const auto object = second_target.object();
+        write_through_scope(object);
+    }
+    check(second_target.finish().has_value(), "object_scope<> names itself");
+}
+
 void key_order_and_absence() {
     // The read cursor takes the fast path on declaration order, but must still be correct
     // when the document disagrees.
@@ -512,6 +551,7 @@ int main() {
     separate_form();
     non_intrusive_form();
     containers_and_nesting();
+    members_into_an_open_object();
     key_order_and_absence();
     reflection_seam();
     aggregates_are_not_strings();

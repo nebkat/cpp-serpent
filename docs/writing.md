@@ -37,6 +37,28 @@ A container is opened only by a scope, which closes it. There is no `begin_objec
 Scopes are movable, so one can live in a `std::optional` to open in one place and close in
 another.
 
+## A type plus a few fields of your own
+
+Where a document is some type's members *and* something decided at the call site, and has to stay
+flat — writing the value as a member would nest it, and a nested document is a different
+document:
+
+```cpp
+const auto object = out.object();
+serpent::write_members(out, partition);      // the type's own members
+object.member("state", state);               // and the ones only this caller knows
+```
+
+`write_members` opens nothing and closes nothing, so an object has to be open already; a writer
+with none latches `errc::key_outside_object` as it would for any stray key. `read_members` is the
+inverse — the type reads its own members out of an object holding more than them, and leaves the
+rest alone.
+
+It works for a type that names its fields, reflected or with a `json_convert`. A `to_json` writes
+its own object and has no members to lend, so it is refused; split its body into a function taking
+the open scope if you need this for one.
+
+
 ## `finish()` is what completes the document
 
 Writers emit at token granularity — a brace, a key, a separator — and the sink is reached

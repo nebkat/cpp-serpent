@@ -65,9 +65,11 @@ struct writer_options {
 /** For writer_options::counted_containers_from: never write a bare count. */
 inline constexpr std::size_t never_counted = std::numeric_limits<std::size_t>::max();
 
-template<writer_options Options>
+// Defaulted here, the way basic_writer is, so a scope can be named in a signature without
+// spelling out an options set the caller never chose.
+template<writer_options Options = writer_options {}>
 class array_scope;
-template<writer_options Options>
+template<writer_options Options = writer_options {}>
 class object_scope;
 
 namespace detail {

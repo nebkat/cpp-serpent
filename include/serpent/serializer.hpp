@@ -161,6 +161,37 @@ std::string_view first_missing_member(Source source) {
 }
 
 /**
+ * @brief Writes a type's members into an object the caller has already opened.
+ *
+ * For a document whose shape is a type plus something decided at the call site, and which has to
+ * stay flat - writing the value as a member would nest it, and nesting is a different document.
+ *
+ *     const auto object = out.object();
+ *     serpent::write_members(out, partition);      // the type's own members
+ *     object.member("state", state);               // and the ones only this caller knows
+ *
+ * Opens nothing and closes nothing, so an object has to be open already; a writer with none
+ * latches errc::key_outside_object as it would for any stray key. Works for a type that names
+ * its fields - reflected or with a json_convert - but not for a to_json, which writes its own
+ * object and has no members to lend.
+ */
+template<typename Writer, typename T>
+void write_members(Writer &out, const T &value) {
+    serializer<std::remove_cvref_t<T>>::write_members(out, value);
+}
+
+/**
+ * Reads a type's members out of an object holding more than them, the inverse of write_members.
+ *
+ * Keys the type does not name are left alone, so the call-site fields of a flattened document
+ * can be read separately from the same object.
+ */
+template<typename Source, typename T>
+bool read_members(Source source, T &value) {
+    return serializer<std::remove_cvref_t<T>>::read_members(source, value);
+}
+
+/**
  * Recovers a sum type by asking each alternative, in declaration order, whether the value fits.
  *
  * The first that accepts it wins, so order is the tie-break where more than one could. A
