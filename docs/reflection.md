@@ -14,6 +14,32 @@ json::encode(point { 3, 4 });   // {"x":3,"y":4}
 
 That is the whole opt-in. The same type now reads and writes in every format.
 
+## A base's members are the object's members
+
+A type that inherits is written whole — base members first, then its own, which is the order they
+were declared in and the order anyone listing them by hand would write:
+
+```cpp
+struct [[= serpent::serializable {}]] identified {
+    int id = 0;
+};
+
+struct [[= serpent::serializable {}]] equipment : identified {
+    std::string name;
+};
+```
+
+```json
+{"id":7,"name":"tractor"}
+```
+
+Only public bases, which falls out of the library asking the compiler what it can see: a base a
+type did not expose is not part of what it presents to the world.
+
+A key follows the naming rule of the type that **declared** it, so a derived type cannot restyle
+the keys a base already settled — those are someone else's wire format, and changing them from a
+derived declaration would be a silent break.
+
 ## Adjusting the keys
 
 Identifiers are rarely the keys you want on the wire, so a type can carry a naming rule and a

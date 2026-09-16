@@ -631,7 +631,9 @@ consteval std::string_view field_key() {
     if constexpr (constexpr auto explicit_name = annotation_of<key>(Member); explicit_name.has_value()) {
         return std::define_static_string(explicit_name->view());
     } else {
-        constexpr auto style = naming_for<T>();
+        // The rule of the type that declared it, which for a member of a base is the base's own -
+        // its keys were settled where it was written, and a derived type must not restyle them.
+        constexpr auto style = naming_for<typename[:std::meta::parent_of(Member):]>();
         if constexpr (style == naming_style::as_written) {
             return std::define_static_string(std::meta::identifier_of(Member));
         } else {
@@ -704,12 +706,35 @@ namespace detail {
 // members, and what each is called on the wire, is knowable here and nowhere else. A mistake in
 // any of it would otherwise be found by reading a document that came out wrong.
 
+/**
+ * Every member a type has, its bases' included, bases first.
+ *
+ * nonstatic_data_members_of reports only what a type declares itself, so a type with a base
+ * would otherwise be written without its inherited state - a document silently missing the
+ * fields it was built on. Bases come first because that is where their members were declared,
+ * and because it is the order anyone listing them by hand would write.
+ *
+ * Only public bases, which falls out of asking from here: a base this library cannot see is one
+ * the type did not expose.
+ */
+template<typename T>
+consteval std::vector<std::meta::info> members_including_bases() {
+    std::vector<std::meta::info> all;
+    template for (constexpr auto base :
+            std::define_static_array(std::meta::bases_of(^^T, std::meta::access_context::current()))) {
+        using inherited = [:std::meta::type_of(base):];
+        for (const auto member : members_including_bases<inherited>()) all.push_back(member);
+    }
+    for (const auto member : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))
+        all.push_back(member);
+    return all;
+}
+
 /** Every member's key, in declaration order, with the skipped ones left out. */
 template<typename T>
 consteval std::vector<std::string_view> wire_keys() {
     std::vector<std::string_view> keys;
-    template for (constexpr auto member :
-            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+    template for (constexpr auto member : std::define_static_array(members_including_bases<T>())) {
         if constexpr (!has_annotation<skip>(member)) keys.push_back(field_key<T, member>());
     }
     return keys;
@@ -750,8 +775,7 @@ consteval std::string_view duplicate_key_message() {
 template<typename T>
 consteval std::string_view annotation_complaint() {
     std::string complaint;
-    template for (constexpr auto member :
-            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+    template for (constexpr auto member : std::define_static_array(members_including_bases<T>())) {
         constexpr std::string_view name = std::define_static_string(std::meta::identifier_of(member));
         using declared = [:std::meta::type_of(member):];
 
@@ -898,8 +922,7 @@ void reflect_members(Visitor &visitor, Object &value) {
         }
     }
 
-    template for (constexpr auto member :
-            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+    template for (constexpr auto member : std::define_static_array(detail::members_including_bases<T>())) {
         if constexpr (!detail::has_annotation<skip>(member)) {
             // Bound to a reference first: a splice may not appear in an arbitrary expression.
             auto &field = value.[:member:];

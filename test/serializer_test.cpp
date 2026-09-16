@@ -52,6 +52,26 @@ struct[[= serpent::serializable {}]] point {
     int y = 0;
 };
 
+// --- Inherited state, which is still the object's state ---
+struct[[= serpent::serializable {}]] identified {
+    int id = 0;
+    std::optional<int> created;
+};
+
+struct[[= serpent::serializable {},
+       = serpent::naming { serpent::naming_style::snake_case }]] styled_base {
+    int createdAt = 0;
+};
+
+struct[[= serpent::serializable {}]] equipment : identified {
+    std::string name;
+    [[= serpent::skip {}]] int internal = 0;
+};
+
+struct[[= serpent::serializable {}]] styled_derived : styled_base {
+    int updatedAt = 0;
+};
+
 // --- Form B: one function, both directions ---
 struct segment {
     point start {};
@@ -312,6 +332,33 @@ void members_named_from_outside() {
             "a member list taken from the type, with one filtered out");
     const auto counts = json::decode<foreign_counts>(R"({"sent":4,"received":5})");
     check(counts && counts->sent == 4 && counts->reserved == 0, "and read back, leaving the filtered one alone");
+}
+
+/**
+ * A base's members are the object's members.
+ *
+ * The compiler reports only what a type declares itself, so walking that alone would write a
+ * document silently missing everything the type was built on - and a reader of the annotation
+ * expects the whole object.
+ */
+void inherited_members() {
+    equipment machine;
+    machine.id = 7;
+    machine.created = 100;
+    machine.name = "tractor";
+    machine.internal = 9;
+
+    check_equal(json::encode(machine), std::string { R"({"id":7,"created":100,"name":"tractor"})" },
+            "the base's members come first, then the type's own, and skip still excludes");
+
+    const auto back = decode<equipment>(encode(machine));
+    check(back && back->id == 7 && back->created == 100 && back->name == "tractor", "and all of it reads back");
+    check(back && back->internal == 0, "except the one left out");
+
+    // A key follows the rule of the type that declared it: a derived type cannot restyle the
+    // keys a base already settled, which would silently change a document.
+    check_equal(json::encode(styled_derived {}), std::string { R"({"created_at":0,"updatedAt":0})" },
+            "each member keeps its own type's naming rule");
 }
 
 void key_order_and_absence() {
@@ -640,6 +687,7 @@ int main() {
     containers_and_nesting();
     members_into_an_open_object();
     members_named_from_outside();
+    inherited_members();
     key_order_and_absence();
     reflection_seam();
     aggregates_are_not_strings();

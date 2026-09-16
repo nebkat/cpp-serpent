@@ -62,15 +62,14 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
     // One bit per member, set as it is read, so that what the type insists on can be checked
     // once at the end. An OR per member and a compare per object, nothing per byte.
     static constexpr std::size_t member_count =
-            std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))
+            std::define_static_array(serpent::detail::members_including_bases<T>())
                     .size();
     static_assert(member_count <= 64, "a type with more than 64 members needs a wider seen mask");
 
     static constexpr std::uint64_t required_mask = [] {
         std::uint64_t mask = 0;
         std::size_t position = 0;
-        template for (constexpr auto member : std::define_static_array(
-                              std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+        template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)
                     && serpent::detail::member_is_required<T, member>()) {
                 mask |= std::uint64_t { 1 } << position;
@@ -144,8 +143,7 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
         bool matched = false;
         marker kind = marker::invalid;
         std::size_t position = 0;
-        template for (constexpr auto member : std::define_static_array(
-                              std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+        template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                 static constexpr auto encoded = detail::encoded_key<name>;
@@ -183,8 +181,7 @@ bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> 
             kind = value_marker();
             if (kind == marker::invalid) return false;
 
-            template for (constexpr auto member : std::define_static_array(
-                                  std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+            template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
                 if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                     static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                     if (!matched && detail::key_matches<name>(key)) {
