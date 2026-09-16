@@ -304,6 +304,182 @@ inline bool value::object::erase(std::string_view name) {
     return true;
 }
 
+class value_array_scope;
+class value_object_scope;
+
+/**
+ * @brief A writer whose destination is a tree rather than bytes.
+ *
+ * The same protocol every other writer answers, so a type reaches the tree through its own
+ * conversion - annotated, tabulated or hand-written - and nothing needs a second definition to
+ * be buildable this way. to_value() is the whole of the usual interface to it.
+ */
+class value_writer {
+    // Each open container is held whole and attached to its parent when it closes, so nothing
+    // ever points into a container that is still growing.
+    struct frame {
+        serpent::value held;
+        std::string pending_key {};
+        bool is_object = false;
+    };
+
+    std::vector<frame> open;
+    serpent::value finished {};
+
+    void place(serpent::value item) {
+        if (this->open.empty()) {
+            this->finished = std::move(item);
+            return;
+        }
+        auto &top = this->open.back();
+        if (top.is_object) {
+            top.held[top.pending_key] = std::move(item);
+            top.pending_key.clear();
+        } else {
+            top.held.push_back(std::move(item));
+        }
+    }
+
+public:
+    friend class value_array_scope;
+    friend class value_object_scope;
+
+    void null() { this->place(serpent::value {}); }
+    void boolean(bool item) { this->place(serpent::value { item }); }
+    void integer(std::int64_t item) { this->place(serpent::value { item }); }
+    void integer(std::uint64_t item) { this->place(serpent::value { item }); }
+    void real(double item) { this->place(serpent::value { item }); }
+    void string(std::string_view text) { this->place(serpent::value { text }); }
+    void character(char item) { this->place(serpent::value { std::string_view { &item, 1 } }); }
+
+    /** A number too wide for a double keeps its digits, as it does reading one back. */
+    void high_precision(std::string_view digits) { this->place(serpent::value { digits }); }
+
+    void binary(std::span<const std::byte> bytes) { this->place(serpent::value { bytes }); }
+
+    void key(std::string_view name) {
+        if (!this->open.empty()) this->open.back().pending_key = std::string { name };
+    }
+
+    template<const std::string_view &Name>
+    void key_literal() {
+        this->key(Name);
+    }
+
+    [[nodiscard]] value_array_scope array();
+    [[nodiscard]] value_object_scope object();
+
+    template<typename T>
+    void value(const T &item) {
+        emit_value(*this, item);
+    }
+
+    template<detail::byte_range R>
+    void bytes(const R &items) {
+        if constexpr (std::ranges::contiguous_range<R>) {
+            this->binary(std::span<const std::byte> { std::ranges::data(items), std::ranges::size(items) });
+        } else {
+            this->binary(std::ranges::to<serpent::value::binary>(items));
+        }
+    }
+
+    template<typename T>
+    void emit_custom(const T &item) {
+        serializer<std::remove_cvref_t<T>>::write(*this, item);
+    }
+
+    template<std::ranges::input_range R>
+    void range(const R &items);
+
+    void begin_array() { this->open.push_back(frame { serpent::value { serpent::value::array {} }, {}, false }); }
+    void begin_object() { this->open.push_back(frame { serpent::value { serpent::value::object {} }, {}, true }); }
+
+    void end_container() {
+        auto closing = std::move(this->open.back().held);
+        this->open.pop_back();
+        this->place(std::move(closing));
+    }
+
+    /** The tree that was written. Empty of meaning until every scope has closed. */
+    [[nodiscard]] serpent::value finish() { return std::move(this->finished); }
+};
+
+/** Closes its container on destruction, as every other writer's scope does. */
+class value_array_scope {
+    value_writer *out = nullptr;
+
+public:
+    explicit value_array_scope(value_writer &out) : out(&out) { this->out->begin_array(); }
+    value_array_scope(const value_array_scope &) = delete;
+    value_array_scope &operator=(const value_array_scope &) = delete;
+    value_array_scope(value_array_scope &&other) noexcept : out(std::exchange(other.out, nullptr)) {}
+    value_array_scope &operator=(value_array_scope &&other) noexcept {
+        if (this != &other) {
+            if (this->out != nullptr) this->out->end_container();
+            this->out = std::exchange(other.out, nullptr);
+        }
+        return *this;
+    }
+    ~value_array_scope() {
+        if (this->out != nullptr) this->out->end_container();
+    }
+
+    template<typename T>
+    void value(const T &item) const {
+        this->out->value(item);
+    }
+};
+
+class value_object_scope {
+    value_writer *out = nullptr;
+
+public:
+    explicit value_object_scope(value_writer &out) : out(&out) { this->out->begin_object(); }
+    value_object_scope(const value_object_scope &) = delete;
+    value_object_scope &operator=(const value_object_scope &) = delete;
+    value_object_scope(value_object_scope &&other) noexcept : out(std::exchange(other.out, nullptr)) {}
+    value_object_scope &operator=(value_object_scope &&other) noexcept {
+        if (this != &other) {
+            if (this->out != nullptr) this->out->end_container();
+            this->out = std::exchange(other.out, nullptr);
+        }
+        return *this;
+    }
+    ~value_object_scope() {
+        if (this->out != nullptr) this->out->end_container();
+    }
+
+    template<typename T>
+    void member(std::string_view name, const T &item) const {
+        this->out->key(name);
+        this->out->value(item);
+    }
+};
+
+inline value_array_scope value_writer::array() { return value_array_scope { *this }; }
+inline value_object_scope value_writer::object() { return value_object_scope { *this }; }
+
+template<std::ranges::input_range R>
+void value_writer::range(const R &items) {
+    const auto scope = this->array();
+    for (detail::range_element_t<decltype(items)> item : items)
+        this->value(item);
+}
+
+/**
+ * Any serializable value as a tree, through its own conversion.
+ *
+ * The bridge between the two halves of the library: a type that can be written at all can be
+ * written here, so a document may be built as a tree, shaped at run time, and then encoded -
+ * without the type knowing a tree exists.
+ */
+template<typename T>
+[[nodiscard]] value to_value(const T &item) {
+    value_writer out;
+    out.value(item);
+    return out.finish();
+}
+
 /**
  * Both directions, so a value goes wherever any other type goes: on its own, as a member of a
  * reflected struct, or as an element of a container.

@@ -62,6 +62,26 @@ document["window"]["first"] = 10;     // both objects made on the way
 document["ids"].push_back(1);
 ```
 
+## Any serializable type, as a tree
+
+A tree built by hand holds the builtin kinds. `to_value` reaches everything else — through the
+type's own conversion, whichever form it takes, because the destination being a tree rather than
+bytes is the only difference:
+
+```cpp
+auto tree = serpent::to_value(reading);   // annotated, tabulated or hand-written, it does not matter
+tree["received_at"] = now;                // then shaped at run time
+bjdata::write(socket, tree);
+```
+
+Nothing is written for a type to be reachable this way. `serpent::value_writer` answers the same
+protocol `bjdata::writer` and `json::writer` answer, so a type that can be written at all can be
+written here, and a tree built from a value encodes byte for byte as writing that value directly
+would.
+
+The reverse — reading a typed struct back *out* of a tree — is not there. Decode from the bytes
+into your type, which is what the readers are for; the tree is for the way out.
+
 ## Reading it back
 
 The same accessors the readers have, in the same shapes: `as_bool()`, `as_int<T>()`,

@@ -148,6 +148,36 @@ void a_member_of_an_annotated_type() {
 #endif
 }
 
+/**
+ * Any serializable type as a tree, through its own conversion.
+ *
+ * The bridge between the two halves: a tree is otherwise buildable only out of the builtin
+ * kinds, which leaves every type that has a conversion unreachable from it.
+ */
+void any_type_as_a_tree() {
+    failure_report original { "out_of_range", {} };
+    original.detail["records"] = 12;
+
+    // A type with a hand-written json_convert, which knows nothing about trees.
+    const auto tree = serpent::to_value(original);
+    check(tree.is_object() && tree.size() == 2, "a hand-written conversion reaches the tree");
+    check_equal(*tree["reason"].as_string(), std::string_view { "out_of_range" }, "its members are there");
+    check_equal(*tree["detail"]["records"].as_int<int>(), 12, "nested, including a tree inside a tree");
+
+    // Writing the tree must be the same document as writing the value.
+    check(bjdata::encode(tree) == bjdata::encode(original), "the tree encodes as the value did");
+
+    // Which is the point: shape it afterwards.
+    auto shaped = serpent::to_value(original);
+    shaped["at"] = 1700000000;
+    check(shaped.size() == 3 && shaped["at"].is_integer(), "and then it can be added to");
+
+    // Scalars and containers are trees too, not only objects.
+    check(serpent::to_value(42).as_int<int>() == 42, "a scalar");
+    check(serpent::to_value(std::vector<int> { 1, 2, 3 }).size() == 3, "a container");
+    check(serpent::to_value(std::vector<std::byte> { std::byte { 9 } }).is_binary(), "and a byte range stays binary");
+}
+
 void refusals() {
     const auto throws = [](auto &&action, errc expected, std::string_view what) {
         try {
@@ -181,6 +211,7 @@ int main() {
     round_trips();
     a_member_of_another_type();
     a_member_of_an_annotated_type();
+    any_type_as_a_tree();
     refusals();
     return report("value");
 }
