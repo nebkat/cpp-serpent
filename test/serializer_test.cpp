@@ -227,6 +227,39 @@ void non_intrusive_form() {
     check_equal(back->height, 480, "extent.height");
 }
 
+/**
+ * A map whose key is not text, which cannot be an object.
+ *
+ * It travels as a sequence of two-element arrays instead, and the two sides have to agree about
+ * that: the write side chooses by whether the key converts to a string, so the read side must
+ * ask the same question rather than assume every keyed container is an object.
+ */
+void maps_whose_keys_are_not_text() {
+    const std::map<std::pair<int, int>, std::string> corners {
+        { { 0, 0 }, "origin" },
+        { { 1, 2 }, "corner" },
+    };
+
+    check_equal(json::encode(corners), std::string { R"([[[0,0],"origin"],[[1,2],"corner"]])" },
+            "a sequence of two-element arrays, not an object");
+
+    const auto text_back = json::decode<std::map<std::pair<int, int>, std::string>>(json::encode(corners));
+    check(text_back && *text_back == corners, "and it reads back what it wrote");
+
+    const auto binary_back = decode<std::map<std::pair<int, int>, std::string>>(encode(corners));
+    check(binary_back && *binary_back == corners, "through binary too");
+
+    // A pair on its own is the same two-element array.
+    const std::pair<int, std::string> lone { 7, "seven" };
+    check_equal(json::encode(lone), std::string { R"([7,"seven"])" }, "a pair is a two-element array");
+    check(json::decode<std::pair<int, std::string>>(json::encode(lone)) == lone, "and reads back");
+
+    // A map that can be an object still is one.
+    const std::map<std::string, int> named { { "x", 1 } };
+    check_equal(json::encode(named), std::string { R"({"x":1})" }, "a text-keyed map is still an object");
+    check(json::decode<std::map<std::string, int>>(json::encode(named)) == named, "and reads back as one");
+}
+
 void containers_and_nesting() {
     document original;
     original.points = { { 1, 2 }, { 3, 4 }, { 5, 6 } };
@@ -685,6 +718,7 @@ int main() {
     separate_form();
     non_intrusive_form();
     containers_and_nesting();
+    maps_whose_keys_are_not_text();
     members_into_an_open_object();
     members_named_from_outside();
     inherited_members();

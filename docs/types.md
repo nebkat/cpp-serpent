@@ -248,6 +248,20 @@ does.
     factor of a thousand. Say which unit a field is in, in its name or in your schema, the way
     you would for any other bare number.
 
+## A map whose keys are not text
+
+A document's keys are text, so a map whose key type is not travels as a sequence of two-element
+arrays instead:
+
+```cpp
+std::map<uuid, calibration> table;     // [[key, value], [key, value], …]
+std::map<std::string, int> named;      // {"x": 1}
+```
+
+Both sides decide by the same question — whether the key converts to a string — so a container
+reads back in the shape it was written. A `std::pair` on its own is the same two-element array,
+which is what makes the sequence form work for any key type that can be serialized at all.
+
 ## Missing and extra keys
 
 A member the type needs has to be in the document. Keeping its default instead is how a

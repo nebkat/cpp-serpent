@@ -25,6 +25,25 @@ concept map_like = std::ranges::input_range<T> && requires {
     typename T::mapped_type;
 } && std::convertible_to<const typename T::key_type &, std::string_view>;
 
+/**
+ * A keyed container whose key is not a string, so it cannot be an object.
+ *
+ * It travels as a sequence of two-element arrays instead - the only shape available, since a
+ * document's keys are text and this one's are not.
+ */
+template<typename T>
+concept keyed_but_not_an_object = std::ranges::input_range<T> && requires {
+    typename T::key_type;
+    typename T::mapped_type;
+} && !map_like<T>;
+
+/** A pair, which is a two-element array wherever one is needed. */
+template<typename T>
+concept pair_like = requires(T &value) {
+    typename std::remove_cvref_t<decltype(value.first)>;
+    typename std::remove_cvref_t<decltype(value.second)>;
+} && !std::ranges::input_range<T> && !requires { typename T::key_type; };
+
 template<typename T>
 concept optional_like = requires(const T &value) {
     { value.has_value() } -> std::convertible_to<bool>;
@@ -86,6 +105,6 @@ using range_element_t = std::conditional_t<std::is_reference_v<std::ranges::rang
 
 template<typename T>
 concept structurally_readable = optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T>
-        || keyed_insertable<T> || std::is_enum_v<T>;
+        || keyed_insertable<T> || pair_like<T> || std::is_enum_v<T>;
 
 } // namespace serpent::detail

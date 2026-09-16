@@ -461,6 +461,26 @@ bool read_into(Source source, T &value) {
             }
         }
         return true;
+    } else if constexpr (detail::pair_like<T>) {
+        if (!source.is_array() || source.size() != 2) return false;
+        auto elements = source.array().begin();
+        if (!read_into(*elements, value.first)) return false;
+        ++elements;
+        return read_into(*elements, value.second);
+    } else if constexpr (detail::keyed_but_not_an_object<T> && requires(T &target) {
+                             target.clear();
+                             target.emplace(typename T::key_type {}, typename T::mapped_type {});
+                         }) {
+        // Written as a sequence of two-element arrays, because its keys are not text; read back
+        // the same way rather than as an object it could never have been.
+        if (!source.is_array()) return false;
+        value.clear();
+        for (const auto element : source.array()) {
+            std::pair<typename T::key_type, typename T::mapped_type> entry {};
+            if (!read_into(element, entry)) return false;
+            value.emplace(std::move(entry.first), std::move(entry.second));
+        }
+        return true;
     } else if constexpr (requires(T &target) {
                              target.clear();
                              target.emplace(typename T::key_type {}, typename T::mapped_type {});

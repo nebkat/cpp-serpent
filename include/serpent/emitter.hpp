@@ -355,6 +355,12 @@ void emit_value(Emitter &out, const T &item) {
         }
     } else if constexpr (detail::byte_range<bare>) {
         out.bytes(item);
+    } else if constexpr (detail::pair_like<bare>) {
+        // A key that is not text cannot be a key, so a keyed container becomes a sequence of
+        // these and this is what one of them looks like.
+        const auto scope = out.array();
+        emit_value(out, item.first);
+        emit_value(out, item.second);
     } else if constexpr (detail::map_like<bare>) {
         const auto scope = out.object();
         for (const auto &[name, mapped] : item) {
