@@ -1026,15 +1026,20 @@ bool emit_mapped_enum(Emitter &out, E value) {
             "would be used and the annotations would do nothing; remove whichever of the two you "
             "did not mean");
     if constexpr (detail::tabulated_enum<E>) {
+#if SERPENT_HAS_REFLECTION
         static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
+#endif
         static_assert(detail::table_forms_are_distinct<E>(),
                 "two entries of this serpent::enum_values table are the same value on the wire, so "
                 "one could never be read back");
         static_assert(detail::table_fallback_is_unique<E>(),
                 "more than one entry of this serpent::enum_values table is the fallback");
-    } else {
+    }
+#if SERPENT_HAS_REFLECTION
+    else {
         static_assert(detail::annotated_enum_is_sound<E>(), detail::annotated_enum_complaint<E>());
     }
+#endif
     if constexpr (detail::tabulated_enum<E>) {
         return detail::emit_table_enum(out, value);
     } else if constexpr (detail::annotated_enum<E>) {
@@ -1053,15 +1058,20 @@ bool read_mapped_enum(Source source, E &value) {
             "would be used and the annotations would do nothing; remove whichever of the two you "
             "did not mean");
     if constexpr (detail::tabulated_enum<E>) {
+#if SERPENT_HAS_REFLECTION
         static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
+#endif
         static_assert(detail::table_forms_are_distinct<E>(),
                 "two entries of this serpent::enum_values table are the same value on the wire, so "
                 "one could never be read back");
         static_assert(detail::table_fallback_is_unique<E>(),
                 "more than one entry of this serpent::enum_values table is the fallback");
-    } else {
+    }
+#if SERPENT_HAS_REFLECTION
+    else {
         static_assert(detail::annotated_enum_is_sound<E>(), detail::annotated_enum_complaint<E>());
     }
+#endif
     if constexpr (detail::tabulated_enum<E>) {
         return detail::read_table_enum(source, value);
     } else {
