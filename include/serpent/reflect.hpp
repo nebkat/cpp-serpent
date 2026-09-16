@@ -464,6 +464,101 @@ struct name_buffer {
 
 #if SERPENT_HAS_REFLECTION
 
+/**
+ * One member of a type you did not declare: which member, and anything an annotation would have
+ * said about it.
+ *
+ * The member is named the way the compiler names it - `^^some_type::field` - so its key comes
+ * from the declaration rather than from a string you restate, and one entry serves both
+ * directions because the same splice reads and writes.
+ *
+ * The options are the annotations, spelled the same and meaning the same, in any order:
+ * serpent::key to rename it, serpent::required or serpent::defaulted to say whether the
+ * document has to carry it.
+ */
+struct member_entry {
+    std::meta::info which {};
+    char renamed[64] {};
+    std::size_t rename_length = 0;
+    bool insisted = false;
+    bool optional_in_document = false;
+    bool excluded = false;
+
+    consteval member_entry(std::meta::info which) : which(which) {}
+
+    template<typename... Options>
+    consteval member_entry(std::meta::info which, Options... options) : which(which) {
+        (this->apply(options), ...);
+    }
+
+    [[nodiscard]] consteval bool is_renamed() const { return this->rename_length != 0; }
+    [[nodiscard]] consteval std::string_view rename() const { return { this->renamed, this->rename_length }; }
+
+private:
+    consteval void apply(key name) {
+        const auto text = name.view();
+        for (std::size_t index = 0; index < text.size() && index + 1 < sizeof(this->renamed); ++index)
+            this->renamed[index] = text[index];
+        this->rename_length = text.size();
+    }
+    consteval void apply(required) { this->insisted = true; }
+    consteval void apply(defaulted) { this->optional_in_document = true; }
+    consteval void apply(skip) { this->excluded = true; }
+};
+
+/**
+ * @brief The opt-in for a type whose declaration is not yours to annotate.
+ *
+ * The counterpart of enum_values for a struct: an annotation cannot go on a type declared in
+ * someone else's header, so the member list goes here and carries what the annotations carry.
+ * One definition serves both directions, as an annotated type's does.
+ *
+ *     template<>
+ *     struct serpent::members_of<esp_netif_ip_info_t> {
+ *         static constexpr serpent::member_entry value[] {
+ *             ^^esp_netif_ip_info_t::ip,
+ *             { ^^esp_netif_ip_info_t::netmask, serpent::key("mask") },
+ *             { ^^esp_netif_ip_info_t::gw, serpent::defaulted {} },
+ *         };
+ *     };
+ *
+ * A naming style may sit beside it as `static constexpr naming_style style`, and a type only
+ * some of whose members belong on the wire says `static constexpr bool partial = true` - without
+ * that, leaving one out is a build error, so a member added upstream cannot quietly stop being
+ * written.
+ *
+ * Only non-static data members can be named this way. A wrapper whose values live behind a
+ * pointer, or a member that is computed rather than stored, wants a serializer<T> - there is no
+ * declaration for a table to point at.
+ *
+ * Unlike enum_values this needs reflection: addressing a member without naming it is a splice.
+ */
+template<typename T>
+struct members_of;
+
+/**
+ * Every non-static data member of a type, for a table that wants all of them.
+ *
+ * A convenience over writing the identifiers out, and nothing more than that: it fills the same
+ * sequence by hand-rolling it from the compiler's own list, so there is one walk and no second
+ * code path. Narrowing it is ordinary code over an ordinary range - views::filter on
+ * identifier_of, say - rather than a vocabulary this library would have to invent:
+ *
+ *     static constexpr auto value = serpent::all_members_of<T>();
+ *
+ *     static constexpr auto value = std::define_static_array(
+ *             std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())
+ *             | std::views::filter([](std::meta::info member) {
+ *                   return std::meta::identifier_of(member) != "reserved";
+ *               }));
+ */
+template<typename T>
+consteval auto all_members_of() {
+    return std::define_static_array(
+            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
+}
+
+
 namespace detail {
 
 /** The annotation of type A attached to an entity, if there is one. */
@@ -685,6 +780,95 @@ consteval std::string_view annotation_complaint() {
 template<typename T>
 consteval bool annotations_make_sense() {
     return annotation_complaint<T>().empty();
+}
+
+// ---------------- a member list for a type that is not yours ----------------
+
+/** A type whose members are listed out of line rather than annotated. */
+template<typename T>
+concept tabulated_type = requires { members_of<T>::value; };
+
+/** The naming rule a member table asks for, if it asks for one. */
+template<typename T>
+consteval naming_style table_naming_for() {
+    // Spelled as the annotation is, so a table reads like the annotations it stands in for.
+    // `style` is accepted too, because enable_reflection established that spelling first.
+    if constexpr (requires { members_of<T>::naming; })
+        return members_of<T>::naming.style;
+    else if constexpr (requires { members_of<T>::style; })
+        return members_of<T>::style;
+    else
+        return naming_style::as_written;
+}
+
+/** What one listed member is called on the wire: its rename, else its declared identifier. */
+template<typename T, member_entry Entry>
+consteval std::string_view table_key() {
+    if constexpr (Entry.is_renamed()) {
+        return std::define_static_string(Entry.rename());
+    } else {
+        constexpr auto style = table_naming_for<T>();
+        if constexpr (style == naming_style::as_written) {
+            return std::define_static_string(std::meta::identifier_of(Entry.which));
+        } else {
+            constexpr auto converted = convert_case(std::meta::identifier_of(Entry.which), style);
+            return std::define_static_string(converted.view());
+        }
+    }
+}
+
+/** Whether the document has to carry a listed member, by the same rule an annotated one follows. */
+template<member_entry Entry>
+consteval bool table_member_is_required() {
+    using declared = [:std::meta::type_of(Entry.which):];
+    if constexpr (optional_like<declared>) return Entry.insisted;
+    else return !Entry.optional_in_document;
+}
+
+/** Whether two listed members claim the same key. */
+template<typename T>
+consteval bool table_keys_are_distinct() {
+    std::vector<std::string_view> keys;
+    template for (constexpr auto listed : std::define_static_array(members_of<T>::value)) {
+        constexpr member_entry entry = listed;
+        if constexpr (!entry.excluded) keys.push_back(table_key<T, entry>());
+    }
+    for (std::size_t first = 0; first < keys.size(); ++first)
+        for (std::size_t second = first + 1; second < keys.size(); ++second)
+            if (keys[first] == keys[second]) return false;
+    return true;
+}
+
+/**
+ * The member() calls for a type whose members are listed rather than annotated.
+ *
+ * The same shape as the annotated walk, and deliberately so: everything downstream - the strict
+ * reading, the constant key framing, the generated readers - sees no difference between a type
+ * that named its own members and one that was named from outside.
+ */
+template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
+    requires tabulated_type<T>
+void table_members(Visitor &visitor, Object &value) {
+    static_assert(table_keys_are_distinct<T>(),
+            "two members of this serpent::members_of table are the same key on the wire; rename one "
+            "with serpent::key");
+
+    template for (constexpr auto listed : std::define_static_array(members_of<T>::value)) {
+        // A sequence of plain std::meta::info is a table of members with nothing said about
+        // them, which is the common case; member_entry is how one of them says more.
+        constexpr member_entry entry = listed;
+        if constexpr (!entry.excluded) {
+        // Bound to a reference first: a splice may not appear in an arbitrary expression.
+        auto &field = value.[:entry.which:];
+        static constexpr std::string_view name = table_key<T, entry>();
+
+        if constexpr (table_member_is_required<entry>()) {
+            if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
+        } else {
+            (void)visitor.template member_if_present<name>(field);
+        }
+        }
+    }
 }
 
 /**
@@ -941,6 +1125,13 @@ void reflect_convert(Visitor &visitor, Object &value) {
     reflect_members(visitor, value);
 }
 
+/** The same, for a type named from outside rather than annotated. */
+template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Object>>
+    requires tabulated_type<T>
+void table_convert(Visitor &visitor, Object &value) {
+    table_members(visitor, value);
+}
+
 } // namespace detail
 
 #else
@@ -953,6 +1144,17 @@ template<typename T>
 concept discriminated_type = false;
 
 namespace detail {
+
+/** A member table needs splicing, so without reflection there is no such thing. */
+template<typename T>
+concept tabulated_type = false;
+
+/** Never defined: the concept above is false, so every call to these is discarded. */
+template<typename Visitor, typename Object>
+void table_convert(Visitor &visitor, Object &value);
+
+template<typename Visitor, typename Object>
+void table_members(Visitor &visitor, Object &value);
 
 /** Without reflection an enumeration cannot annotate itself; a table is still open to it. */
 template<typename T>

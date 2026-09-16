@@ -6,6 +6,7 @@
 #include <serpent/json.hpp>
 
 #include <map>
+#include <ranges>
 #include <optional>
 #include <string>
 #include <variant>
@@ -89,6 +90,44 @@ struct connection {
         return true;
     }
 };
+
+// --- A type you cannot edit at all, named from outside by its members ---
+// Declared as a foreign header would: no annotation, nothing serpent knows about.
+struct foreign_endpoint {
+    int address = 0;
+    int netmask = 0;
+    int gateway = 0;
+};
+
+/** The same, where every member belongs on the wire and nothing needs saying about any of them. */
+struct foreign_counts {
+    int sent = 0;
+    int received = 0;
+    int reserved = 0;
+};
+
+} // namespace
+
+template<>
+struct serpent::members_of<foreign_endpoint> {
+    static constexpr serpent::member_entry value[] {
+        ^^foreign_endpoint::address,
+        { ^^foreign_endpoint::netmask, serpent::key("mask") },
+        { ^^foreign_endpoint::gateway, serpent::defaulted {} },
+    };
+};
+
+template<>
+struct serpent::members_of<foreign_counts> {
+    // Narrowed by ordinary code over an ordinary range, rather than by a vocabulary for it.
+    static constexpr auto value = std::define_static_array(
+            std::meta::nonstatic_data_members_of(^^foreign_counts, std::meta::access_context::current())
+            | std::views::filter([](std::meta::info member) {
+                  return std::meta::identifier_of(member) != "reserved";
+              }));
+};
+
+namespace {
 
 // --- Form C again, non-intrusively, for a type you cannot edit ---
 struct extent {
@@ -225,6 +264,54 @@ void members_into_an_open_object() {
         write_through_scope(object);
     }
     check(second_target.finish().has_value(), "object_scope<> names itself");
+}
+
+/**
+ * A type named from outside, by listing its members rather than annotating it.
+ *
+ * The keys come from the declaration, so only the exception is written down; everything
+ * downstream - both formats, both directions, the strict reading - sees no difference between
+ * this and a type that annotated itself.
+ */
+void members_named_from_outside() {
+    const foreign_endpoint endpoint { 3, 4, 5 };
+
+    check_equal(json::encode(endpoint), std::string { R"({"address":3,"mask":4,"gateway":5})" },
+            "identifiers become keys, and the one rename is honoured");
+
+    const auto back = decode<foreign_endpoint>(encode(endpoint));
+    check(back && back->address == 3 && back->netmask == 4 && back->gateway == 5, "round-trips through binary");
+
+    const auto from_text = json::decode<foreign_endpoint>(R"({"address":9,"mask":8,"gateway":7})");
+    check(from_text && from_text->netmask == 8, "and through text, from one definition");
+
+    // The strictness rule reaches a foreign type too, and names what was missing.
+    const auto partial = json::try_decode<foreign_endpoint>(R"({"address":9})");
+    check(!partial && partial.error().code() == errc::missing_key && partial.error().key() == "mask",
+            "a member the table names and the document leaves out is a failure");
+
+    // Except the one the table said may be left out.
+    const auto without_default = json::decode<foreign_endpoint>(R"({"address":9,"mask":8})");
+    check(without_default && without_default->gateway == 0, "a defaulted member keeps its value");
+
+    // And it flattens, like any other type that names its members.
+    std::vector<std::byte> flat;
+    container_sink flat_out { flat };
+    writer flat_target { flat_out };
+    {
+        const auto object = flat_target.object();
+        serpent::write_members(flat_target, endpoint);
+        object.member("interface", "wlan0");
+    }
+    check(flat_target.finish().has_value(), "flattened");
+    check_equal(view::over(flat).size(), std::size_t { 4 }, "its members and the caller's, side by side");
+
+    // The list can come from the compiler instead of from the keyboard, and be narrowed with
+    // ordinary range code - the same walk either way.
+    check_equal(json::encode(foreign_counts { 1, 2, 3 }), std::string { R"({"sent":1,"received":2})" },
+            "a member list taken from the type, with one filtered out");
+    const auto counts = json::decode<foreign_counts>(R"({"sent":4,"received":5})");
+    check(counts && counts->sent == 4 && counts->reserved == 0, "and read back, leaving the filtered one alone");
 }
 
 void key_order_and_absence() {
@@ -552,6 +639,7 @@ int main() {
     non_intrusive_form();
     containers_and_nesting();
     members_into_an_open_object();
+    members_named_from_outside();
     key_order_and_absence();
     reflection_seam();
     aggregates_are_not_strings();

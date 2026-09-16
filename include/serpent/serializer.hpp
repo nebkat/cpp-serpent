@@ -42,6 +42,10 @@ struct serializer {
      */
     template<typename Writer>
     static void write(Writer &out, const T &value) {
+        static_assert(!(detail::tabulated_type<T> && (convertible_type<T> || requires { to_json(out, value); })),
+                "this type has a serpent::members_of table and also a hand-written conversion. The "
+                "table would be used and one of them would do nothing; remove whichever you did not "
+                "mean");
         static_assert(!(reflected_type<T> && (convertible_type<T> || requires { to_json(out, value); })),
                 "this type is opted in to reflection and also has a hand-written conversion. The "
                 "hand-written one would be used and the annotation would do nothing; remove "
@@ -51,6 +55,10 @@ struct serializer {
             write_visitor<Writer> visitor { out };
             const auto scope = out.object();
             json_convert(visitor, value);
+        } else if constexpr (detail::tabulated_type<T>) {
+            write_visitor<Writer> visitor { out };
+            const auto scope = out.object();
+            detail::table_convert(visitor, value);
         } else if constexpr (requires { to_json(out, value); }) {
             to_json(out, value);
         } else if constexpr (reflected_type<T>) {
@@ -77,6 +85,8 @@ struct serializer {
         write_visitor<Writer> visitor { out };
         if constexpr (convertible_type<T>) {
             json_convert(visitor, value);
+        } else if constexpr (detail::tabulated_type<T>) {
+            detail::table_members(visitor, value);
         } else if constexpr (reflection_available) {
             detail::reflect_members(visitor, value);
         } else {
@@ -91,6 +101,8 @@ struct serializer {
         read_visitor<Source> visitor { source };
         if constexpr (convertible_type<T>) {
             json_convert(visitor, value);
+        } else if constexpr (detail::tabulated_type<T>) {
+            detail::table_members(visitor, value);
         } else if constexpr (reflection_available) {
             detail::reflect_members(visitor, value);
         } else {
@@ -102,6 +114,10 @@ struct serializer {
     /** Reads from any source offering the reader interface. Resolved as to_json is. */
     template<typename Source>
     static bool read(Source source, T &value) {
+        static_assert(!(detail::tabulated_type<T> && (convertible_type<T> || requires { from_json(source, value); })),
+                "this type has a serpent::members_of table and also a hand-written conversion. The "
+                "table would be used and one of them would do nothing; remove whichever you did not "
+                "mean");
         static_assert(!(reflected_type<T> && (convertible_type<T> || requires { from_json(source, value); })),
                 "this type is opted in to reflection and also has a hand-written conversion. The "
                 "hand-written one would be used and the annotation would do nothing; remove "
@@ -111,6 +127,11 @@ struct serializer {
             if (!source.is_object()) return false;
             read_visitor<Source> visitor { source };
             json_convert(visitor, value);
+            return visitor.ok();
+        } else if constexpr (detail::tabulated_type<T>) {
+            if (!source.is_object()) return false;
+            read_visitor<Source> visitor { source };
+            detail::table_convert(visitor, value);
             return visitor.ok();
         } else if constexpr (requires { from_json(source, value); }) {
             return from_json(source, value);
@@ -145,12 +166,15 @@ struct serializer {
  */
 template<typename T, typename Source>
 std::string_view first_missing_member(Source source) {
-    if constexpr ((convertible_type<T> || reflected_type<T>) && std::default_initializable<T>) {
+    if constexpr ((convertible_type<T> || reflected_type<T> || detail::tabulated_type<T>)
+            && std::default_initializable<T>) {
         if (!source.is_object()) return {};
         T scratch {};
         read_visitor<Source> visitor { source };
         if constexpr (convertible_type<T>) {
             json_convert(visitor, scratch);
+        } else if constexpr (detail::tabulated_type<T>) {
+            detail::table_convert(visitor, scratch);
         } else {
             detail::reflect_convert(visitor, scratch);
         }

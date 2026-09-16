@@ -193,6 +193,71 @@ struct [[= serpent::serializable {}]] listener {
 Two enumerations may give the same spelling different meanings, which a rule derived from the
 identifiers could not: `rtk_float` is `"float"` in one and `"rtk_float"` in another.
 
+## A type you cannot annotate, by its members
+
+An annotation cannot go on a type declared in someone else's header. `members_of` names its
+members from outside instead, and the key comes from the declaration rather than from a string
+you restate — so only the exceptions are written down, and one list serves both directions:
+
+```cpp
+template<>
+struct serpent::members_of<esp_netif_ip_info_t> {
+    static constexpr serpent::member_entry value[] {
+        ^^esp_netif_ip_info_t::ip,                                       // key is "ip"
+        { ^^esp_netif_ip_info_t::netmask, serpent::key("mask") },        // the exception
+        { ^^esp_netif_ip_info_t::gw, serpent::defaulted {} },
+    };
+};
+```
+
+No `serializer<T>` is involved; the type now reads and writes in every format, strictly, exactly
+as an annotated one does. A member may carry `key`, `skip`, `required` or `defaulted` in any
+order — the annotations, spelled the same and meaning the same — and the table may carry a
+type-wide `naming` rule beside the list.
+
+### Where the list comes from is up to you
+
+The list is an ordinary constexpr range of members, so hand-picking and taking all of them are
+the same primitive rather than two features:
+
+=== "All of them"
+
+    ```cpp
+    static constexpr auto value = serpent::all_members_of<T>();
+    ```
+
+=== "Narrowed"
+
+    ```cpp
+    static constexpr auto value = std::define_static_array(
+            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())
+            | std::views::filter([](std::meta::info member) {
+                  return std::meta::identifier_of(member) != "reserved";
+              }));
+    ```
+
+=== "Hand-rolled"
+
+    ```cpp
+    static constexpr serpent::member_entry value[] {
+        ^^T::first,
+        { ^^T::second, serpent::key("2nd") },
+    };
+    ```
+
+`all_members_of` is a convenience and nothing more — it fills the same sequence from the
+compiler's own list and runs the same walk. Narrowing is `<ranges>` and `<meta>` code you already
+know, not a filtering vocabulary this library invented.
+
+### What it does not reach
+
+Only non-static data members can be named this way. A wrapper whose values live behind a pointer,
+a member that is computed rather than stored, or a type that is one scalar rather than an object
+has no declaration for a table to point at — those want a `serializer<T>`.
+
+Unlike [`enum_values`](#an-enumeration-you-cannot-annotate), this needs reflection: addressing a
+member without naming it is a splice.
+
 ## An enumeration you cannot annotate
 
 An annotation cannot go on an enumeration declared in someone else's header, so the table goes
