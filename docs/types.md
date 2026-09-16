@@ -136,6 +136,34 @@ struct serpent::serializer<timestamp, void> {
 };
 ```
 
+#### Templated or concrete, and what each costs
+
+The example above names its writer `template<typename Writer>`, which is the form to reach for:
+it serves every format, including one added later, and a type written this way never has to be
+revisited. The bodies must then live in the header, as any template's must.
+
+Naming a concrete writer instead is legitimate and buys one thing — the definitions can move into
+a `.cpp`:
+
+```cpp
+// in the header
+template<>
+struct serpent::serializer<ip4, void> {
+    static void write(serpent::bjdata::writer &out, const ip4 &value);
+    static bool read(serpent::bjdata::view source, ip4 &value);
+};
+```
+
+What it costs is easy to miss: **that type can now only be written to that one format.** Nothing
+complains at the declaration; the error arrives at the first call site that writes it as something
+else — a log line, a status endpoint — and it reads as though the call is wrong rather than the
+conversion. Take the concrete form when a type is genuinely single-format and the compile-time
+cost of the header matters, and the templated form otherwise.
+
+A type whose two formats need genuinely *different* behaviour is the remaining case, and that is
+what the `to_json` pair is for: one overload per writer, chosen by ordinary overload resolution.
+`example/splicing.cpp` does this — bytes spliced whole into BJData, transcribed into JSON.
+
 ## Only one at a time
 
 A type may carry exactly one of these forms. If it is opted in to reflection **and** has a
