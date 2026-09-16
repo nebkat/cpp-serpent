@@ -65,7 +65,7 @@ struct [[= serpent::serializable {},
 | `key("...")` | a field | overrides one key |
 | `skip {}` | a field | leaves it out of the document, both directions |
 | `required {}` | an optional field | the key must be present, though its value may be null |
-| `defaulted {}` | a plain field | the document may omit it, and it keeps its declared default |
+| `defaulted {}` | a plain field, **or a type** | the document may omit it, and it keeps its declared default; on a type it means every member, and `required {}` on one of them is the exception |
 | `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
 | `tagged("key")` | a variant field | the same, decided at the field instead of on the alternatives |
 | `as(...)` | an enumerator | what it is on the wire, where its identifier will not do |

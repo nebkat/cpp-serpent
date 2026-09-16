@@ -36,6 +36,14 @@ struct[[= serpent::serializable {}]] lenient {
     [[= serpent::defaulted {}]] int y = 0;
 };
 
+/** Every member may be absent, which is the shape of a stored configuration. */
+struct[[= serpent::serializable {}, = serpent::defaulted {}]] stored_config {
+    std::string host = "localhost";
+    int port = 8080;
+    std::optional<int> timeout;
+    [[= serpent::required {}]] int version = 1;
+};
+
 /** An optional is absent-tolerant; saying required makes the key mandatory, the value still not. */
 struct[[= serpent::serializable {}]] with_optional {
     std::string name;
@@ -394,6 +402,31 @@ void inherited_members() {
             "each member keeps its own type's naming rule");
 }
 
+/**
+ * A whole type whose members may be absent.
+ *
+ * What a stored configuration needs: a field added in a later version is simply not in a file
+ * written before it, and that file must still load rather than failing and losing every other
+ * setting with it.
+ */
+void a_type_whose_members_may_be_absent() {
+    const auto old_file = json::decode<stored_config>(R"({"version":1,"host":"device"})");
+    check(old_file.has_value(), "a document written before a member existed still reads");
+    check(old_file && old_file->port == 8080, "and the member it never had keeps its default");
+
+    // A member may still be the exception.
+    const auto without_version = json::try_decode<stored_config>(R"({"host":"device"})");
+    check(!without_version && without_version.error().key() == "version",
+            "a member marked required is still insisted on, and named");
+
+    // An optional is unaffected: the type-wide rule has nothing to say about a type whose whole
+    // job is representing absence.
+    check(json::decode<stored_config>(R"({"version":1})").has_value(), "an absent optional is nothing new");
+
+    // And a type that did not ask for it is unchanged.
+    check(!json::decode<point>(R"({"x":1})").has_value(), "a type that says nothing still insists");
+}
+
 void key_order_and_absence() {
     // The read cursor takes the fast path on declaration order, but must still be correct
     // when the document disagrees.
@@ -722,6 +755,7 @@ int main() {
     members_into_an_open_object();
     members_named_from_outside();
     inherited_members();
+    a_type_whose_members_may_be_absent();
     key_order_and_absence();
     reflection_seam();
     aggregates_are_not_strings();

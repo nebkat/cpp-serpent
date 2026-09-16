@@ -280,6 +280,22 @@ between a field that said zero and a field that said nothing.
 So a format that gains a field can mark it `defaulted` and keep reading documents written before
 it existed, and a type that must be fully specified gets that for nothing.
 
+A whole type can say it, the way it says a naming rule — which is what a stored configuration
+usually wants, since a field added in a later version is simply absent from every file written
+before it, and such a file must still load rather than failing and losing every other setting
+with it:
+
+```cpp
+struct [[= serpent::serializable {}, = serpent::defaulted {}]] user_config {
+    std::string host = "localhost";
+    int port = 8080;
+    [[= serpent::required {}]] int version = 1;   // the exception
+};
+```
+
+An optional is unaffected by the type-wide rule: absence is already what it represents, so only
+`required {}` on the member itself changes anything there.
+
 ```cpp
 struct [[= serpent::serializable {}]] calibration {
     double offset;                                   // must be there

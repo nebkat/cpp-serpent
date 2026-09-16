@@ -619,10 +619,18 @@ consteval tagged resolved_tag() {
 template<typename T, std::meta::info Member>
 consteval bool member_is_required() {
     using declared = [:std::meta::type_of(Member):];
-    if constexpr (optional_like<declared>)
+    if constexpr (optional_like<declared>) {
+        // An optional is absent-tolerant because that is what it represents, so only the member
+        // itself can demand its key - a type-wide rule has nothing to say about it.
         return has_annotation<required>(Member);
-    else
-        return !has_annotation<defaulted>(Member);
+    } else if constexpr (has_annotation<required>(Member)) {
+        return true;
+    } else {
+        // On the type it means every member, the way naming does. A whole type of fields that may
+        // be absent is the ordinary shape of a stored configuration, where a field added in a
+        // later version is simply not in a file written before it.
+        return !has_annotation<defaulted>(Member) && !has_annotation<defaulted>(^^T);
+    }
 }
 
 /** The wire key for one field: an explicit key, else the type's naming rule. */
@@ -781,10 +789,12 @@ consteval std::string_view annotation_complaint() {
 
         if constexpr (has_annotation<required>(member) && has_annotation<defaulted>(member)) {
             complaint += std::string { name } + " is required and defaulted at once; ";
-        } else if constexpr (has_annotation<required>(member) && !optional_like<declared>) {
+        } else if constexpr (has_annotation<required>(member) && !optional_like<declared>
+                && !has_annotation<defaulted>(^^T)) {
             complaint += std::string { name }
-                    + " is not an optional, so it is required already - serpent::required says only that "
-                      "an optional's key must be stated; ";
+                    + " is not an optional and its type is not defaulted, so it is required already - "
+                      "serpent::required says only that an optional's key must be stated, or that this "
+                      "member is the exception to a defaulted type; ";
         }
         if constexpr (has_annotation<skip>(member) && has_annotation<key>(member)) {
             complaint += std::string { name } + " is skipped and also renamed; ";
@@ -842,11 +852,13 @@ consteval std::string_view table_key() {
 }
 
 /** Whether the document has to carry a listed member, by the same rule an annotated one follows. */
-template<member_entry Entry>
+template<typename T, member_entry Entry>
 consteval bool table_member_is_required() {
     using declared = [:std::meta::type_of(Entry.which):];
+    constexpr bool table_is_defaulted = requires { members_of<T>::defaulted; };
     if constexpr (optional_like<declared>) return Entry.insisted;
-    else return !Entry.optional_in_document;
+    else if constexpr (Entry.insisted) return true;
+    else return !Entry.optional_in_document && !table_is_defaulted;
 }
 
 /** Whether two listed members claim the same key. */
@@ -886,7 +898,7 @@ void table_members(Visitor &visitor, Object &value) {
         auto &field = value.[:entry.which:];
         static constexpr std::string_view name = table_key<T, entry>();
 
-        if constexpr (table_member_is_required<entry>()) {
+        if constexpr (table_member_is_required<T, entry>()) {
             if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
         } else {
             (void)visitor.template member_if_present<name>(field);
