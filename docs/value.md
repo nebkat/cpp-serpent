@@ -79,8 +79,25 @@ protocol `bjdata::writer` and `json::writer` answer, so a type that can be writt
 written here, and a tree built from a value encodes byte for byte as writing that value directly
 would.
 
-The reverse — reading a typed struct back *out* of a tree — is not there. Decode from the bytes
-into your type, which is what the readers are for; the tree is for the way out.
+### And back out of it
+
+`from_value` is the other direction, and it goes through the same code every other reader does:
+
+```cpp
+const auto recovered = serpent::from_value<reading>(tree);
+```
+
+`serpent::value_reader` is what makes that work — a handle to one node answering exactly what
+`view` and `reader` answer, so nothing that decodes has to know which of the three it was given.
+That is the reason the tree is a third way to *hold* a document rather than a separate world:
+
+| holds | owns | finding the next value |
+|---|---|---|
+| `view`, `reader` | nothing | scanning the bytes |
+| `value_reader` | the values themselves | already there |
+
+Reading from bytes is still the cheaper path, and the one to reach for when you have them. This
+is for when what you have is a tree.
 
 ## Reading it back
 

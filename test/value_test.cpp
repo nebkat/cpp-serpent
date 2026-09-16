@@ -178,6 +178,35 @@ void any_type_as_a_tree() {
     check(serpent::to_value(std::vector<std::byte> { std::byte { 9 } }).is_binary(), "and a byte range stays binary");
 }
 
+/**
+ * The tree answers what a reader over bytes answers, so it is a third way to hold a document
+ * rather than a separate world: bytes scanned in place, and values already materialised, reach
+ * a type through the same code.
+ */
+void a_tree_is_a_source() {
+    const failure_report original { "out_of_range", serpent::value::of({ { "records", 12 } }) };
+    const auto tree = serpent::to_value(original);
+
+    const auto recovered = serpent::from_value<failure_report>(tree);
+    check(recovered.has_value(), "a type reads straight out of a tree");
+    check(recovered && recovered->reason == "out_of_range", "its members are there");
+    check(recovered && *recovered->detail["records"].as_int<int>() == 12, "nested, including a tree inside it");
+
+    // The same answers a view gives, from the same document held the other way.
+    const serpent::value_reader handle { tree };
+    check(handle.is_object() && handle.size() == 2, "shape");
+    check_equal(*handle["reason"].as_string(), std::string_view { "out_of_range" }, "a member by key");
+    check(!handle["nope"].is_valid(), "and an absent member is invalid, not null");
+
+    std::size_t walked = 0;
+    for (const auto entry : handle.items()) walked += entry.key_is("reason") ? 1 : 0;
+    check_equal(walked, std::size_t { 1 }, "items() walks it the way every reader's does");
+
+    const auto numbers = serpent::to_value(std::vector<int> { 4, 5, 6 });
+    check_equal(serpent::value_reader { numbers }[1].as_int<int>().value_or(0), 5, "and an array indexes");
+    check(serpent::from_value<std::vector<int>>(numbers) == std::vector<int> { 4, 5, 6 }, "and reads back whole");
+}
+
 void refusals() {
     const auto throws = [](auto &&action, errc expected, std::string_view what) {
         try {
@@ -212,6 +241,7 @@ int main() {
     a_member_of_another_type();
     a_member_of_an_annotated_type();
     any_type_as_a_tree();
+    a_tree_is_a_source();
     refusals();
     return report("value");
 }

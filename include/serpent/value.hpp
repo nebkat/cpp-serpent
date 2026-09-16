@@ -481,6 +481,225 @@ template<typename T>
 }
 
 /**
+ * @brief A handle to one node of a tree, answering what a reader over bytes answers.
+ *
+ * The third of the three ways to hold a document, and the same interface as the other two: a
+ * view scans the bytes on every step, an index would record where each value ends, and this one
+ * has the values already. Nothing that reads names a reader type, so a type is decoded from any
+ * of them by the same code.
+ *
+ * A handle rather than the value itself because a reader must be able to say "no such member",
+ * and a tree node has no absent state - a null pointer here is that state.
+ */
+class value_reader {
+    const value *target = nullptr;
+
+public:
+    constexpr value_reader() = default;
+    constexpr value_reader(const value &node) noexcept : target(&node) {}
+
+    [[nodiscard]] kind type() const noexcept { return this->target == nullptr ? kind::invalid : this->target->type(); }
+    [[nodiscard]] bool is_valid() const noexcept { return this->target != nullptr; }
+    [[nodiscard]] explicit operator bool() const noexcept { return this->is_valid(); }
+
+    [[nodiscard]] bool is_null() const noexcept { return this->target != nullptr && this->target->is_null(); }
+    [[nodiscard]] bool is_boolean() const noexcept { return this->target != nullptr && this->target->is_boolean(); }
+    [[nodiscard]] bool is_integer() const noexcept { return this->target != nullptr && this->target->is_integer(); }
+    [[nodiscard]] bool is_real() const noexcept { return this->target != nullptr && this->target->is_real(); }
+    [[nodiscard]] bool is_number() const noexcept { return this->target != nullptr && this->target->is_number(); }
+    [[nodiscard]] bool is_string() const noexcept { return this->target != nullptr && this->target->is_string(); }
+    [[nodiscard]] bool is_array() const noexcept { return this->target != nullptr && this->target->is_array(); }
+    [[nodiscard]] bool is_object() const noexcept { return this->target != nullptr && this->target->is_object(); }
+    [[nodiscard]] bool is_binary() const noexcept { return this->target != nullptr && this->target->is_binary(); }
+
+    [[nodiscard]] std::optional<bool> as_bool() const noexcept {
+        return this->target == nullptr ? std::nullopt : this->target->as_bool();
+    }
+
+    template<std::integral T>
+    [[nodiscard]] std::optional<T> as_int() const noexcept {
+        return this->target == nullptr ? std::nullopt : this->target->template as_int<T>();
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] std::optional<T> as_float() const noexcept {
+        return this->target == nullptr ? std::nullopt : this->target->template as_float<T>();
+    }
+
+    [[nodiscard]] std::optional<std::string_view> as_string() const noexcept {
+        return this->target == nullptr ? std::nullopt : this->target->as_string();
+    }
+
+    [[nodiscard]] std::optional<std::span<const std::byte>> as_binary() const noexcept {
+        return this->target == nullptr ? std::nullopt : this->target->as_binary();
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return this->target == nullptr ? 0 : this->target->size(); }
+
+    /** Already known, where a scanning reader would have to count. */
+    [[nodiscard]] std::optional<std::size_t> size_hint() const noexcept {
+        if (this->target == nullptr) return std::nullopt;
+        if (const auto *items = this->target->as_array()) return items->size();
+        return std::nullopt;
+    }
+
+    [[nodiscard]] value_reader operator[](std::string_view name) const noexcept {
+        if (this->target == nullptr) return {};
+        const auto *members = this->target->as_object();
+        if (members == nullptr) return {};
+        const auto *found = members->find(name);
+        return found != nullptr ? value_reader { *found } : value_reader {};
+    }
+
+    [[nodiscard]] value_reader operator[](std::size_t index) const noexcept {
+        if (this->target == nullptr) return {};
+        const auto *items = this->target->as_array();
+        if (items == nullptr || index >= items->size()) return {};
+        return value_reader { (*items)[index] };
+    }
+
+    struct key_value;
+
+    class array_iterator {
+        const value *position = nullptr;
+
+    public:
+        using value_type = value_reader;
+        using reference = value_reader;
+        using difference_type = std::ptrdiff_t;
+        using iterator_concept = std::forward_iterator_tag;
+        using iterator_category = std::forward_iterator_tag;
+
+        constexpr array_iterator() = default;
+        constexpr explicit array_iterator(const value *position) noexcept : position(position) {}
+
+        [[nodiscard]] value_reader operator*() const noexcept { return value_reader { *this->position }; }
+        array_iterator &operator++() noexcept {
+            ++this->position;
+            return *this;
+        }
+        array_iterator operator++(int) noexcept {
+            auto copy = *this;
+            ++*this;
+            return copy;
+        }
+        [[nodiscard]] bool operator==(const array_iterator &) const noexcept = default;
+    };
+
+    class member_iterator {
+        using held = std::pair<std::string, value>;
+        const held *position = nullptr;
+
+    public:
+        using value_type = key_value;
+        using reference = key_value;
+        using difference_type = std::ptrdiff_t;
+        using iterator_concept = std::forward_iterator_tag;
+        using iterator_category = std::forward_iterator_tag;
+
+        constexpr member_iterator() = default;
+        constexpr explicit member_iterator(const held *position) noexcept : position(position) {}
+
+        [[nodiscard]] inline key_value operator*() const noexcept;
+        member_iterator &operator++() noexcept {
+            ++this->position;
+            return *this;
+        }
+        member_iterator operator++(int) noexcept {
+            auto copy = *this;
+            ++*this;
+            return copy;
+        }
+        [[nodiscard]] bool operator==(const member_iterator &) const noexcept = default;
+    };
+
+    class array_range {
+        const value::array *items = nullptr;
+
+    public:
+        constexpr explicit array_range(const value::array *items) noexcept : items(items) {}
+        [[nodiscard]] array_iterator begin() const noexcept {
+            return array_iterator { this->items == nullptr ? nullptr : this->items->data() };
+        }
+        [[nodiscard]] array_iterator end() const noexcept {
+            return array_iterator { this->items == nullptr ? nullptr : this->items->data() + this->items->size() };
+        }
+    };
+
+    class member_range {
+        const value::object *members = nullptr;
+
+    public:
+        constexpr explicit member_range(const value::object *members) noexcept : members(members) {}
+        [[nodiscard]] member_iterator begin() const noexcept {
+            return member_iterator { this->members == nullptr ? nullptr : &*this->members->begin() };
+        }
+        [[nodiscard]] member_iterator end() const noexcept {
+            return member_iterator { this->members == nullptr ? nullptr : &*this->members->begin() + this->members->size() };
+        }
+    };
+
+    [[nodiscard]] array_range array() const noexcept {
+        return array_range { this->target == nullptr ? nullptr : this->target->as_array() };
+    }
+
+    [[nodiscard]] member_range items() const noexcept {
+        return member_range { this->target == nullptr ? nullptr : this->target->as_object() };
+    }
+
+    /**
+     * Whatever this node holds, as one of your types.
+     *
+     * The same dispatch the other readers make, and for the same reason: a scalar is answered
+     * here, a container or an optional is filled from the shape it finds and must not go
+     * looking for a customization, and everything else is the user's own conversion.
+     */
+    template<typename T>
+    [[nodiscard]] std::optional<T> try_get() const {
+        if constexpr (std::same_as<T, bool>) {
+            return this->as_bool();
+        } else if constexpr (std::same_as<T, std::string_view>) {
+            return this->as_string();
+        } else if constexpr (detail::string_like<T> && std::constructible_from<T, std::string_view>) {
+            const auto text = this->as_string();
+            if (!text) return std::nullopt;
+            return T { *text };
+        } else if constexpr (std::floating_point<T>) {
+            return this->as_float<T>();
+        } else if constexpr (std::integral<T>) {
+            return this->as_int<T>();
+        } else if constexpr (detail::structurally_readable<T>) {
+            T item {};
+            if (!read_into(*this, item)) return std::nullopt;
+            return item;
+        } else {
+            T item {};
+            if (!serializer<T>::read(*this, item)) return std::nullopt;
+            return item;
+        }
+    }
+};
+
+/** A key and its value, the shape every reader's items() yields. */
+struct value_reader::key_value {
+    std::string_view key;
+    value_reader value;
+
+    [[nodiscard]] bool key_is(std::string_view other) const noexcept { return this->key == other; }
+    [[nodiscard]] std::string key_string() const { return std::string { this->key }; }
+};
+
+inline value_reader::key_value value_reader::member_iterator::operator*() const noexcept {
+    return key_value { this->position->first, value_reader { this->position->second } };
+}
+
+/** Reads a typed value straight out of a tree, as decode() does out of bytes. */
+template<typename T>
+[[nodiscard]] std::optional<T> from_value(const value &tree) {
+    return value_reader { tree }.template try_get<T>();
+}
+
+/**
  * Both directions, so a value goes wherever any other type goes: on its own, as a member of a
  * reflected struct, or as an element of a container.
  */
