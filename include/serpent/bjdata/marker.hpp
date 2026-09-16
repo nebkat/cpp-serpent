@@ -285,8 +285,8 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
     return marker::float64;
 }
 
-[[nodiscard]] constexpr marker float_marker(double value) noexcept {
-    return float_marker(fits_float16(value), fits_float32(value));
+[[nodiscard]] constexpr marker float_marker(double value, bool allow_float16 = true) noexcept {
+    return float_marker(allow_float16 && fits_float16(value), fits_float32(value));
 }
 
 /** Maximum rank of a dimension-array count. */

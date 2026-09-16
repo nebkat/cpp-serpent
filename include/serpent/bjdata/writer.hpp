@@ -34,6 +34,20 @@ namespace serpent::bjdata {
 struct writer_options {
     /** Choose the narrowest marker that holds a value exactly. */
     bool compact_types = true;
+    /**
+     * Whether a real may narrow all the way to half precision, the `h` marker.
+     *
+     * Spec-legal and chosen by the reference encoder, but half precision is thinly implemented
+     * in the wild and a reader that gets it wrong usually gets it wrong *silently* - reading the
+     * two payload bytes as an integer rather than refusing them. That turns 20.0 into 19712
+     * rather than into an error, which is the worst way for a format feature to fail.
+     *
+     * Turn it off to keep every other narrowing - integers especially - while pinning reals at
+     * float32 or wider, which every implementation agrees about. Whether it costs anything
+     * depends on the values, not the type: only a real that survives the round trip exactly
+     * would have narrowed.
+     */
+    bool float16 = true;
     /** Rewrite a uniform numeric list as [$T#n when that is strictly smaller. */
     bool numeric_packing = true;
     /**
@@ -74,11 +88,16 @@ class object_scope;
 
 namespace detail {
 
-/** The bytes one value costs in a generic array, its own marker included. */
+/**
+ * The bytes one value costs in a generic array, its own marker included.
+ *
+ * Told whether half precision is available, because the packing decision compares this against
+ * the typed form and would otherwise measure a generic array the writer will not produce.
+ */
 template<typename T>
-[[nodiscard]] constexpr std::size_t generic_value_size(T item) noexcept {
+[[nodiscard]] constexpr std::size_t generic_value_size(T item, bool allow_float16 = true) noexcept {
     if constexpr (std::floating_point<T>) {
-        return 1 + payload_width(float_marker(static_cast<double>(item)));
+        return 1 + payload_width(float_marker(static_cast<double>(item), allow_float16));
     } else if constexpr (std::is_signed_v<T>) {
         return 1 + payload_width(integer_marker(item, item));
     } else if constexpr (std::same_as<T, std::uint64_t>) {
@@ -223,7 +242,7 @@ public:
     }
 
     void real(double value) noexcept {
-        const auto kind = Options.compact_types ? float_marker(value) : marker::float64;
+        const auto kind = Options.compact_types ? float_marker(value, Options.float16) : marker::float64;
         this->put_marker(kind);
         this->put_float_payload(kind, value);
     }
@@ -472,9 +491,9 @@ void basic_writer<Options>::range(const R &items) noexcept {
                         const auto widened = static_cast<double>(item);
                         all_fit_16 = all_fit_16 && fits_float16(widened);
                         all_fit_32 = all_fit_32 && fits_float32(widened);
-                        generic += detail::generic_value_size(item);
+                        generic += detail::generic_value_size(item, Options.float16);
                     }
-                    element_marker = float_marker(all_fit_16, all_fit_32);
+                    element_marker = float_marker(all_fit_16 && Options.float16, all_fit_32);
                 } else {
                     std::int64_t minimum = 0;
                     std::int64_t maximum = 0;
@@ -498,7 +517,7 @@ void basic_writer<Options>::range(const R &items) noexcept {
                             }
                         }
                         first = false;
-                        generic += detail::generic_value_size(item);
+                        generic += detail::generic_value_size(item, Options.float16);
                     }
                     element_marker =
                             above_signed_range ? integer_marker(unsigned_maximum) : integer_marker(minimum, maximum);

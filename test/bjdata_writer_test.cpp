@@ -358,7 +358,39 @@ void error_latching() {
 
 } // namespace
 
+/**
+ * Half precision, withheld.
+ *
+ * It is spec-legal and the reference encoder chooses it, but it is thinly implemented: a reader
+ * that gets it wrong tends to read the two payload bytes as an integer rather than refusing
+ * them, so 20.0 arrives as 19712 and nothing reports an error. This keeps every other
+ * narrowing and pins reals at float32 or wider.
+ */
+void float16_can_be_withheld() {
+    static constexpr writer_options no_half { .float16 = false };
+
+    check_equal(hex(encode(20.0)), "68004d", "a half-representable real narrows by default");
+    check_equal(hex(encode<no_half>(20.0)), "640000a041", "and does not when withheld");
+
+    // Only the reals change: integers narrow exactly as before.
+    check_equal(hex(encode<no_half>(200)), hex(encode(200)), "an integer is unaffected");
+    check_equal(hex(encode<no_half>(std::vector<int> { 1, 2, 3, 4, 5, 6 })),
+            hex(encode(std::vector<int> { 1, 2, 3, 4, 5, 6 })), "and so is a packed integer list");
+
+    // A uniform list of halves packs at float32 rather than not packing at all.
+    const std::vector<double> halves { 1.0, 2.0, 4.0, 8.0, 16.0 };
+    const auto packed = encode<no_half>(halves);
+    check(view::over(packed).is_array(), "a list of them is still an array");
+    check_equal(view::over(packed).size(), std::size_t { 5 }, "of the same length");
+    check(decode<std::vector<double>>(packed) == halves, "and reads back exactly");
+
+    // A value that never fit is untouched either way.
+    check_equal(hex(encode<no_half>(19.061674f)), hex(encode(19.061674f)),
+            "a real that would not have narrowed is the same bytes");
+}
+
 int main() {
+    float16_can_be_withheld();
     scalars();
     containers();
     numeric_packing();
