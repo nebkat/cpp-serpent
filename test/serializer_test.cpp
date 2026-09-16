@@ -63,6 +63,21 @@ struct[[= serpent::serializable {}]] point {
     int y = 0;
 };
 
+/**
+ * Sentinels aliased onto real values, as a C API declares them.
+ *
+ * ESP-IDF's partition subtypes are the live case: APP_OTA_MIN *is* APP_OTA_0, and APP_TEST is
+ * APP_OTA_MAX. A bound is not a value anything should be written as, and it is declared first.
+ */
+enum class[[= serpent::serializable {}]] partition_subtype {
+    app_ota_min[[= serpent::skip {}]] = 0x10,
+    app_ota_0[[= serpent::as("ota_0")]] = 0x10,
+    app_ota_1[[= serpent::as("ota_1")]] = 0x11,
+    app_ota_max[[= serpent::skip {}]] = 0x20,
+    app_test[[= serpent::as("test")]] = 0x20,
+    factory[[= serpent::as("factory"), = serpent::fallback {}]] = 0x00,
+};
+
 // --- Inherited state, which is still the object's state ---
 struct[[= serpent::serializable {}]] identified {
     int id = 0;
@@ -419,6 +434,26 @@ void members_named_from_outside() {
  * document silently missing everything the type was built on - and a reader of the annotation
  * expects the whole object.
  */
+/**
+ * A skipped enumerator is not a candidate, in either direction.
+ *
+ * Otherwise a sentinel sharing a real value shadows it by declaration order, and the wire gets
+ * the sentinel's name for a value that has a name of its own.
+ */
+void skipped_enumerators_are_not_candidates() {
+    check_equal(json::encode(partition_subtype::app_ota_0), std::string { R"("ota_0")" },
+            "an aliased sentinel declared first does not shadow the real value");
+    check_equal(json::encode(partition_subtype::app_test), std::string { R"("test")" }, "nor does the other one");
+    check_equal(json::encode(partition_subtype::app_ota_1), std::string { R"("ota_1")" }, "and an unaliased value is itself");
+
+    check(json::decode<partition_subtype>(R"("ota_0")") == partition_subtype::app_ota_0, "the name reads back");
+    check(json::decode<partition_subtype>(R"("test")") == partition_subtype::app_test, "and so does the other");
+
+    // A skipped enumerator's identifier is not a name the document may use.
+    check(json::decode<partition_subtype>(R"("app_ota_min")") == partition_subtype::factory,
+            "a skipped enumerator is not readable either, so it falls back");
+}
+
 void inherited_members() {
     equipment machine;
     machine.id = 7;
@@ -793,6 +828,7 @@ int main() {
     members_into_an_open_object();
     members_named_from_outside();
     inherited_members();
+    skipped_enumerators_are_not_candidates();
     a_type_whose_members_may_be_absent();
     key_order_and_absence();
     reflection_seam();

@@ -1065,7 +1065,8 @@ consteval std::string_view annotated_enum_complaint() {
         template for (constexpr auto other : std::define_static_array(std::meta::enumerators_of(^^E))) {
             constexpr as other_form = wire_form<E, other>();
             constexpr std::string_view other_name = std::define_static_string(std::meta::identifier_of(other));
-            if constexpr (std::meta::extract<E>(enumerator) != std::meta::extract<E>(other)
+            if constexpr (!has_annotation<skip>(enumerator) && !has_annotation<skip>(other)
+                    && std::meta::extract<E>(enumerator) != std::meta::extract<E>(other)
                     && same_wire_form(form, other_form) && name < other_name) {
                 complaint += std::string { name } + " and " + std::string { other_name }
                         + " are the same value on the wire; ";
@@ -1108,14 +1109,19 @@ bool emit_annotated_enum(Emitter &out, E value) {
     } else {
         bool written = false;
         template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
-            if (!written && value == std::meta::extract<E>(enumerator)) {
-                written = true;
-                detail::emit_wire_form<detail::wire_form<E, enumerator>()>(out);
+            // A skipped enumerator is not on the wire, so it is not a candidate either. C APIs
+            // alias sentinels onto real values - a _MIN that is also the first real one - and
+            // taking it as a match would emit the sentinel's name for the real value.
+            if constexpr (!detail::has_annotation<skip>(enumerator)) {
+                if (!written && value == std::meta::extract<E>(enumerator)) {
+                    written = true;
+                    detail::emit_wire_form<detail::wire_form<E, enumerator>()>(out);
+                }
             }
         }
         if (!written) {
             template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
-                if constexpr (detail::has_annotation<fallback>(enumerator)) {
+                if constexpr (detail::has_annotation<fallback>(enumerator) && !detail::has_annotation<skip>(enumerator)) {
                     if (!written) {
                         written = true;
                         detail::emit_wire_form<detail::wire_form<E, enumerator>()>(out);
@@ -1135,14 +1141,16 @@ bool read_annotated_enum(Source source, E &value) {
 
     bool matched = false;
     template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
-        if (!matched && detail::source_is<detail::wire_form<E, enumerator>()>(source)) {
-            matched = true;
-            value = std::meta::extract<E>(enumerator);
+        if constexpr (!detail::has_annotation<skip>(enumerator)) {
+            if (!matched && detail::source_is<detail::wire_form<E, enumerator>()>(source)) {
+                matched = true;
+                value = std::meta::extract<E>(enumerator);
+            }
         }
     }
     if (!matched) {
         template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
-            if constexpr (detail::has_annotation<fallback>(enumerator)) {
+            if constexpr (detail::has_annotation<fallback>(enumerator) && !detail::has_annotation<skip>(enumerator)) {
                 if (!matched) {
                     matched = true;
                     value = std::meta::extract<E>(enumerator);

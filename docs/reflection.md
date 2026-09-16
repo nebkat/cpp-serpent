@@ -63,7 +63,7 @@ struct [[= serpent::serializable {},
 | `serializable {}` | a type | opts it in |
 | `naming {style}` | a type | derives every key from the identifiers |
 | `key("...")` | a field | overrides one key |
-| `skip {}` | a field | leaves it out of the document, both directions |
+| `skip {}` | a field, **or an enumerator** | leaves it out of the document, both directions &mdash; and an enumerator so marked is not a candidate when choosing what to write, which is what a sentinel aliased onto a real value needs |
 | `required {}` | an optional field | the key must be present, though its value may be null |
 | `defaulted {}` | a plain field, **or a type** | the document may omit it, and it keeps its declared default; on a type it means every member, and `required {}` on one of them is the exception |
 | `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
@@ -178,6 +178,21 @@ one enumeration** — a stop-bit count that is `1`, `1.5` and `2` is written exa
 word length maps to `5`, `6`, `7`, `8` regardless of its underlying values. The type's
 [naming rule](#adjusting-the-keys) applies to the identifiers it falls back on, so
 `notConnected` under `kebab_case` is `"not-connected"`.
+
+!!! tip "Sentinels aliased onto real values"
+
+    A C API often declares bounds among its enumerators, and they are often *equal* to a real
+    one &mdash; `ESP_PARTITION_SUBTYPE_APP_OTA_MIN` is `APP_OTA_0`, and it is declared first.
+    Mark the bound `skip {}` and it stops being a candidate, so the value writes under the name
+    it has rather than the bound's identifier:
+
+    ```cpp
+    app_ota_min [[= serpent::skip {}]]            = 0x10,
+    app_ota_0   [[= serpent::as("ota_0")]]        = 0x10,   // what 0x10 writes as
+    ```
+
+    Declaration order then stops mattering, which is the point: nothing about the wire should
+    depend on which alias the header happened to put first.
 
 `fallback {}` names one enumerator as the answer when nothing else fits, in **both** directions:
 a value on the wire matching no enumerator reads as it, and an enumeration value that is not any
