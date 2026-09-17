@@ -91,6 +91,22 @@ process that does nothing else, and the gap between the two is a property of ser
 knowing: something in our working set survives other work less well than the alternatives, and
 it is not yet understood.
 
+### Describing a type beats converting it by hand
+
+The figures above are for an annotated type, which is what the library wants you to write. The
+same five fields behind a hand-written `json_convert` decode from BJData in 1.47 ms rather than
+0.45 ms — **3.2x** — because a described type gets a reader generated for it that walks the
+document once, where a hand-written conversion goes through the general iterators, parsing each
+entry into a key and a handle and comparing the key at run time.
+
+That gap was 4.4x until the BJData view learned to step over an element something has already
+walked, rather than scanning it a second time to find the next one. JSON has kept such a note
+for a while; the binary reader had not, so every container read through a hand-written
+conversion was scanned twice over.
+
+Hand-writing is still the right answer when the two directions genuinely differ, or on a
+toolchain with no reflection. It is not the right answer for speed.
+
 ### What is left
 
 The remaining 2.6x on decode, against the same library reading the same kind of format, is two
