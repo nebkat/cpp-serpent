@@ -185,4 +185,29 @@ inline real_text format_real(double value) {
     return out;
 }
 
+/** How much room write_real() has to be given. */
+inline constexpr std::size_t real_text_capacity = 40;
+
+/**
+ * The same, written into room the caller already has - `real_text_capacity` characters of it -
+ * and returning how many were used. For a writer that wants the text in its destination rather
+ * than in a value it then has to copy from.
+ */
+inline std::size_t write_real(char *to, double value) {
+#if SERPENT_USE_ZMIJ
+    if (std::isfinite(value)) {
+        char *end = external::zmij::write(to, real_text_capacity, value);
+        const bool bare_digits = std::abs(value) < 1e16 && std::trunc(value) == value;
+        if (bare_digits) {
+            *end++ = '.';
+            *end++ = '0';
+        }
+        return static_cast<std::size_t>(end - to);
+    }
+#endif
+    const auto text = format_real(value);
+    std::copy_n(text.storage.data(), text.length, to);
+    return text.length;
+}
+
 } // namespace serpent::detail

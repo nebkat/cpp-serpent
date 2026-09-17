@@ -39,7 +39,7 @@ class byte_emitter {
     write_function write_bytes = nullptr;
     void *context = nullptr;
     errc failure = errc::ok;
-    std::size_t produced = 0;
+    std::size_t settled = 0; ///< written in room already handed back; size() adds what is used of the room in hand
 
     /**
      * Emitted bytes are gathered here and handed to the sink in batches.
@@ -85,9 +85,12 @@ class byte_emitter {
         // negotiable, the rest is, and the sink is the only one that knows its own storage.
         const auto next = this->lend_room(this->context, at_least, this->next_chunk);
         if (next.empty()) {
+            // The room in hand stays in hand, used as far as it was: finish() keeps it again, and
+            // keeping the same room twice has to land on the same answer.
             this->fail(errc::sink_failed);
             return false;
         }
+        this->settled += this->room_used;
         this->room = next.data();
         this->room_size = next.size();
         this->room_used = 0;
@@ -102,18 +105,20 @@ class byte_emitter {
             this->keep_room(this->context, this->room_used);
             this->next_chunk = std::min(this->next_chunk * 2, largest_chunk);
             const auto next = this->lend_room(this->context, 0, this->next_chunk);
-            this->room = next.data();
-            this->room_size = next.size();
-            this->room_used = 0;
             if (next.empty()) {
                 this->fail(errc::sink_failed);
                 return false;
             }
+            this->settled += this->room_used;
+            this->room = next.data();
+            this->room_size = next.size();
+            this->room_used = 0;
             return true;
         }
 
         if (this->room_used == 0) return true;
         const std::size_t count = this->room_used;
+        this->settled += count;
         this->room_used = 0;
         if (!this->write_bytes(this->context, std::span<const std::byte> { this->buffer, count })) {
             this->fail(errc::sink_failed);
@@ -211,7 +216,7 @@ public:
 
     [[nodiscard]] bool ok() const noexcept { return this->failure == errc::ok; }
     [[nodiscard]] errc error_code() const noexcept { return this->failure; }
-    [[nodiscard]] std::size_t size() const noexcept { return this->produced; }
+    [[nodiscard]] std::size_t size() const noexcept { return this->settled + this->room_used; }
 
     void fail(errc code) noexcept {
         if (this->ok()) this->failure = code;
@@ -230,7 +235,6 @@ public:
         if (this->failure == errc::ok && bytes.size() <= this->room_size - this->room_used) {
             std::memcpy(this->room + this->room_used, bytes.data(), bytes.size());
             this->room_used += bytes.size();
-            this->produced += bytes.size();
             return;
         }
         this->put_overflowing(bytes);
@@ -240,7 +244,6 @@ public:
     void put_byte(std::byte value) noexcept {
         if (this->failure == errc::ok && this->room_used < this->room_size) {
             this->room[this->room_used++] = value;
-            ++this->produced;
             return;
         }
         this->put_overflowing(std::span<const std::byte> { &value, 1 });
@@ -258,7 +261,6 @@ public:
         if (this->failure == errc::ok && Width <= this->room_size - this->room_used) {
             std::memcpy(this->room + this->room_used, text.data(), Width);
             this->room_used += Width;
-            this->produced += Width;
             return;
         }
         this->put_overflowing(std::as_bytes(std::span { text }));
@@ -270,6 +272,30 @@ public:
         std::array<char, Size - 1> text {};
         for (std::size_t index = 0; index < text.size(); ++index) text[index] = literal[index];
         this->put_constant(text);
+    }
+
+    /** The most compose() can be asked for: enough for any number as text, with room to spare. */
+    static constexpr std::size_t composed_capacity = 64;
+
+    /**
+     * Writes a value that is composed where it will be kept, rather than somewhere else and then
+     * copied in - a number, which a conversion writes out a digit at a time.
+     *
+     * `write` is handed room for `at_most` characters and returns how many it used. That room is
+     * the destination's own whenever it has that much left, which is nearly always; at the end
+     * of a chunk it is a scratch buffer instead, put in the ordinary way. So nothing is asked of
+     * a sink that it could not already do, and the common case loses a copy.
+     */
+    template<typename Write>
+    void compose(std::size_t at_most, Write write) noexcept {
+        if (this->failure == errc::ok && at_most <= this->room_size - this->room_used) {
+            const std::size_t used = write(reinterpret_cast<char *>(this->room + this->room_used));
+            this->room_used += used;
+            return;
+        }
+        char scratch[composed_capacity];
+        const std::size_t used = write(scratch);
+        this->put_text(std::string_view { scratch, used });
     }
 
     void put_text(std::string_view text) noexcept {
@@ -284,7 +310,6 @@ public:
             if (!this->renew_room(bytes.size())) return;
             std::memcpy(this->room + this->room_used, bytes.data(), bytes.size());
             this->room_used += bytes.size();
-            this->produced += bytes.size();
             return;
         }
 
@@ -295,11 +320,11 @@ public:
                 this->fail(errc::sink_failed);
                 return;
             }
+            this->settled += bytes.size();
         } else {
             std::memcpy(this->buffer, bytes.data(), bytes.size());
             this->room_used = bytes.size();
         }
-        this->produced += bytes.size();
     }
 
     /** The single check at the end: the bytes written, or the first failure. */
@@ -308,6 +333,7 @@ public:
             // Settled: hand back the unused tail and disarm, so the destructor does not commit
             // a second time and truncate what was just kept.
             this->keep_room(this->context, this->room_used);
+            this->settled += this->room_used;
             this->lend_room = nullptr;
             this->room_used = 0;
             this->room_size = 0;
@@ -315,8 +341,8 @@ public:
             this->flush();
         }
         if (this->depth != 0) this->fail(errc::unterminated_container);
-        if (!this->ok()) return std::unexpected { error { this->failure, this->produced } };
-        return this->produced;
+        if (!this->ok()) return std::unexpected { error { this->failure, this->size() } };
+        return this->size();
     }
 };
 

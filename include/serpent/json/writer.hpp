@@ -185,7 +185,7 @@ public:
             this->put_constant("null");
             return;
         }
-        this->put_text(detail::format_real(value).view());
+        this->compose(detail::real_text_capacity, [value](char *to) { return detail::write_real(to, value); });
     }
 
     void string(std::string_view text) noexcept {
@@ -270,9 +270,11 @@ private:
     template<typename T>
     void number(T value) noexcept {
         this->begin_value();
-        char buffer[24];
-        const auto converted = std::to_chars(buffer, buffer + sizeof(buffer), value);
-        this->put_text(std::string_view { buffer, static_cast<std::size_t>(converted.ptr - buffer) });
+        // Twenty characters hold any 64-bit integer, sign included.
+        constexpr std::size_t widest = 24;
+        this->compose(widest, [value](char *to) {
+            return static_cast<std::size_t>(std::to_chars(to, to + widest, value).ptr - to);
+        });
     }
 };
 

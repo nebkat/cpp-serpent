@@ -266,16 +266,32 @@ void sinks() {
                 "and never reallocated to get them");
     }
 
-    // A fixed buffer must latch overflow at every length short of the whole document.
-    for (std::size_t capacity = 0; capacity < reference.size(); ++capacity) {
-        std::vector<std::byte> storage(capacity);
-        span_sink out { storage };
-        basic_writer<reference_parity> target { out };
-        target.value(std::vector<int> { 1, 2, 3 });
-        check(!target.finish().has_value(), "a short fixed buffer fails");
-        check(out.overflowed(), "a short fixed buffer latches overflow");
-        check(out.size() <= capacity, "a short fixed buffer never writes past its end");
-    }
+    // A fixed buffer must latch overflow at every length short of the whole document - and must
+    // still hold what it accepted before that. Running out of room is one failure, not two: the
+    // room already filled stays filled. Swept over a short document and one long enough to be
+    // written in more than one piece, since what is at risk is the piece in hand when the next
+    // cannot be had.
+    const std::vector<std::string> words { "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta" };
+    const auto sweep = [](const auto &document, std::size_t longest_token) {
+        const auto whole = emit([&](auto &w) { w.value(document); });
+        for (std::size_t capacity = 0; capacity < whole.size(); ++capacity) {
+            std::vector<std::byte> storage(capacity);
+            span_sink out { storage };
+            basic_writer<reference_parity> target { out };
+            target.value(document);
+            check(!target.finish().has_value(), "a short fixed buffer fails");
+            check(out.overflowed(), "a short fixed buffer latches overflow");
+            check(out.size() <= capacity, "a short fixed buffer never writes past its end");
+            check(std::ranges::equal(out.written(), std::span { whole }.first(out.size())),
+                    "what it holds is the start of the document");
+            // Everything that fitted was kept: it stopped within one token of the end of the
+            // buffer, rather than somewhere back where an earlier piece began.
+            check(capacity - out.size() <= longest_token, "and it kept everything that fitted");
+        }
+    };
+    sweep(std::vector<int> { 1, 2, 3 }, 6);
+    sweep(words, 8);
+
     std::vector<std::byte> exact(reference.size());
     span_sink fitted { exact };
     basic_writer<reference_parity> fitting { fitted };
