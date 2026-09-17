@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -29,15 +30,27 @@ struct real_text {
     }
 
     constexpr void append(std::string_view text) noexcept {
-        for (const char value : text) this->push(value);
+        const auto count = std::min(text.size(), this->storage.size() - this->length);
+        std::copy_n(text.data(), count, this->storage.data() + this->length);
+        this->length += count;
     }
 
     constexpr void append(std::size_t count, char value) noexcept {
-        for (std::size_t index = 0; index < count; ++index) this->push(value);
+        count = std::min(count, this->storage.size() - this->length);
+        std::fill_n(this->storage.data() + this->length, count, value);
+        this->length += count;
     }
 };
 
-/** ECMAScript's number-to-string rules, plus a trailing .0 on a whole number. */
+/**
+ * ECMAScript's number-to-string rules, plus a trailing .0 on a whole number.
+ *
+ * std::to_chars finds the shortest digits that read back as the same double, which is the hard
+ * part, and in scientific form it hands them over as "d.ddde+XX": a first digit, the rest after
+ * a point, and where the point really belongs. What is left is to lay those same digits out the
+ * way the reference implementation does - written out in full between a millionth and 1e21, with
+ * an exponent beyond - which is a matter of copying two runs of digits to the right places.
+ */
 inline real_text format_real(double value) {
     real_text out;
 
@@ -53,57 +66,57 @@ inline real_text format_real(double value) {
         out.append(std::signbit(value) ? "-0.0" : "0.0");
         return out;
     }
+    if (value < 0) out.push('-');
 
-    const bool negative = value < 0;
-    if (negative) out.push('-');
-
-    char buffer[64];
-    const auto converted =
-            std::to_chars(buffer, buffer + sizeof(buffer), negative ? -value : value, std::chars_format::scientific);
+    char buffer[32];
+    const auto converted = std::to_chars(buffer, buffer + sizeof(buffer), std::abs(value), std::chars_format::scientific);
     const std::string_view text { buffer, static_cast<std::size_t>(converted.ptr - buffer) };
 
-    const auto exponent_at = text.find('e');
+    // "d.ddde+XX": one digit, then the rest behind a point that is not there when there are none.
+    const auto exponent_at = text.rfind('e');
+    const std::string_view first = text.substr(0, 1);
+    const std::string_view rest = exponent_at > 1 ? text.substr(2, exponent_at - 2) : std::string_view {};
+    const std::size_t significant = 1 + rest.size();
 
-    // The mantissa with its point taken out. A shortest round-trip double is at most 17 digits.
-    std::array<char, 24> digits {};
-    std::size_t significant = 0;
-    for (const char digit : text.substr(0, exponent_at)) {
-        if (digit != '.' && significant < digits.size()) digits[significant++] = digit;
-    }
-
+    const bool exponent_negative = text[exponent_at + 1] == '-';
     int exponent = 0;
-    // from_chars rejects a leading '+', which to_chars always writes for a positive exponent.
-    const auto tail = text.substr(exponent_at + (text[exponent_at + 1] == '+' ? 2 : 1));
-    std::from_chars(tail.data(), tail.data() + tail.size(), exponent);
+    for (const char digit : text.substr(exponent_at + 2)) exponent = exponent * 10 + (digit - '0');
+    if (exponent_negative) exponent = -exponent;
 
-    const std::string_view mantissa { digits.data(), significant };
-    const int point = exponent + 1; // where the decimal point falls among the digits
+    const int point = exponent + 1; // how many digits stand before the decimal point
 
-    if (static_cast<int>(significant) <= point && point <= 21) {
-        out.append(mantissa);
-        out.append(static_cast<std::size_t>(point) - significant, '0');
-        out.append(".0");
-    } else if (point > 0 && point <= 21) {
-        out.append(mantissa.substr(0, static_cast<std::size_t>(point)));
-        out.push('.');
-        out.append(mantissa.substr(static_cast<std::size_t>(point)));
-    } else if (point > -6 && point <= 0) {
-        out.append("0.");
-        out.append(static_cast<std::size_t>(-point), '0');
-        out.append(mantissa);
-    } else {
-        out.append(mantissa.substr(0, 1));
-        if (significant > 1) {
+    if (point > 21 || point <= -6) {
+        // Too large or too small to write out: the digits as they came, and the exponent without
+        // the leading zero to_chars pads it with.
+        out.append(first);
+        if (!rest.empty()) {
             out.push('.');
-            out.append(mantissa.substr(1));
+            out.append(rest);
         }
         out.push('e');
-        out.push(point > 0 ? '+' : '-');
-
-        char exponent_digits[8];
-        const auto rendered = std::to_chars(
-                exponent_digits, exponent_digits + sizeof(exponent_digits), point > 0 ? point - 1 : 1 - point);
-        out.append({ exponent_digits, static_cast<std::size_t>(rendered.ptr - exponent_digits) });
+        out.push(exponent_negative ? '-' : '+');
+        std::string_view magnitude = text.substr(exponent_at + 2);
+        if (magnitude.size() > 1 && magnitude.front() == '0') magnitude.remove_prefix(1);
+        out.append(magnitude);
+    } else if (point <= 0) {
+        // Smaller than one: "0.", the zeros the exponent stands for, then every digit.
+        out.append("0.");
+        out.append(static_cast<std::size_t>(-point), '0');
+        out.append(first);
+        out.append(rest);
+    } else if (static_cast<std::size_t>(point) >= significant) {
+        // A whole number: every digit, the zeros that pad it out to its size, and ".0".
+        out.append(first);
+        out.append(rest);
+        out.append(static_cast<std::size_t>(point) - significant, '0');
+        out.append(".0");
+    } else {
+        // The point falls among the digits, `point - 1` of the way into the rest.
+        const auto before = static_cast<std::size_t>(point) - 1;
+        out.append(first);
+        out.append(rest.substr(0, before));
+        out.push('.');
+        out.append(rest.substr(before));
     }
 
     return out;
