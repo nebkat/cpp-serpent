@@ -22,14 +22,21 @@ concept sink = requires(S &out, std::span<const std::byte> bytes) { out.write(by
 /**
  * A sink that can hand out its own memory to be written into.
  *
- * `lend(n)` returns somewhere with room for at least n bytes, or an empty span if it cannot;
- * `keep(n)` says how much of it was used. A sink over contiguous storage can do this, and it
- * saves the whole document being copied twice - once into the writer's batch and again into
- * the sink - and saves carrying that batch around at all.
+ * `lend(at_least, preferred)` returns somewhere to write, or an empty span if it cannot. It
+ * must never return fewer than `at_least` bytes, which is a single value that has to land in
+ * one piece; `preferred` is how much the caller would rather have, and a sink is free to stop
+ * short of it at a boundary of its own - the edge of a buffer, the end of the room a container
+ * already holds. `keep(n)` then says how much was used.
+ *
+ * Two numbers rather than one because only the sink knows where its storage ends: told a single
+ * figure it must read it as a demand, and a container sized exactly for its document would grow
+ * anyway to satisfy the last request. A sink over contiguous storage can do this, and it saves
+ * the whole document being copied twice - once into the writer's batch and again into the sink -
+ * and saves carrying that batch around at all.
  */
 template<typename S>
 concept lending_sink = sink<S> && requires(S &out, std::size_t bytes) {
-    { out.lend(bytes) } -> std::same_as<std::span<std::byte>>;
+    { out.lend(bytes, bytes) } -> std::same_as<std::span<std::byte>>;
     out.keep(bytes);
 };
 
@@ -74,8 +81,13 @@ public:
     }
 
     /** Grows the container and lends out the new room, so the writer fills it in place. */
-    [[nodiscard]] std::span<std::byte> lend(std::size_t bytes) {
+    [[nodiscard]] std::span<std::byte> lend(std::size_t at_least, std::size_t preferred) {
         this->lent = this->target->size();
+        // Room the container already holds costs nothing to hand over, so one reserved to the
+        // size of its document is filled without ever growing past what its caller asked for.
+        const auto spare = this->target->capacity() - this->lent;
+        auto bytes = std::max(at_least, std::min(preferred, spare));
+        if (bytes == 0) bytes = std::max(preferred, std::size_t { 1 });
         this->target->resize(this->lent + bytes);
         return { reinterpret_cast<std::byte *>(this->target->data()) + this->lent, bytes };
     }
@@ -98,6 +110,7 @@ container_sink(Container &) -> container_sink<Container>;
 class span_sink {
     std::span<std::byte> target {};
     std::size_t used = 0;
+    std::size_t lent = 0;
     bool overflow = false;
 
 public:
@@ -113,6 +126,32 @@ public:
         this->used += bytes.size();
         return true;
     }
+
+    /**
+     * Lends out what is left of the buffer, so a document is written straight into it.
+     *
+     * A fixed buffer knows its room exactly, which is the whole of what lend asks: it can always
+     * offer the remainder and never has to find more. Only a value that will not fit at all
+     * overflows, and that is the same condition write() latches.
+     */
+    [[nodiscard]] std::span<std::byte> lend(std::size_t at_least, std::size_t preferred) noexcept {
+        const auto spare = this->target.size() - this->used;
+        if (spare == 0 || spare < at_least) {
+            this->overflow = true;
+            return {};
+        }
+        this->lent = this->used;
+        return this->target.subspan(this->lent, std::min(preferred, spare));
+    }
+
+    /**
+     * Keeps that much of what was lent, and gives the rest back.
+     *
+     * Says where the used part ends rather than how much was added, so committing the same
+     * chunk twice - which a writer does when a lend fails and the failure is settled later -
+     * lands on the same answer both times.
+     */
+    void keep(std::size_t bytes) noexcept { this->used = this->lent + bytes; }
 
     [[nodiscard]] std::size_t size() const noexcept { return this->used; }
     [[nodiscard]] bool overflowed() const noexcept { return this->overflow; }

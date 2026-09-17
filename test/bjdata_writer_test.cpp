@@ -244,6 +244,28 @@ void typed_arrays() {
 void sinks() {
     const auto reference = emit([](auto &w) { w.value(std::vector<int> { 1, 2, 3 }); });
 
+    // Both sinks over contiguous storage are written into directly. Asserted rather than left
+    // to the bytes agreeing, because falling back to the copying path agrees on those too.
+    static_assert(lending_sink<span_sink>, "a fixed buffer is written into in place");
+    static_assert(lending_sink<container_sink<std::vector<std::byte>>>, "so is a container");
+
+    // A container holding room for its document must not grow: what it was given is enough,
+    // whatever size the writer would have preferred to ask for.
+    {
+        std::vector<std::byte> sized;
+        sized.reserve(reference.size());
+        const auto *const storage = sized.data();
+        const auto capacity = sized.capacity();
+        container_sink into { sized };
+        basic_writer<reference_parity> filling { into };
+        filling.value(std::vector<int> { 1, 2, 3 });
+        check(filling.finish().has_value(), "an exactly reserved container accepts the document");
+        check_equal(std::string_view { hex(sized) }, std::string_view { hex(reference) },
+                "an exactly reserved container holds the same bytes");
+        check(sized.capacity() == capacity && sized.data() == storage,
+                "and never reallocated to get them");
+    }
+
     // A fixed buffer must latch overflow at every length short of the whole document.
     for (std::size_t capacity = 0; capacity < reference.size(); ++capacity) {
         std::vector<std::byte> storage(capacity);

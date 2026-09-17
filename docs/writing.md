@@ -12,15 +12,31 @@ serpent::container_sink out { buffer };
 bjdata::writer writer { out };
 ```
 
-| Sink | For |
-|---|---|
-| `container_sink` | a growable container |
-| `span_sink` | a fixed buffer; latches overflow, never truncates |
-| `counting_sink` | sizing, or hashing in one pass |
-| `iterator_sink` | any output iterator |
-| `ostream_sink` | a `std::ostream` (its own header) |
+| Sink | For | |
+|---|---|---|
+| `container_sink` | a growable container | written into directly |
+| `span_sink` | a fixed buffer; latches overflow, never truncates | written into directly |
+| `counting_sink` | sizing, or hashing in one pass | |
+| `iterator_sink` | any output iterator | |
+| `ostream_sink` | a `std::ostream` (its own header) | |
 
 A bare lambda works too: `serpent::bjdata::writer w { callback };`
+
+### Sizing the destination
+
+A sink over contiguous storage is written into in place: the document is composed in the
+buffer that will hold it, rather than gathered elsewhere and copied in. A buffer that already
+has room for its document is therefore never grown, and never reallocates —
+
+```cpp
+std::vector<std::byte> buffer;
+buffer.reserve(serpent::bjdata::measure(value));   // one allocation, and no more
+serpent::container_sink out { buffer };
+```
+
+— which costs a second pass to measure, so it is worth it where peak memory matters rather than
+everywhere. A `span_sink` needs no such care: a fixed buffer already knows its extent, hands the
+writer whatever is left of it, and latches `overflowed()` only when a value will not fit at all.
 
 ## Writing
 
@@ -62,8 +78,9 @@ the open scope if you need this for one.
 ## `finish()` is what completes the document
 
 Writers emit at token granularity — a brace, a key, a separator — and the sink is reached
-through a type-erased call that cannot be inlined, so bytes are gathered into a small internal
-batch and handed over when it fills. That makes BJData encoding about 1.7x quicker, at the
+through a type-erased call that cannot be inlined, so bytes are gathered before being handed
+over - into the destination itself for the sinks above that allow it, and into a small internal
+batch for the rest. That makes BJData encoding about 1.7x quicker, at the
 cost of one rule:
 
 !!! warning "A sink does not hold the whole document until `finish()`"

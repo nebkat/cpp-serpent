@@ -63,7 +63,7 @@ class byte_emitter {
     std::size_t room_used = 0;
 
     /** Asks the sink for more room. Null when it does not lend, which selects the batch. */
-    std::span<std::byte> (*lend_room)(void *, std::size_t) = nullptr;
+    std::span<std::byte> (*lend_room)(void *, std::size_t, std::size_t) = nullptr;
     void (*keep_room)(void *, std::size_t) = nullptr;
 
     /**
@@ -80,7 +80,9 @@ class byte_emitter {
     bool renew_room(std::size_t at_least) noexcept {
         this->keep_room(this->context, this->room_used);
         this->next_chunk = std::min(this->next_chunk * 2, largest_chunk);
-        const auto next = this->lend_room(this->context, std::max(at_least, this->next_chunk));
+        // The floor and the preference go separately: what must land in one piece is not
+        // negotiable, the rest is, and the sink is the only one that knows its own storage.
+        const auto next = this->lend_room(this->context, at_least, this->next_chunk);
         if (next.empty()) {
             this->fail(errc::sink_failed);
             return false;
@@ -98,7 +100,7 @@ class byte_emitter {
             // fresh chunk to carry on in.
             this->keep_room(this->context, this->room_used);
             this->next_chunk = std::min(this->next_chunk * 2, largest_chunk);
-            const auto next = this->lend_room(this->context, this->next_chunk);
+            const auto next = this->lend_room(this->context, 0, this->next_chunk);
             this->room = next.data();
             this->room_size = next.size();
             this->room_used = 0;
@@ -163,9 +165,11 @@ public:
     })
     , context(std::addressof(out)) {
         if constexpr (lending_sink<S>) {
-            this->lend_room = [](void *target, std::size_t bytes) { return static_cast<S *>(target)->lend(bytes); };
+            this->lend_room = [](void *target, std::size_t at_least, std::size_t preferred) {
+                return static_cast<S *>(target)->lend(at_least, preferred);
+            };
             this->keep_room = [](void *target, std::size_t bytes) { static_cast<S *>(target)->keep(bytes); };
-            const auto first = out.lend(first_chunk);
+            const auto first = out.lend(0, first_chunk);
             this->room = first.data();
             this->room_size = first.size();
         } else {
