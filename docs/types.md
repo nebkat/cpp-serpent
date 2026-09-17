@@ -1,34 +1,36 @@
-# Your types
+# Types and conversions
 
-Every form below ends up at the same place, so pick the shortest one that fits. The question
-that decides it is usually whether you own the type: if you do, annotate it and let the
-compiler do the rest; if you do not, name the fields yourself.
+Most types need nothing written for them at all. Those that do are usually described rather
+than converted — an annotation, or a `describe` specialization for a type from someone else's
+header, both covered under [Annotations](reflection.md). This page is the rest: what serpent
+already knows, and what to write when neither of those fits.
 
-## Types you own
+## What works with no code at all
 
-### Let the compiler name the fields
+Arithmetic types, `bool`, `std::string` and string-likes, `std::optional`, `std::variant`, any
+range, any keyed container with string keys, ranges of `std::byte` (as binary), and enums — which go out
+as their underlying number unless they
+[say otherwise](reflection.md#enumerations). None of these need opting in, in either direction.
 
-Where the compiler supports reflection, it already knows the field names and there is nothing
-else to write:
+## Describing a type is usually enough
+
+Naming a type's fields is [Annotations](reflection.md), whether or not you declared the type:
+an annotation where you can attach one, and `serpent::describe<T>` where you cannot. Both give
+the same keys, the same renaming and skipping, the same strictness, in every format and both
+directions.
 
 ```cpp
-struct [[= serpent::serializable {}]] point {
-    int x = 0;
-    int y = 0;
+struct [[= serpent::serializable {}]] point { int x, y; };          // a type you declared
+
+template<> struct serpent::describe<foreign_point> {                // one you did not
+    static constexpr serpent::naming naming { serpent::naming_style::snake_case };
 };
 ```
 
-This is the form to reach for, and the only one that also gives you
-[discriminated variants](reflection.md#naming-a-type-on-the-wire). It needs GCC 16 with
-`-freflection`.
+Reach for a conversion below only when the *body* has to be yours — because the two directions
+disagree, because the type is not an object at all, or because your compiler has no reflection.
 
-A header compiled by more than one toolchain needs care: the annotation does not degrade to
-nothing on a compiler that cannot parse it, it fails to compile. Carry both forms behind
-`#if SERPENT_HAS_REFLECTION`, as `example/reflection.cpp` does.
-
-The forms below exist because most compilers cannot do this yet — GCC 14 and 15 are what
-the embedded toolchains ship, and neither has it. They are a compatibility path, not a
-preference: reach for them when your compiler leaves you no choice.
+## When the conversion has to be yours
 
 ### One function, both directions
 
@@ -84,36 +86,10 @@ struct connection {
     `std::vector<std::uint16_t>` into a typed array and copy it whole; JSON writes numbers.
     Neither your type nor its author needs to know.
 
-## Types you do not own
-
-You cannot annotate a type from someone else's header, and you cannot add a hidden friend to
-it. Three ways in, shortest first.
-
-### Describe it from outside
-
-`serpent::describe<T>` is the annotation block's counterpart for a type you did not declare.
-Specializing it is the opt-in, and it may carry the naming rule the annotation would have:
-
-```cpp
-template<>
-struct serpent::describe<foreign_reading> {
-    static constexpr serpent::naming naming { serpent::naming_style::snake_case };
-};
-```
-
-```json
-{"sensor_id":4,"degrees_celsius":21.5}
-```
-
-Every field is included, so this fits a type whose fields you want as they are. When one needs
-renaming or keeping off the wire, the same description carries a `members` table that takes the
-per-member annotations — see [a type you cannot
-annotate](reflection.md#members-that-need-to-say-more). Reach for a form below only when the
-conversion itself has to be yours.
-
 ### The macro, beside the type
 
-Name the members yourself, in the type's own namespace:
+Names the members from outside the type, in its own namespace, for a type you cannot annotate
+on a toolchain that cannot reflect — where `describe` is unavailable for the same reason:
 
 ```cpp
 SERPENT_DEFINE_TYPE_NON_INTRUSIVE(point, x, y)
@@ -186,13 +162,6 @@ The one exception is a `serializer<T>` specialization. It replaces the dispatch 
 rather than competing inside it, so it may coexist with an annotation and it wins — which is
 what specializing it is for, and the only way to override a type whose definition you cannot
 touch.
-
-## What works out of the box
-
-Arithmetic types, `bool`, `std::string` and string-likes, `std::optional`, `std::variant`, any
-range, any keyed container with string keys, ranges of `std::byte` (as binary), and enums — which go out
-as their underlying number unless they
-[say otherwise](reflection.md#enumerations). None of these need opting in, in either direction.
 
 ## A field that can hold one of several types
 

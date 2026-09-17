@@ -61,7 +61,7 @@ See [Reading](reading.md).
 | Header only | C++23, no dependencies beyond [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
 | Allocates | only where you ask it to; reading allocates nothing |
 | Without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
-| Types you do not own | described from outside, with no conversion code — [here](types.md) |
+| Types you do not own | described from outside, with no conversion code — [here](reflection.md#a-type-you-cannot-annotate) |
 | Output | byte-identical to the reference implementation, in both formats |
 
 !!! note "Reflection needs GCC 16.1 with `-freflection`"
@@ -78,7 +78,7 @@ See [Reading](reading.md).
 
 - :material-rocket-launch: **[Getting started](getting-started.md)** — build it, run something
 - :material-tag-text: **[Annotations](reflection.md)** — everything a type can say about itself
-- :material-package-variant: **[Types you do not own](types.md)** — SDK structs and enums, from outside
+- :material-package-variant: **[Types and conversions](types.md)** — what works already, and writing your own
 - :material-book-open-variant: **[Reading](reading.md)** and **[Writing](writing.md)** — the API
 - :material-file-tree: **[A document as a tree](value.md)** — when the shape is decided at run time
 - :material-speedometer: **[Benchmarks](benchmarks.md)** — against four other libraries, wins and losses

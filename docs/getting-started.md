@@ -43,7 +43,7 @@ int main() {
 
 1.  Needs a compiler that can enumerate the fields for you: GCC 16 with `-freflection`. On any
     other, drop the annotation and write a `json_convert` naming the three fields — see
-    [Your types](types.md#types-you-own). Nothing else in this program changes. Note that the
+    [Types and conversions](types.md#one-function-both-directions). Nothing else in this program changes. Note that the
     annotation is a *parse error* on a compiler that does not know it rather than something
     quietly ignored, so a header built by two toolchains needs both forms behind
     `#if SERPENT_HAS_REFLECTION`.

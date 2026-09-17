@@ -464,11 +464,8 @@ is caught.
 ## Reflection and a hand-written conversion are exclusive
 
 Annotating a type that already has a `json_convert`, or a `to_json` / `from_json` pair, is a
-compile error. Preferring one silently would leave the annotation on the type doing nothing,
-so it is diagnosed instead. Replace one form with the other in the same change.
-
-A `serializer<T>` specialization is the exception — it replaces the dispatch outright, so it
-may sit alongside an annotation and it wins.
+compile error rather than a silent ranking — see [only one at a
+time](types.md#only-one-at-a-time).
 
 ## Why opting in is deliberate
 

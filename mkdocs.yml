@@ -53,7 +53,7 @@ nav:
   - Getting started: getting-started.md
   - Describing your types:
       - Annotations: reflection.md
-      - Types you do not own: types.md
+      - Types and conversions: types.md
   - Using it:
       - Reading: reading.md
       - Writing: writing.md
