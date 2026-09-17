@@ -12,6 +12,7 @@
 #include <serpent/concepts.hpp>
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
+#include <serpent/json/direct.hpp>
 #include <serpent/json/scan.hpp>
 #include <serpent/kind.hpp>
 #include <serpent/serializer.hpp>
@@ -166,70 +167,23 @@ public:
 
     // ---------------- scalars ----------------
 
-    [[nodiscard]] std::optional<bool> as_bool() const noexcept {
-        if (this->type() != kind::boolean) return std::nullopt;
-        auto scan = this->scan();
-        scanner::scan_literal(scan, *this->first == 't' ? "true" : "false");
-        if (!scan.ok()) return std::nullopt;
-        this->note_end(scan.position);
-        return *this->first == 't';
-    }
+    [[nodiscard]] std::optional<bool> as_bool() const noexcept { return this->read_as<bool>(); }
 
     template<std::integral T>
     [[nodiscard]] std::optional<T> as_int() const noexcept {
-        // As above, with the one thing the grammar scan does not settle: a real is a number and
-        // would convert, so the text is checked for the point or exponent that makes it one.
-        // That is the same walk number_kind() does, done here on text already in hand.
-        const auto text = this->number_text();
-        if (text.empty() || text.find_first_of(".eE") != std::string_view::npos) return std::nullopt;
-
-        if (text.front() == '-') {
-            std::int64_t value = 0;
-            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (parsed.ec != std::errc {} || !std::in_range<T>(value)) return std::nullopt;
-            return static_cast<T>(value);
-        }
-        std::uint64_t value = 0;
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-        if (parsed.ec != std::errc {} || !std::in_range<T>(value)) return std::nullopt;
-        return static_cast<T>(value);
+        return this->read_as<T>();
     }
 
     template<std::floating_point T>
     [[nodiscard]] std::optional<T> as_float() const noexcept {
-        // One grammar scan and one conversion. is_number() would walk the digits to answer a
-        // question the conversion answers anyway, and it answers it by telling an integer from
-        // a real - which this does not care about and which costs a second walk to decide.
-        const auto text = this->number_text();
-        if (text.empty()) return std::nullopt;
-
-        double value = 0;
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-        // out_of_range means the literal overflows a double; JSON has no infinity to mean.
-        if (parsed.ec != std::errc {}) return std::nullopt;
-        return static_cast<T>(value);
+        return this->read_as<T>();
     }
 
     /**
      * Always copies. There is no borrow-when-unescaped path, deliberately - a string read out
      * of a document owns its bytes, whatever the document does next.
-     *
-     * The copy is not always the same copy. The scan that found the closing quote already knows
-     * whether anything between the quotes needs decoding, and most strings need nothing, so
-     * those are taken whole; only a string that actually carries an escape is walked a character
-     * at a time to resolve it.
      */
-    [[nodiscard]] std::optional<std::string> as_string() const noexcept {
-        const auto text = this->scanned_string();
-        if (!text) return std::nullopt;
-
-        if (!text->escaped) return std::string { text->contents };
-
-        std::string decoded;
-        decoded.reserve(scanner::decoded_length(*text));
-        scanner::decode_string(*text, [&](char value) { decoded.push_back(value); });
-        return decoded;
-    }
+    [[nodiscard]] std::optional<std::string> as_string() const { return this->read_as<std::string>(); }
 
     bool read_string_into(std::string &destination) const {
         const auto text = this->scanned_string();
@@ -362,6 +316,22 @@ private:
     }
 
     /**
+     * Reads this value as a type known in advance, and says where it ended.
+     *
+     * The conversions themselves are direct::read, shared with the readers generated for
+     * described types so that the two cannot come to disagree about what a value is.
+     */
+    template<typename T>
+    [[nodiscard]] std::optional<T> read_as() const {
+        if (this->first == nullptr) return std::nullopt;
+        auto scan = this->scan();
+        T value {};
+        if (!direct::read(scan, value)) return std::nullopt;
+        this->note_end(scan.position);
+        return value;
+    }
+
+    /**
      * Records where this value ends, so that stepping to the next need not scan it again.
      *
      * A container says this when a walk of it reaches the end. A scalar knows it as soon as it
@@ -423,6 +393,25 @@ inline void close_containers(cursor &scan, int open) noexcept {
 
 } // namespace scanner
 
+/**
+ * Moves a cursor standing at the start of a value to just past it.
+ *
+ * By scanning it - unless something has already walked the value and said how far it got, in
+ * which case only what that walk left unread is scanned, which for a value read to its end is
+ * nothing at all. This is the one place a memo is consulted, whoever is stepping.
+ */
+inline void step_over_value(scanner::cursor &scan, std::string_view document, const walk_memo *memo) noexcept {
+    const char *const start = scan.position;
+    if (memo != nullptr && memo->describes(document.data(), start)) {
+        scan.position = memo->reached;
+        if (memo->open > 0) {
+            scanner::close_containers(scan, memo->open);
+            return;
+        }
+    }
+    if (scan.position == start) scanner::skip_value(scan, 1);
+}
+
 /** Forward iterator over the elements of an array. */
 class array_iterator {
 public:
@@ -465,17 +454,7 @@ public:
         if (this->exhausted) return *this;
 
         scanner::cursor scan { this->source, this->cursor };
-        int open = 0;
-        if (this->memo != nullptr && this->memo->describes(this->source.data(), this->cursor)) {
-            // Something walked into this element. Finish what is left of it rather than all.
-            scan.position = this->memo->reached;
-            open = this->memo->open;
-        }
-        if (open > 0) {
-            scanner::close_containers(scan, open);
-        } else if (scan.position == this->cursor) {
-            scanner::skip_value(scan, 1);
-        }
+        step_over_value(scan, this->source, this->memo);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
             this->exhausted = true;
@@ -577,20 +556,7 @@ public:
         scan.advance(1);
         scanner::skip_whitespace(scan);
 
-        // The value may have been walked by a loop of its own; finish what is left of it.
-        const char *const value_at = scan.available(1) ? scan.position : nullptr;
-        int open = 0;
-        if (this->memo != nullptr && value_at != nullptr && this->memo->describes(this->source.data(), value_at)) {
-            scan.position = this->memo->reached;
-            open = this->memo->open;
-        }
-        if (open > 0) {
-            scanner::close_containers(scan, open);
-        } else if (scan.position == value_at) {
-            // Nothing had been walked, or it was walked to the end: only skip if we are still
-            // standing at the start of it.
-            scanner::skip_value(scan, 1);
-        }
+        step_over_value(scan, this->source, this->memo);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
             this->exhausted = true;

@@ -285,6 +285,20 @@ constexpr void scan_literal(cursor &scan, std::string_view word) noexcept {
     scan.advance(word.size());
 }
 
+/**
+ * Steps over `text` if that is exactly what stands at the cursor, and says whether it did.
+ *
+ * The answering sibling of scan_literal: not finding the text is an answer rather than a failure,
+ * and the cursor is left where it was. Meant for text known when the program is compiled - a
+ * literal, a key and its punctuation - where the comparison is of a width the compiler can see.
+ */
+[[nodiscard]] constexpr bool accept(cursor &scan, std::string_view text) noexcept {
+    if (!scan.available(text.size())) return false;
+    if (std::string_view { scan.position, text.size() } != text) return false;
+    scan.advance(text.size());
+    return true;
+}
+
 /** Appends one Unicode code point as UTF-8. */
 template<typename Append>
 constexpr void append_utf8(std::uint32_t code, Append &append) noexcept {
