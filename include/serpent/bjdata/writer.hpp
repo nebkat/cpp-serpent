@@ -8,6 +8,7 @@
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <concepts>
 #include <limits>
@@ -20,6 +21,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace serpent::bjdata {
 
@@ -207,12 +209,103 @@ public:
     }
 
     /** A length or count: its own compact marker, then its value. Never a bare width. */
-    void put_length(std::uint64_t length) noexcept {
-        const auto kind = length > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-                ? integer_marker(length)
-                : integer_marker(static_cast<std::int64_t>(length), static_cast<std::int64_t>(length));
-        this->put_marker(kind);
-        this->put_integer_payload(kind, length);
+    void put_length(std::uint64_t length) noexcept { this->marked(length_form(length)); }
+
+    // ---------------- a scalar as its marker and payload ----------------
+
+    /** A marker, and the payload it announces as the low bytes of one word. */
+    struct marked_scalar {
+        marker kind;
+        std::uint64_t payload;
+    };
+
+    /**
+     * The one place that says which marker a value goes under: as this writer's options have
+     * it, the narrowest that holds it, or the one its type dictates.
+     *
+     * Taken as emit_value hands values over - a signed integer as the widest signed one, any
+     * other as the widest unsigned, a real as a double - so a member written as part of a run
+     * and one written on its own cannot come out differently.
+     */
+    template<typename T>
+        requires std::integral<T> || std::floating_point<T>
+    [[nodiscard]] static constexpr marked_scalar marked_form(T value) noexcept {
+        if constexpr (std::same_as<T, bool>) {
+            return { value ? marker::boolean_true : marker::boolean_false, 0 };
+        } else if constexpr (std::floating_point<T>) {
+            const auto wide = static_cast<double>(value);
+            switch (Options.compact_types ? float_marker(wide, Options.float16) : marker::float64) {
+            case marker::float16: return { marker::float16, encode_float16(static_cast<float>(wide)) };
+            case marker::float32: return { marker::float32, std::bit_cast<std::uint32_t>(static_cast<float>(wide)) };
+            default: return { marker::float64, std::bit_cast<std::uint64_t>(wide) };
+            }
+        } else if constexpr (std::is_signed_v<T>) {
+            const auto wide = static_cast<std::int64_t>(value);
+            return { Options.compact_types ? integer_marker(wide, wide) : marker::int64,
+                static_cast<std::uint64_t>(wide) };
+        } else {
+            const auto wide = static_cast<std::uint64_t>(value);
+            if (!Options.compact_types) return { marker::uint64, wide };
+            const bool beyond_signed = wide > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+            return { beyond_signed ? integer_marker(wide)
+                                   : integer_marker(static_cast<std::int64_t>(wide), static_cast<std::int64_t>(wide)),
+                wide };
+        }
+    }
+
+    /** A length is always under the narrowest marker that holds it, whatever the options say of values. */
+    [[nodiscard]] static constexpr marked_scalar length_form(std::uint64_t length) noexcept {
+        const bool beyond_signed = length > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        return { beyond_signed ? integer_marker(length)
+                               : integer_marker(static_cast<std::int64_t>(length), static_cast<std::int64_t>(length)),
+            length };
+    }
+
+    /** The most write_marked() stores: a marker and the eight bytes of the widest payload. */
+    static constexpr std::size_t widest_marked = 1 + sizeof(std::uint64_t);
+
+    /**
+     * A marker and its payload, written at a pointer with room for widest_marked bytes.
+     *
+     * The payload goes out as all eight bytes of the word, and as many of them are kept as the
+     * marker says: in little-endian order the low bytes of a wide integer are the narrow one, so
+     * there is nothing to choose between but how far to advance.
+     */
+    [[nodiscard]] static char *write_marked(char *to, marked_scalar scalar) noexcept {
+        const nonstd::unaligned_little<std::uint64_t> stored { scalar.payload };
+        to[0] = static_cast<char>(scalar.kind);
+        std::memcpy(to + 1, stored.data(), sizeof(std::uint64_t));
+        return to + 1 + payload_width(scalar.kind);
+    }
+
+    void marked(marked_scalar scalar) noexcept {
+        if (char *const to = this->room_for(widest_marked)) {
+            this->used(static_cast<std::size_t>(write_marked(to, scalar) - to));
+            return;
+        }
+        // Not nine bytes to be had in one piece - the end of a fixed buffer, where there may
+        // still be room for the bytes that are kept - so those and no more, the ordinary way.
+        std::array<char, widest_marked> piece {};
+        const char *const end = write_marked(piece.data(), scalar);
+        this->put_text(std::string_view { piece.data(), end });
+    }
+
+    /**
+     * Writes whole members of the object that is open - keys and values - into room claimed
+     * once for all of them, where each would otherwise ask for its own.
+     *
+     * `write` is handed room for `at_most` bytes and returns how many it used; what it writes
+     * has to be exactly what key() and value() would have. False where the destination has not
+     * that much room in one piece, and nothing has been written: the members are then written
+     * the usual way, one at a time.
+     */
+    template<typename Write>
+    [[nodiscard]] bool compose_members(std::size_t at_most, Write write) noexcept {
+        if (!this->inside_object()) return false;
+        char *const to = this->room_for(at_most);
+        if (to == nullptr) return false;
+        this->used(write(to));
+        return true;
     }
 
     // ---------------- scalars ----------------
@@ -226,30 +319,19 @@ public:
         this->put_raw(static_cast<std::uint8_t>(value));
     }
 
-    void integer(std::int64_t value) noexcept {
-        const auto kind = Options.compact_types ? integer_marker(value, value) : marker::int64;
-        this->put_marker(kind);
-        this->put_integer_payload(kind, static_cast<std::uint64_t>(value));
-    }
-
-    void integer(std::uint64_t value) noexcept {
-        const auto kind = !Options.compact_types ? marker::uint64
-                : value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-                ? integer_marker(value)
-                : integer_marker(static_cast<std::int64_t>(value), static_cast<std::int64_t>(value));
-        this->put_marker(kind);
-        this->put_integer_payload(kind, value);
-    }
-
-    void real(double value) noexcept {
-        const auto kind = Options.compact_types ? float_marker(value, Options.float16) : marker::float64;
-        this->put_marker(kind);
-        this->put_float_payload(kind, value);
-    }
+    void integer(std::int64_t value) noexcept { this->marked(marked_form(value)); }
+    void integer(std::uint64_t value) noexcept { this->marked(marked_form(value)); }
+    void real(double value) noexcept { this->marked(marked_form(value)); }
 
     void string(std::string_view text) noexcept {
-        this->put_marker(marker::string);
-        this->put_length(text.size());
+        // The marker and the length as one piece where there is room, which there nearly always is.
+        if (char *const to = this->room_for(1 + widest_marked)) {
+            to[0] = static_cast<char>(marker::string);
+            this->used(static_cast<std::size_t>(write_marked(to + 1, length_form(text.size())) - to));
+        } else {
+            this->put_marker(marker::string);
+            this->put_length(text.size());
+        }
         this->put_text(text);
     }
 
@@ -290,7 +372,7 @@ public:
             this->fail(errc::key_outside_object);
             return;
         }
-        this->put(detail::encoded_key<Name>);
+        this->put_constant(detail::encoded_key<Name>);
     }
 
     [[nodiscard]] array_scope<Options> array() noexcept;

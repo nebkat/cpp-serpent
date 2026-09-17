@@ -256,8 +256,9 @@ public:
      * The same as put(), with the width in the type so that the copy is of a fixed size wherever
      * this ends up, rather than only where put() happens to be inlined. See constant_text.hpp.
      */
-    template<std::size_t Width>
-    void put_constant(const std::array<char, Width> &text) noexcept {
+    template<typename Character, std::size_t Width>
+        requires (sizeof(Character) == 1)
+    void put_constant(const std::array<Character, Width> &text) noexcept {
         if (this->failure == errc::ok && Width <= this->room_size - this->room_used) {
             std::memcpy(this->room + this->room_used, text.data(), Width);
             this->room_used += Width;

@@ -13,6 +13,9 @@
 
 #include <serpent/bjdata/detail.hpp>
 #include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/writer.hpp>
+#include <serpent/config.hpp>
+#include <serpent/member_runs.hpp>
 #include <serpent/reflect.hpp>
 #include <serpent/serializer.hpp>
 
@@ -275,6 +278,120 @@ std::optional<bool> read_sequence(const view &source, C &out) {
     }
     return true;
 }
+
+#if SERPENT_BOUNDED_OBJECT_WRITE
+
+/** The most bytes one member can take - key, marker and payload - or zero if it has no limit. */
+template<typename T, std::meta::info Member>
+struct widest_member {
+    static constexpr std::size_t value = [] () -> std::size_t {
+        if (serpent::detail::has_annotation<skip>(Member)) return 0;
+        if (serpent::detail::annotation_of<tagged>(Member).has_value()) return 0;
+
+        using field = std::remove_cvref_t<typename [:std::meta::type_of(Member):]>;
+        if (!std::integral<field> && !std::floating_point<field>) return 0;
+
+        static constexpr std::string_view name = serpent::detail::field_key<T, Member>();
+        return detail::encoded_key<name>.size() + plain_writer::widest_marked;
+    }();
+};
+
+/**
+ * Writes one object of a described type.
+ *
+ * A boolean or a number is a marker and at most eight bytes, and its key is a constant, so a run
+ * of such members has a longest possible length: room for the run is claimed once and keys and
+ * values are stored into it one after another, where each key and each value would otherwise
+ * ask for room of its own. Any other member - a string, a container, another described type -
+ * is written the usual way, and the run ends before it and another may begin after. Which
+ * members are in which run is settled when this is compiled - see member_runs.hpp.
+ */
+template<writer_options Options, typename T>
+class object_writer {
+    using runs = serpent::detail::member_runs<T, widest_member>;
+    using writer = basic_writer<Options>;
+
+    writer &out;
+    const T &value;
+
+public:
+    object_writer(writer &out, const T &value) noexcept : out(out), value(value) {}
+
+    void write_members() {
+        template for (constexpr auto member : runs::members) {
+            constexpr std::size_t position = runs::position_of(member);
+
+            if constexpr (serpent::detail::has_annotation<skip>(member)) {
+                // Not written at all.
+            } else if constexpr (runs::widest[position] == 0) {
+                this->write_member<member>();
+            } else if constexpr (runs::begins_run(position)) {
+                // Writes every member of the run, so the rest of it have nothing left to do here.
+                if (!this->write_run<position, runs::run_end(position)>())
+                    this->write_run_one_at_a_time<position, runs::run_end(position)>();
+            }
+        }
+    }
+
+private:
+    /** One member, the usual way: its key, then whatever writes its value. */
+    template<std::meta::info Member>
+    void write_member() {
+        static constexpr std::string_view name = serpent::detail::field_key<T, Member>();
+        const auto &field = this->value.[:Member:];
+
+        this->out.template key_literal<name>();
+        if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
+            using declared = [:std::meta::type_of(Member):];
+            static_assert(serpent::detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
+            this->out.value(make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field));
+        } else {
+            this->out.value(field);
+        }
+    }
+
+    /** The members from `First` up to `Last` stored one after another, if room for them can be had. */
+    template<std::size_t First, std::size_t Last>
+    [[nodiscard]] bool write_run() {
+        return this->out.compose_members(runs::widest_run(First, Last), [this](char *const to) {
+            char *at = to;
+            template for (constexpr auto member : runs::members) {
+                if constexpr (runs::within(member, First, Last)) {
+                    static constexpr std::string_view name = serpent::detail::field_key<T, member>();
+                    static constexpr auto &key = detail::encoded_key<name>;
+                    std::memcpy(at, key.data(), key.size());
+                    at = writer::write_marked(at + key.size(), writer::marked_form(this->value.[:member:]));
+                }
+            }
+            return static_cast<std::size_t>(at - to);
+        });
+    }
+
+    /** The same members when that room could not be had: each the usual way. */
+    template<std::size_t First, std::size_t Last>
+    void write_run_one_at_a_time() {
+        template for (constexpr auto member : runs::members) {
+            if constexpr (runs::within(member, First, Last)) this->write_member<member>();
+        }
+    }
+};
+
+/**
+ * Writes a described type as a BJData object.
+ *
+ * Found by ordinary lookup from serializer<T>::write, as read_reflected is, so that a writer with
+ * no such function does not take this path.
+ */
+template<writer_options Options, reflected_type T>
+    requires (!serpent::detail::is_discriminated<T>())
+void write_reflected(basic_writer<Options> &out, const T &value) {
+    static_assert(serpent::detail::keys_are_distinct<T>(), serpent::detail::duplicate_key_message<T>());
+    static_assert(serpent::detail::annotations_make_sense<T>(), serpent::detail::annotation_complaint<T>());
+    const auto scope = out.object();
+    object_writer<Options, T> { out, value }.write_members();
+}
+
+#endif // SERPENT_BOUNDED_OBJECT_WRITE
 
 #endif
 
