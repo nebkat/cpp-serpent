@@ -82,67 +82,6 @@ bool read_reflected(const reader &source, T &value) {
             std::define_static_array(serpent::detail::members_including_bases<type>()).size();
     static_assert(member_count <= 64, "a type with more than 64 members needs a wider seen mask");
 
-    static constexpr std::size_t slots = std::bit_ceil(member_count * 2 + 1);
-    static constexpr std::size_t slot_mask = slots - 1;
-    static constexpr std::uint8_t no_member = 0xFF;
-
-    /** Which member owns each slot, by open addressing: a collision takes the next free one. */
-    static constexpr auto slot_owner = [] {
-        std::array<std::uint8_t, slots> owners {};
-        for (auto &owner : owners) owner = no_member;
-        std::size_t position = 0;
-        template for (constexpr auto member :
-                std::define_static_array(serpent::detail::members_including_bases<type>())) {
-            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
-                constexpr std::string_view name = serpent::detail::field_key<type, member>();
-                std::size_t slot = key_slot(name, slot_mask);
-                while (owners[slot] != no_member) slot = (slot + 1) & slot_mask;
-                owners[slot] = static_cast<std::uint8_t>(position);
-            }
-            ++position;
-        }
-        return owners;
-    }();
-
-    /** Each member's key, so a slot can be confirmed rather than assumed. */
-    static constexpr auto member_key = [] {
-        std::array<std::string_view, member_count> keys {};
-        std::size_t position = 0;
-        template for (constexpr auto member :
-                std::define_static_array(serpent::detail::members_including_bases<type>())) {
-            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
-                keys[position] = serpent::detail::field_key<type, member>();
-            }
-            ++position;
-        }
-        return keys;
-    }();
-
-    /** Reading one member, by index, so a key found in one step is acted on in one more. */
-    using filler = bool (*)(const reader &, type &);
-    static constexpr auto fillers = [] {
-        std::array<filler, member_count> table {};
-        std::size_t position = 0;
-        template for (constexpr auto member :
-                std::define_static_array(serpent::detail::members_including_bases<type>())) {
-            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
-                // A tagged variant is read through the tag that names its alternatives, as the
-                // member walk does it; reading it plainly would go back to trying each
-                // alternative in turn, which is what the tag exists to stop.
-                if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(member);
-                        tag.has_value()) {
-                    using declared = [:std::meta::type_of(member):];
-                    table[position] = &fill_tagged_member<type, member,
-                            serpent::detail::resolved_tag<declared, *tag>()>;
-                } else {
-                    table[position] = &fill_member<type, member>;
-                }
-            }
-            ++position;
-        }
-        return table;
-    }();
-
     static constexpr std::uint64_t required_mask = [] {
         std::uint64_t mask = 0;
         std::size_t position = 0;
@@ -159,38 +98,50 @@ bool read_reflected(const reader &source, T &value) {
 
     std::uint64_t seen = 0;
     bool complete = true;
-    // Where the next key is expected, which is where it is when the document was written from
-    // this type: one comparison then, and the slot lookup only when that guess is wrong.
-    std::size_t expected = 0;
+    // Built once rather than per entry: an escaped key is rare, and constructing somewhere to
+    // put one for every member of every object is not free even when it stays empty.
+    std::string decoded;
 
     for (const auto entry : source.items()) {
-        // An escaped key is rare and cannot be compared in place, so it is decoded only then.
-        std::string decoded;
         std::string_view name = entry.key.contents;
         if (entry.key.escaped) [[unlikely]] {
             decoded = entry.key_string();
             name = decoded;
         }
 
-        // A document written from this type arrives in this order, and so does one written by
-        // anyone following the same schema. Left unannotated on purpose: a branch this
-        // consistent is what a predictor is best at, and saying so measured no different.
-        if (expected < member_count && member_key[expected] == name) {
-            seen |= std::uint64_t { 1 } << expected;
-            if (!fillers[expected](entry.value, value)) complete = false;
-            ++expected;
-            continue;
-        }
-
-        for (std::size_t slot = key_slot(name, slot_mask);; slot = (slot + 1) & slot_mask) {
-            const auto owner = slot_owner[slot];
-            if (owner == no_member) break; // a key this type does not name
-            if (member_key[owner] == name) {
-                seen |= std::uint64_t { 1 } << owner;
-                if (!fillers[owner](entry.value, value)) complete = false;
-                expected = owner + std::size_t { 1 };
-                break;
+        // Each name is compared at the width the compiler knows it to be, which is what makes
+        // this worth unrolling: a length test rejects almost every member without looking at a
+        // byte, and the comparison that survives it is a fixed-size one the compiler emits
+        // inline rather than a call to memcmp with a length it cannot see. Reading the member is
+        // inline here too, for the same reason - through a table it would be a call that cannot
+        // be.
+        //
+        // The document is still walked once and each key offered to the type once, so a document
+        // whose keys arrive in another order costs no more than this one does.
+        bool matched = false;
+        std::size_t position = 0;
+        template for (constexpr auto member :
+                std::define_static_array(serpent::detail::members_including_bases<type>())) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
+                static constexpr std::string_view key = serpent::detail::field_key<type, member>();
+                if (!matched && name.size() == key.size()
+                        && __builtin_memcmp(name.data(), key.data(), key.size()) == 0) {
+                    matched = true;
+                    seen |= std::uint64_t { 1 } << position;
+                    if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(member);
+                            tag.has_value()) {
+                        // A tagged variant is read through the tag that names its alternatives;
+                        // reading it plainly would go back to trying each alternative in turn.
+                        using declared = [:std::meta::type_of(member):];
+                        auto wrapper = make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(
+                                value.[:member:]);
+                        if (!read_into(entry.value, wrapper)) complete = false;
+                    } else {
+                        if (!read_into(entry.value, value.[:member:])) complete = false;
+                    }
+                }
             }
+            ++position;
         }
     }
 
