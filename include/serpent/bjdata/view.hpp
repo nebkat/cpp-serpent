@@ -40,6 +40,50 @@ class member_range;
  * (at, get, string, binary, span) wrap those and raise instead, so both styles run over the
  * same bytes and the same single parsing implementation.
  */
+/**
+ * How far a traversal got into which value of which document.
+ *
+ * A forward iterator has to walk a value to find its sibling, so a container read element by
+ * element is scanned once to read each element and again to step over it - every byte twice, and
+ * once more for each level above it. When something has already walked an element to its end,
+ * this is where it says so, and the iterator steps to that instead of scanning.
+ *
+ * Only a completed walk is recorded. A traversal that stopped in the middle of a value leaves
+ * nothing, and the iterator scans as it always did: knowing where a walk paused would not be
+ * enough to resume, because a counted container's remaining count is not recoverable from a
+ * position alone.
+ */
+struct walk_memo {
+    const std::byte *base = nullptr;    ///< the document these positions are into
+    const std::byte *owner = nullptr;   ///< first byte after the marker of the value walked
+    const std::byte *reached = nullptr; ///< one past the end of that value
+
+    /**
+     * Whether this says anything about the value beginning at `first` of this document.
+     *
+     * The document is part of the question, not only the value. A memo outlives the document it
+     * was taken about, so a later document allocated where an earlier one stood would otherwise
+     * match a note about the dead one and resume into a position that means nothing.
+     */
+    [[nodiscard]] constexpr bool describes(const std::byte *document, const std::byte *first) const noexcept {
+        return this->base == document && this->owner == first && this->reached != nullptr;
+    }
+
+    constexpr void note(const std::byte *document, const std::byte *first, const std::byte *end) noexcept {
+        this->base = document;
+        this->owner = first;
+        this->reached = end;
+    }
+
+    constexpr void forget() noexcept { this->reached = nullptr; }
+};
+
+/** The memo a view uses when it was not given one. Not per-thread: this library has no threads. */
+[[nodiscard]] inline walk_memo &ambient_memo() noexcept {
+    static walk_memo memo;
+    return memo;
+}
+
 class view {
     marker element = marker::invalid;
     std::span<const std::byte> source {}; ///< the whole document, so bounds and offsets are absolute
@@ -413,7 +457,14 @@ public:
                 return *this;
             }
             scanner.advance(1);
-            detail::skip_value(scanner, kind, 1);
+            // Something already walked this element to its end, so step to where it finished
+            // rather than scanning the same bytes a second time to find the same place.
+            if (auto &memo = ambient_memo(); memo.describes(this->source.data(), scanner.position)) {
+                scanner.position = memo.reached;
+                memo.forget();
+            } else {
+                detail::skip_value(scanner, kind, 1);
+            }
             if (!scanner.ok()) {
                 this->exhausted = true;
                 return *this;
@@ -457,9 +508,34 @@ private:
     bool counted = false;
     bool exhausted = true;
     key_value current {};
+    const std::byte *owner = nullptr; ///< the object being walked, for the memo
 
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
         return this->source.data() + this->source.size();
+    }
+
+    /**
+     * Says where this object ended, once it has been walked all the way.
+     *
+     * Only on exhaustion, and only for a counted object: an unbounded one ends at a terminator
+     * the cursor has not stepped over, so the position here is not yet past the value.
+     */
+    void publish() const noexcept {
+        if (this->owner == nullptr || !this->exhausted) return;
+
+        const std::byte *end = nullptr;
+        if (this->counted) {
+            // Every member owed has been read, so the cursor is already past the last of them.
+            if (this->remaining != 0) return;
+            end = this->cursor;
+        } else {
+            // An unbounded object ends at a terminator the cursor stops on rather than steps
+            // over, so the value ends one byte further on than the walk reached.
+            if (this->cursor == nullptr || this->cursor >= this->limit()) return;
+            if (to_marker(*this->cursor) != marker::object_end) return;
+            end = this->cursor + 1;
+        }
+        ambient_memo().note(this->source.data(), this->owner, end);
     }
 
     /** Parses the entry at the cursor. Called once per position, by normalise(). */
@@ -502,12 +578,14 @@ private:
 public:
     member_iterator() = default;
 
-    member_iterator(std::span<const std::byte> source, const detail::header &info) noexcept
+    member_iterator(std::span<const std::byte> source, const detail::header &info,
+            const std::byte *owner = nullptr) noexcept
     : source(source)
     , cursor(info.body)
     , element(info.element)
     , remaining(info.count)
-    , counted(!info.unbounded) {
+    , counted(!info.unbounded)
+    , owner(owner) {
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
@@ -541,6 +619,7 @@ public:
         this->cursor = scanner.position;
         if (this->counted && this->remaining > 0) --this->remaining;
         this->normalise();
+        this->publish();
         return *this;
     }
 
@@ -585,7 +664,7 @@ inline array_range view::array() const noexcept {
 
 inline member_range view::items() const noexcept {
     if (this->element != marker::object_begin) return {};
-    return member_range { member_iterator { this->source, this->container_header() } };
+    return member_range { member_iterator { this->source, this->container_header(), this->payload } };
 }
 
 inline std::optional<std::size_t> view::size_hint() const noexcept {
