@@ -20,7 +20,7 @@ set(TESTS
 
 # Suites that define types the way types are meant to be defined, by annotation.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    list(APPEND TESTS json_writer serializer reflect)
+    list(APPEND TESTS json_writer json_shapes serializer reflect)
 endif()
 
 foreach(TEST_NAME IN LISTS TESTS)

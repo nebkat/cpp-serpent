@@ -131,6 +131,9 @@ public:
 
     [[nodiscard]] constexpr std::string_view buffer() const noexcept { return this->source; }
     [[nodiscard]] constexpr const char *data() const noexcept { return this->first; }
+
+    /** The whole document this value sits in, which a reader generated for a type scans itself. */
+    [[nodiscard]] constexpr std::string_view document() const noexcept { return this->source; }
     [[nodiscard]] constexpr std::size_t offset() const noexcept {
         return this->first == nullptr ? 0 : static_cast<std::size_t>(this->first - this->source.data());
     }
