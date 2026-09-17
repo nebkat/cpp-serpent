@@ -1,5 +1,4 @@
-// The writer. Expected bytes are the reference implementation's, either quoted from its test vectors or
-// produced by its CLI; bjdata_fixture_test checks the whole corpus byte for byte.
+// The writer: the bytes each thing it can be asked for comes out as, preferring size and preferring speed.
 
 #include "check.hpp"
 
@@ -8,18 +7,18 @@
 
 #include <array>
 #include <iterator>
+#include <list>
 #include <map>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace serpent;
 using namespace serpent::bjdata;
 
-// Nearly every expectation in this file is a reference-encoder byte string, so emit() defaults
-// to the parity policy rather than the library default, which counts sized containers. The
-// bodies below take `auto &` so they bind to whichever writer emit() hands them.
+// The bodies below take `auto &` so they bind to whichever writer emit() hands them.
 
 namespace {
 
@@ -33,11 +32,11 @@ std::string hex(std::span<const std::byte> bytes) {
     return out;
 }
 
-template<writer_options Options = reference_parity, typename Body>
+template<prefer Preference = prefer::size, typename Body>
 std::vector<std::byte> emit(Body body) {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
-    basic_writer<Options> target { out };
+    basic_writer<Preference> target { out };
     body(target);
     const auto result = target.finish();
     check(result.has_value(), "the writer finished cleanly");
@@ -78,18 +77,23 @@ void scalars() {
     produces("53550668c3a96c6c6f", [](auto &w) { w.value("h\xc3\xa9llo"); }, "S utf-8 counts bytes");
     produces("4855022d31", [](auto &w) { w.high_precision("-1"); }, "H -1");
 
-    // compact_types off pins every integer to int64 and every real to float64.
-    check_equal(std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1); })) },
-            "4c0100000000000000", "compact_types off widens an integer");
-    check_equal(
-            std::string_view { hex(emit<writer_options { .compact_types = false }>([](auto &w) { w.value(1.0); })) },
-            "44000000000000f03f", "compact_types off widens a real");
+    // Preferring speed, a number goes under the marker of the type it has and is not looked at.
+    const auto fast = [](auto body) { return hex(emit<prefer::speed>(body)); };
+    check_equal(fast([](auto &w) { w.value(1); }), "6c01000000", "an int is l, four bytes");
+    check_equal(fast([](auto &w) { w.value(std::uint8_t { 7 }); }), "5507", "a uint8 is U");
+    check_equal(fast([](auto &w) { w.value(std::int16_t { -2 }); }), "49feff", "an int16 is I");
+    check_equal(fast([](auto &w) { w.value(std::uint64_t { 1 }); }), "4d0100000000000000", "a uint64 is M");
+    check_equal(fast([](auto &w) { w.value(1.0); }), "44000000000000f03f", "a double is D");
+    check_equal(fast([](auto &w) { w.value(1.0f); }), "640000803f", "a float is d");
+    check_equal(fast([](auto &w) { w.value(true); }), "54", "a boolean is its marker either way");
+    check_equal(fast([](auto &w) { w.value("hello"); }), "53550568656c6c6f", "and a length is always the narrowest");
 }
 
 void containers() {
     produces("5b5d", [](auto &w) { const auto scope = w.array(); }, "empty array");
     produces("7b7d", [](auto &w) { const auto scope = w.object(); }, "empty object");
-    produces("5b5501550255035d", [](auto &w) { w.value(std::vector<int> { 1, 2, 3 }); }, "[1,2,3]");
+    produces("5b246c235503010000000200000003000000", [](auto &w) { w.value(std::vector<int> { 1, 2, 3 }); },
+            "[1,2,3] is a typed array of what it is");
     produces(
             "5b5a54465501535501615d",
             [](auto &w) {
@@ -129,8 +133,14 @@ void containers() {
             "object built from a map");
 
     produces(
-            "5b5b5501550255035d5b5504550555065d5d",
-            [](auto &w) { w.value(std::vector<std::vector<int>> { { 1, 2, 3 }, { 4, 5, 6 } }); }, "nested arrays");
+            "5b5b24552355030102035b24552355030405065d",
+            [](auto &w) { w.value(std::vector<std::vector<std::uint8_t>> { { 1, 2, 3 }, { 4, 5, 6 } }); },
+            "nested arrays");
+
+    // Preferring speed, a range that is not of numbers says how many elements it has.
+    check_equal(std::string_view { hex(emit<prefer::speed>(
+                        [](auto &w) { w.value(std::vector<std::string> { "a", "bb", "cde" }); })) },
+            "5b235503535501615355026262535503636465", "a counted array of strings");
 
     produces(
             "5b5a5d", [](auto &w) { w.value(std::vector<std::optional<int>> { std::nullopt }); },
@@ -140,81 +150,44 @@ void containers() {
             "an engaged optional writes its value");
 }
 
-void numeric_packing() {
-    // A generic array stores each value at its own width; a typed one pays the widest
-    // throughout. Both are measured and a tie keeps the generic form.
-    produces(
-            "5b55015502550355045d", [](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); },
-            "four small ints tie at 10 bytes and stay generic");
-
-    check_equal(std::string_view { hex(emit([](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4, 5 }); })) },
-            "5b24552355050102030405", "five small ints pack");
-    check_equal(std::string_view { hex(emit([](auto &w) { w.value(std::vector<int> { 1, 2, 3, 1000000 }); })) },
-            "5b5501550255036d40420f005d", "one large value forces the width and keeps it generic");
-    check_equal(
-            std::string_view { hex(emit([](auto &w) { w.value(std::vector<int> { 52445, 43707, 13124, 4386 }); })) },
-            "5b75ddcc75bbaa7544337522115d", "a 14 byte tie stays generic");
-    check_equal(std::string_view { hex(emit([](auto &w) { w.value(std::vector<double> { 1.5, 2.5, -0.25 }); })) },
-            "5b68003e6800416800b45d", "three halves stay generic");
-
-    // The generic form a packed one is measured against has to be the form that would actually
-    // be written. Counting sized containers made the generic array two bytes dearer, and
-    // measuring against the old unbounded framing left arrays generic that are smaller typed.
-    check_equal(std::string_view { hex(
-                        emit<writer_options {}>([](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); })) },
-            "5b2455235504"
-            "01020304",
-            "four small ints pack once the generic form carries a count");
-    check_equal(
-            std::string_view { hex(emit<reference_parity>([](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4 }); })) },
-            "5b55015502550355045d", "and stay generic when it does not");
-
-    // Packing off falls back to the generic form whatever the measurement says.
-    check_equal(std::string_view { hex(
-                        emit<writer_options { .numeric_packing = false, .counted_containers_from = never_counted }>(
-                                [](auto &w) { w.value(std::vector<int> { 1, 2, 3, 4, 5 }); })) },
-            "5b550155025503550455055d", "numeric_packing off keeps the generic form");
-}
-
 /**
- * A contiguous range packed at the element's own width goes out in one copy; narrowed or
- * written generically it costs a store per element. That is not a size question alone, and
- * the reference encoder - being Dart, where the copy is not available - only ever asks the
- * size one. copy_tolerance_percent is how much size you will pay for the copy.
+ * A range of numbers is a typed array at the width the numbers already have, whichever is
+ * preferred: narrowing is for a value on its own. So it is one copy to write and one to read,
+ * and never turns into an array of separately marked elements because of what is in it.
  */
-void contiguous_copy() {
-    std::vector<double> real;
-    for (int index = 0; index < 200; ++index)
-        real.push_back(index * 0.1);
-    std::vector<double> halves;
-    for (int index = 0; index < 200; ++index)
-        halves.push_back(index * 0.5);
-    std::vector<std::int32_t> positive;
-    for (int index = 0; index < 200; ++index)
-        positive.push_back(index * 100000);
+void ranges_of_numbers() {
+    for (const auto &values : { std::vector<std::int32_t> { 1, 2, 3 }, std::vector<std::int32_t> { 1, 2, 3, 1000000 },
+                 std::vector<std::int32_t>(300, 7), std::vector<std::int32_t> {} }) {
+        const auto small = encode<prefer::size>(values);
+        check(encode<prefer::speed>(values) == small, "the same bytes whichever is preferred");
+        check_equal(std::string_view { hex(small).substr(0, 8) }, "5b246c23", "[$l# whatever the values are");
+        check(decode<std::vector<std::int32_t>>(small) == values, "and reads back");
+        check(view::over(small).as_span<std::int32_t>().has_value(), "or is viewed in place");
+    }
 
-    constexpr writer_options slack { .copy_tolerance_percent = 5 };
-    constexpr writer_options generous { .copy_tolerance_percent = 400 };
+    check_equal(std::string_view { hex(encode(std::vector<double> { 1.5, 2.5 })) },
+            "5b2444235502000000000000f83f0000000000000440", "doubles stay doubles");
+    check_equal(std::string_view { hex(encode(std::vector<float> { 1.5f })) }, "5b24642355010000c03f", "and floats floats");
 
-    const auto marker_of = [](std::span<const std::byte> bytes) {
-        return bytes.size() > 2 && static_cast<char>(bytes[1]) == '$' ? static_cast<char>(bytes[2]) : '-';
-    };
+    // Read into numbers of the same type it is one copy; into anything else, an element at a time.
+    const auto words = encode(std::vector<std::uint16_t> { 1, 2, 300 });
+    check(decode<std::vector<std::uint16_t>>(words) == std::vector<std::uint16_t> { 1, 2, 300 }, "the same type");
+    check(decode<std::vector<int>>(words) == std::vector<int> { 1, 2, 300 }, "a wider one");
+    check(decode<std::vector<double>>(words) == std::vector<double> { 1, 2, 300 }, "reals");
+    check(decode<std::list<std::uint16_t>>(words) == std::list<std::uint16_t> { 1, 2, 300 }, "a list");
+    check(!decode<std::vector<std::uint8_t>>(words), "and not a narrower one that cannot hold them");
+    const auto cut = std::span { words }.first(words.size() - 1);
+    check(!decode<std::vector<std::uint16_t>>(cut), "nor one whose payload is cut short");
 
-    // Doubles that do not narrow: generic is barely smaller, so a little slack buys the copy.
-    check_equal(marker_of(encode(real)), '-', "real doubles are generic at zero tolerance");
-    check_equal(marker_of(encode<slack>(real)), 'D', "and copied whole once a little slack is allowed");
-    check(encode<slack>(real).size() > encode(real).size(), "which does cost a few bytes");
+    // A range that is not contiguous is the same bytes, stored an element at a time.
+    check(encode(std::list<std::int16_t> { 1, -2, 300 }) == encode(std::vector<std::int16_t> { 1, -2, 300 }),
+            "a list is written as a vector is");
 
-    // Doubles that all fit a float16: the copy would cost four times the space, so slack of
-    // this size must not buy it.
-    check_equal(marker_of(encode(halves)), 'h', "half-exact doubles narrow at zero tolerance");
-    check_equal(marker_of(encode<slack>(halves)), 'h', "and small slack does not undo that");
-    check_equal(marker_of(encode<generous>(halves)), 'D', "only generous slack takes the copy");
-
-    // Already copyable at the chosen marker: positive int32 packs as uint32, whose bytes are
-    // identical, so this is a copy at zero tolerance and the marker must not drift.
-    check_equal(marker_of(encode(positive)), 'm', "positive int32 packs as uint32");
-    check_equal(marker_of(encode<slack>(positive)), 'm', "and tolerance does not change that");
+    // An array that is mixed anyway has no type to be of, and each value in it narrows on its own.
+    check_equal(std::string_view { hex(encode(std::tuple { 1, 1000000, 1.0 })) }, "5b55016d40420f0068003c5d",
+            "a tuple's numbers narrow where size is preferred");
+    check_equal(std::string_view { hex(encode<prefer::speed>(std::tuple { 1, 1.0f })) }, "5b6c01000000640000803f5d",
+            "and keep their types where speed is");
 }
 
 void typed_arrays() {
@@ -226,7 +199,7 @@ void typed_arrays() {
     const std::array<std::uint16_t, 3> words { 1, 2, 3 };
     check_equal(
             std::string_view { hex(emit([&](auto &w) { w.typed_array(std::span<const std::uint16_t> { words }); })) },
-            "5b2455235503010203", "typed uint16 array narrows to uint8");
+            "5b2475235503010002000300", "a typed uint16 array stays uint16, however small its values");
 
     const std::array<std::uint16_t, 3> wide { 1, 2, 1000 };
     check_equal(
@@ -257,7 +230,7 @@ void sinks() {
         const auto *const storage = sized.data();
         const auto capacity = sized.capacity();
         container_sink into { sized };
-        basic_writer<reference_parity> filling { into };
+        basic_writer<prefer::size> filling { into };
         filling.value(std::vector<int> { 1, 2, 3 });
         check(filling.finish().has_value(), "an exactly reserved container accepts the document");
         check_equal(std::string_view { hex(sized) }, std::string_view { hex(reference) },
@@ -277,7 +250,7 @@ void sinks() {
         for (std::size_t capacity = 0; capacity < whole.size(); ++capacity) {
             std::vector<std::byte> storage(capacity);
             span_sink out { storage };
-            basic_writer<reference_parity> target { out };
+            basic_writer<prefer::size> target { out };
             target.value(document);
             check(!target.finish().has_value(), "a short fixed buffer fails");
             check(out.overflowed(), "a short fixed buffer latches overflow");
@@ -294,7 +267,7 @@ void sinks() {
 
     std::vector<std::byte> exact(reference.size());
     span_sink fitted { exact };
-    basic_writer<reference_parity> fitting { fitted };
+    basic_writer<prefer::size> fitting { fitted };
     fitting.value(std::vector<int> { 1, 2, 3 });
     check(fitting.finish().has_value(), "an exactly sized buffer succeeds");
     check_equal(std::string_view { hex(fitted.written()) }, std::string_view { hex(reference) }, "span_sink bytes");
@@ -302,17 +275,17 @@ void sinks() {
     // The writer batches, so a sink only holds everything once finish() has handed it over.
     counting_sink counter;
     {
-        basic_writer<reference_parity> counting { counter };
+        basic_writer<prefer::size> counting { counter };
         counting.value(std::vector<int> { 1, 2, 3 });
         check(counting.finish().has_value(), "counting_sink accepts the document");
     }
     check_equal(counter.size(), reference.size(), "counting_sink agrees with the real output");
-    check_equal(measure<reference_parity>(std::vector<int> { 1, 2, 3 }), reference.size(), "measure() agrees");
+    check_equal(measure<prefer::size>(std::vector<int> { 1, 2, 3 }), reference.size(), "measure() agrees");
 
     std::vector<std::byte> appended;
     iterator_sink iterated { std::back_inserter(appended) };
     {
-        basic_writer<reference_parity> iterating { iterated };
+        basic_writer<prefer::size> iterating { iterated };
         iterating.value(std::vector<int> { 1, 2, 3 });
         check(iterating.finish().has_value(), "iterator_sink accepts the document");
     }
@@ -321,7 +294,7 @@ void sinks() {
     std::ostringstream stream;
     ostream_sink streamed { stream };
     {
-        basic_writer<reference_parity> streaming { streamed };
+        basic_writer<prefer::size> streaming { streamed };
         streaming.value(std::vector<int> { 1, 2, 3 });
         check(streaming.finish().has_value(), "ostream_sink accepts the document");
     }
@@ -331,7 +304,7 @@ void sinks() {
     std::size_t seen = 0;
     auto collect = [&](std::span<const std::byte> bytes) { seen += bytes.size(); };
     {
-        basic_writer<reference_parity> callback { collect };
+        basic_writer<prefer::size> callback { collect };
         callback.value(std::vector<int> { 1, 2, 3 });
         check(callback.finish().has_value(), "a callable accepts the document");
     }
@@ -343,7 +316,7 @@ void error_latching() {
     container_sink out { buffer };
 
     {
-        basic_writer<reference_parity> target { out };
+        basic_writer<prefer::size> target { out };
         target.key("orphan");
         check_equal(target.error_code(), errc::key_outside_object, "a key outside an object fails");
     }
@@ -351,7 +324,7 @@ void error_latching() {
         // A container cannot be left open by accident: the scope is the only way to open one
         // and it closes itself. It can still be held open deliberately, and finish() catches
         // that.
-        basic_writer<reference_parity> target { out };
+        basic_writer<prefer::size> target { out };
         auto held = std::optional { target.array() };
         check_equal(target.finish().error().code(), errc::unterminated_container,
                 "a deliberately held-open container fails at finish");
@@ -361,7 +334,7 @@ void error_latching() {
         // A moved-from scope closes nothing, so the container closes exactly once.
         std::vector<std::byte> moved;
         container_sink moved_out { moved };
-        basic_writer<reference_parity> target { moved_out };
+        basic_writer<prefer::size> target { moved_out };
         {
             auto first = target.array();
             auto second = std::move(first);
@@ -376,14 +349,14 @@ void error_latching() {
         // rather than waiting for finish().
         std::array<std::byte, 1> tiny {};
         span_sink small { tiny };
-        basic_writer<reference_parity> target { small };
+        basic_writer<prefer::size> target { small };
         target.value(std::string(1024, 'x'));
         target.value(1);
         target.value(2);
         check_equal(target.error_code(), errc::sink_failed, "the first failure is the one reported");
     }
     {
-        basic_writer<reference_parity> target { out };
+        basic_writer<prefer::size> target { out };
         const auto nest = [&](auto &self, int remaining) -> void {
             if (remaining == 0) return;
             const auto scope = target.array();
@@ -396,43 +369,10 @@ void error_latching() {
 
 } // namespace
 
-/**
- * Half precision, withheld.
- *
- * It is spec-legal and the reference encoder chooses it, but it is thinly implemented: a reader
- * that gets it wrong tends to read the two payload bytes as an integer rather than refusing
- * them, so 20.0 arrives as 19712 and nothing reports an error. This keeps every other
- * narrowing and pins reals at float32 or wider.
- */
-void float16_can_be_withheld() {
-    static constexpr writer_options no_half { .float16 = false };
-
-    check_equal(hex(encode(20.0)), "68004d", "a half-representable real narrows by default");
-    check_equal(hex(encode<no_half>(20.0)), "640000a041", "and does not when withheld");
-
-    // Only the reals change: integers narrow exactly as before.
-    check_equal(hex(encode<no_half>(200)), hex(encode(200)), "an integer is unaffected");
-    check_equal(hex(encode<no_half>(std::vector<int> { 1, 2, 3, 4, 5, 6 })),
-            hex(encode(std::vector<int> { 1, 2, 3, 4, 5, 6 })), "and so is a packed integer list");
-
-    // A uniform list of halves packs at float32 rather than not packing at all.
-    const std::vector<double> halves { 1.0, 2.0, 4.0, 8.0, 16.0 };
-    const auto packed = encode<no_half>(halves);
-    check(view::over(packed).is_array(), "a list of them is still an array");
-    check_equal(view::over(packed).size(), std::size_t { 5 }, "of the same length");
-    check(decode<std::vector<double>>(packed) == halves, "and reads back exactly");
-
-    // A value that never fit is untouched either way.
-    check_equal(hex(encode<no_half>(19.061674f)), hex(encode(19.061674f)),
-            "a real that would not have narrowed is the same bytes");
-}
-
 int main() {
-    float16_can_be_withheld();
     scalars();
     containers();
-    numeric_packing();
-    contiguous_copy();
+    ranges_of_numbers();
     typed_arrays();
     sinks();
     error_latching();

@@ -106,9 +106,9 @@ The same accessors the readers have, in the same shapes: `as_bool()`, `as_int<T>
 `at(index)` throw, naming the key; `operator[]` on a missing member gives null.
 
 Integer width is not kept. A value holds `std::int64_t`, `std::uint64_t` or `double`, and the
-writer narrows every integer to the smallest marker that holds it anyway — so a document
-round-tripped through a tree comes back byte-identical under the default options, and wider than
-it went in under `no_compaction`.
+writer narrows every number to the smallest marker that holds it where size is preferred — so
+a document round-tripped through a tree comes back as small as it went in, and with every number
+eight bytes wide where speed is.
 
 Objects remember the order their members were added, because a document built by hand is usually
 read by a person. Neither format ascribes meaning to key order, and two objects with the same

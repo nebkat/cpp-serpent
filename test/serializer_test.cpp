@@ -734,33 +734,33 @@ void containers_need_no_customization() {
 }
 
 /**
- * A sized array states its length, so the reader sizes its container once instead of growing it.
- *
- * On by default from three elements up, where the two bytes it costs buy two allocations. Below
- * that it buys less than it costs, and reference_parity turns it off entirely.
+ * Where speed is preferred a sized array states its length, so the reader sizes its container
+ * once instead of growing it. Where size is, it does not: the count costs bytes.
  */
 void counted_containers() {
-    const std::vector<point> two { { 1, 2 }, { 3, 4 } };
     const std::vector<point> three { { 1, 2 }, { 3, 4 }, { 5, 6 } };
+    const auto fast = encode<prefer::speed>(three);
+    const auto small = encode<prefer::size>(three);
 
-    check(hex(encode(two)).find("5b7b") == 0, "below the threshold an array stays unbounded");
-    check(hex(encode(three)).find("5b23") == 0, "at three elements it states its length");
-    check(hex(encode<reference_parity>(three)).find("5b7b") == 0, "reference_parity never states one");
-    check(encode(three).size() == encode<reference_parity>(three).size() + 2, "which costs two bytes");
+    check(hex(fast).find("5b23") == 0, "preferring speed, an array states its length");
+    check(hex(small).find("5b7b") == 0, "preferring size, it does not");
+    check(small.size() < fast.size(), "which is smaller");
 
-    const auto back = decode<std::vector<point>>(encode(three));
-    check(back && back->size() == 3 && back->at(2).y == 6, "and it round-trips");
+    for (const auto &bytes : { fast, small }) {
+        const auto back = decode<std::vector<point>>(bytes);
+        check(back && back->size() == 3 && back->at(2).y == 6, "and either round-trips");
+    }
 
     // The point of the count: it is readable without walking the elements.
-    const auto hint = view::over(encode(three)).size_hint();
+    const auto hint = view::over(fast).size_hint();
     check(hint && *hint == 3, "a counted array states its length");
-    check(!view::over(encode<reference_parity>(three)).size_hint(), "an unbounded one does not, rather than counting");
-    check(view::over(encode<reference_parity>(three)).size() == 3, "though size() will still walk it");
+    check(!view::over(small).size_hint(), "an unbounded one does not, rather than counting");
+    check(view::over(small).size() == 3, "though size() will still walk it");
 
-    // A packed numeric array already carried a count, whatever the threshold.
-    const auto typed = encode<reference_parity>(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });
+    // An array of numbers is typed whichever is preferred, and so always carries a count.
+    const auto typed = encode(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });
     const auto typed_hint = view::over(typed).size_hint();
-    check(typed_hint && *typed_hint == 5, "a packed numeric array states its length already");
+    check(typed_hint && *typed_hint == 5, "a typed array states its length already");
 }
 
 struct[[= serpent::serializable {}]] circle {

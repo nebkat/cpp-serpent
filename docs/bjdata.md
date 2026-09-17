@@ -3,41 +3,35 @@
 [BJData](https://github.com/NeuroJSON/bjdata) is little-endian and self-delimiting, which is
 what makes reading it in place possible.
 
-## Counted arrays
+## Size or speed
 
-A sized array states its length — `[#n` rather than an unbounded `[ … ]` — so a reader knows
-how many elements are coming and sizes its container once instead of growing it.
-
-```cpp
-bjdata::encode(values);   // [#n from three elements up
-```
-
-The count costs two bytes. What it buys depends on how many elements there are:
-
-| elements | extra bytes | allocations to decode |
-|---:|---:|---:|
-| 1 | +2 | 1 → 1 |
-| 2 | +2 | 2 → 1 |
-| 3 | +2 | 3 → 1 |
-| 1000 | +3 | 11 → 1 |
-
-At one element it saves nothing, so the default threshold is three, where two bytes buy two
-allocations. `writer_options::counted_containers_from` moves it.
-
-This is the one place the default output departs from the reference encoder, which writes a
-count only beside a type marker. `bjdata::reference_parity` restores it:
+A document is either to be as small as it can be, or as quick to write and read as it can be.
+That is the one thing to choose, and everything the writer decides follows from it:
 
 ```cpp
-bjdata::encode<bjdata::reference_parity>(values);   // unbounded, byte-for-byte the reference
+bjdata::encode(value);                        // prefer::size, the default
+bjdata::encode<bjdata::prefer::speed>(value);
 ```
 
-A packed numeric array already carried a count, so `std::vector<int>` and friends are sized on
-read under either policy.
+| | `prefer::size` | `prefer::speed` |
+|---|---|---|
+| a number on its own | the narrowest marker that holds it exactly: `200` is `U`, `1.0` is a three-byte `h` | the marker of its own type: an `int` is `l`, a `double` is `D` |
+| a range of numbers | a typed array, `[$T#n`, at the numbers' own type | the same |
+| any other range | unbounded, `[ … ]`: a count costs bytes | counted, `[#n`: the reader sizes its container once |
+
+A range of numbers is a typed array whichever is preferred, at the width the numbers already
+have. Narrowing is for a value on its own, or in an array that is mixed anyway: narrowing a run
+of numbers would mean measuring it and then storing each element, where this is one copy to
+write, one to read, and [a span to view](#zero-copy-concretely). A `std::vector<std::int32_t>`
+of small values you want small is a `std::vector<std::uint8_t>`.
+
+Either is read by the same reader, which takes whatever marker it finds. It is a template
+argument, so a build carries the code of the one it uses.
 
 ## Zero copy, concretely
 
 ```cpp
-// [$u#U3 — three little-endian uint16s
+// [$u#U3 - three little-endian uint16s
 if (auto samples = document["adc"].as_span<std::uint16_t>()) {
     auto peak = std::ranges::max(*samples);                              // no copy
     auto owned = std::ranges::to<std::vector<std::uint16_t>>(*samples);  // opt in to one
@@ -45,45 +39,7 @@ if (auto samples = document["adc"].as_span<std::uint16_t>()) {
 ```
 
 `as_span<T>()` requires the element marker to be exactly what `T` packs as, because zero copy
-demands an exact layout match.
-
-## What the writer emits
-
-Output is byte-identical to the reference implementation:
-
-- Integer markers take the narrowest width that holds the value, preferring unsigned, so
-  `200` is `U` and never `i`.
-- Floats narrow where the round trip is exact, so `1.0` is three bytes and ±inf and NaN narrow
-  to `float16`.
-- Plain lists and maps are unbounded. A count only ever follows a `$type`.
-- A uniform numeric list becomes `[$T#n` only when that is **strictly** smaller.
-
-## Compaction is compile-time
-
-```cpp
-bjdata::encode(value);                        // everything the reference encoder does
-bjdata::encode<bjdata::no_compaction>(value); // declared widths, and none of that code emitted
-```
-
-A build that turns one off does not carry its code — about 1 KB of `__text` for a three-type
-translation unit.
-
-## Paying size for a copy
-
-A contiguous range packed at the element's own width is already in wire order and goes out in
-**one copy**. Narrowed or generic, it costs a store per element.
-
-```cpp
-constexpr bjdata::writer_options slack { .copy_tolerance_percent = 5 };
-bjdata::encode<slack>(readings);
-```
-
-| 1,000 doubles | tolerance 0 | with the copy |
-|---|---|---|
-| real values | 7,802 B generic | 8,007 B — **+2.6%** |
-| all float16-exact | 2,007 B as `h` | 8,007 B — +299% |
-
-Zero is the default and reproduces the reference exactly.
+demands an exact layout match. Decoding into a `std::vector<T>` of that type is one copy.
 
 ## N-dimensional arrays
 

@@ -557,6 +557,54 @@ static void each_kind_of_member() {
     }));
 }
 
+// ---------------- arrays of numbers ----------------
+
+// A record that is mostly numbers in bulk, which is what a recording is. Both libraries write
+// these as a typed payload, so this is how well each gets out of the way of a copy.
+struct [[= serpent::serializable {}]] trace {
+    std::uint32_t id = 0;
+    std::vector<double> samples;
+    std::vector<std::int32_t> counts;
+};
+
+static void arrays_of_numbers() {
+    std::vector<trace> values(100);
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        values[index].id = static_cast<std::uint32_t>(index);
+        for (int sample = 0; sample < 1000; ++sample) {
+            values[index].samples.push_back(sample * 0.37 + static_cast<double>(index));
+            values[index].counts.push_back(sample * 3 - 500);
+        }
+    }
+    const auto bytes = bjdata::encode(values);
+    std::string cbor, beve;
+    (void)glz::write_cbor(values, cbor);
+    (void)glz::write_beve(values, beve);
+
+    bench::measure("binary encode 100 x 2000 numbers", "serpent", bytes.size(), [&] { return bjdata::encode(values).size(); });
+    bench::measure("binary encode 100 x 2000 numbers", "glaze cbor", cbor.size(), [&] {
+        std::string buffer;
+        (void)glz::write_cbor(values, buffer);
+        return buffer.size();
+    });
+    bench::measure("binary encode 100 x 2000 numbers", "glaze beve", beve.size(), [&] {
+        std::string buffer;
+        (void)glz::write_beve(values, buffer);
+        return buffer.size();
+    });
+
+    bench::measure("binary decode 100 x 2000 numbers", "serpent", bytes.size(),
+            [&] { return bjdata::decode<std::vector<trace>>(bytes)->size(); });
+    bench::measure("binary decode 100 x 2000 numbers", "glaze cbor", cbor.size(), [&] {
+        std::vector<trace> out;
+        return glz::read_cbor(out, cbor) ? 0 : out.size();
+    });
+    bench::measure("binary decode 100 x 2000 numbers", "glaze beve", beve.size(), [&] {
+        std::vector<trace> out;
+        return glz::read_beve(out, beve) ? 0 : out.size();
+    });
+}
+
 #endif
 
 /**
@@ -579,12 +627,18 @@ static void binary_formats(const std::vector<reading> &values) {
     const auto cbor = other::to_cbor(other(values));
     const auto msgpack = other::to_msgpack(other(values));
 
-    std::printf("\nbinary sizes for the same 10k records: BJData %zu B, BEVE %zu B, CBOR %zu B (glaze %zu B), "
+    std::printf("\nbinary sizes for the same 10k records: BJData %zu B for size and %zu B for speed, BEVE %zu B, CBOR %zu B (glaze %zu B), "
                 "MessagePack %zu B\n",
-            bjdata_bytes.size(), beve.size(), cbor.size(), glaze_cbor.size(), msgpack.size());
+            bjdata_bytes.size(), bjdata::encode<bjdata::prefer::speed>(values).size(), beve.size(), cbor.size(),
+            glaze_cbor.size(), msgpack.size());
 
-    bench::measure(
-            "binary encode 10k records", "serpent", bjdata_bytes.size(), [&] { return bjdata::encode(values).size(); });
+    // BJData both ways it can be written: for speed, which is what the other library's formats
+    // are - every value under the marker of its type - and for size, which narrows each value.
+    const auto fast_bytes = bjdata::encode<bjdata::prefer::speed>(values);
+    bench::measure("binary encode 10k records", "serpent (speed)", fast_bytes.size(),
+            [&] { return bjdata::encode<bjdata::prefer::speed>(values).size(); });
+    bench::measure("binary encode 10k records", "serpent (size)", bjdata_bytes.size(),
+            [&] { return bjdata::encode<bjdata::prefer::size>(values).size(); });
     bench::measure("binary encode 10k records", "glaze cbor", glaze_cbor.size(), [&] {
         std::string buffer;
         (void)glz::write_cbor(values, buffer);
@@ -598,7 +652,9 @@ static void binary_formats(const std::vector<reading> &values) {
     bench::measure(
             "binary encode 10k records", "nlohmann", cbor.size(), [&] { return other::to_cbor(other(values)).size(); });
 
-    bench::measure("binary decode 10k records", "serpent", bjdata_bytes.size(),
+    bench::measure("binary decode 10k records", "serpent (speed)", fast_bytes.size(),
+            [&] { return bjdata::decode<std::vector<reading>>(fast_bytes)->size(); });
+    bench::measure("binary decode 10k records", "serpent (size)", bjdata_bytes.size(),
             [&] { return bjdata::decode<std::vector<reading>>(bjdata_bytes)->size(); });
     bench::measure("binary decode 10k records", "glaze cbor", glaze_cbor.size(), [&] {
         std::vector<reading> out;
@@ -790,6 +846,7 @@ int main(int argc, char **argv) {
     your_types(values);
 #if SERPENT_HAS_REFLECTION
     each_kind_of_member();
+    arrays_of_numbers();
 #endif
     binary_formats(values);
     whole_document_scan(canada, twitter);

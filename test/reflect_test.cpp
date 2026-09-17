@@ -302,12 +302,12 @@ void a_constant_key_is_framed_once() {
  */
 void a_sequence_is_walked_once() {
     const std::vector<point> many { { 1, 2 }, { 3, 4 }, { 5, 6 } };
-    const auto counted = bjdata::encode(many);
+    const auto counted = bjdata::encode<bjdata::prefer::speed>(many);
     const auto back = bjdata::decode<std::vector<point>>(counted);
     check(back && back->size() == 3 && back->at(2).y == 6, "a counted array of objects");
 
-    // Unbounded: what the reference policy writes, and what another implementation may send.
-    const auto unbounded = bjdata::encode<bjdata::reference_parity>(many);
+    // Unbounded: what is written where size is preferred, and what another implementation may send.
+    const auto unbounded = bjdata::encode<bjdata::prefer::size>(many);
     const auto walked = bjdata::decode<std::vector<point>>(unbounded);
     check(walked && walked->size() == 3 && walked->at(1).x == 3, "an unbounded array of objects");
 

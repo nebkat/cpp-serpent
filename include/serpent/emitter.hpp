@@ -422,6 +422,9 @@ void emit_value(Emitter &out, const T &item) {
     } else if constexpr (std::is_enum_v<bare>) {
         // An enumeration that names its values writes those; one that says nothing is a number.
         if (!emit_mapped_enum(out, item)) emit_value(out, std::to_underlying(item));
+    } else if constexpr (requires { out.number(item); }) {
+        // A format whose markers depend on a number's type is given it as the type it has.
+        out.number(item);
     } else if constexpr (std::floating_point<bare>) {
         out.real(static_cast<double>(item));
     } else if constexpr (std::integral<bare> && std::is_signed_v<bare>) {

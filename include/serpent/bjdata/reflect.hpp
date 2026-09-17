@@ -326,7 +326,7 @@ struct widest_member {
         if (!std::integral<field> && !std::floating_point<field>) return 0;
 
         static constexpr std::string_view name = serpent::detail::field_key<T, Member>();
-        return detail::encoded_key<name>.size() + plain_writer::widest_marked;
+        return detail::encoded_key<name>.size() + writer::widest_marked;
     }();
 };
 
@@ -340,10 +340,10 @@ struct widest_member {
  * is written the usual way, and the run ends before it and another may begin after. Which
  * members are in which run is settled when this is compiled - see member_runs.hpp.
  */
-template<writer_options Options, typename T>
+template<prefer Preference, typename T>
 class object_writer {
     using runs = serpent::detail::member_runs<T, widest_member>;
-    using writer = basic_writer<Options>;
+    using writer = basic_writer<Preference>;
 
     writer &out;
     const T &value;
@@ -416,13 +416,13 @@ private:
  * Found by ordinary lookup from serializer<T>::write, as read_reflected is, so that a writer with
  * no such function does not take this path.
  */
-template<writer_options Options, reflected_type T>
+template<prefer Preference, reflected_type T>
     requires (!serpent::detail::is_discriminated<T>())
-void write_reflected(basic_writer<Options> &out, const T &value) {
+void write_reflected(basic_writer<Preference> &out, const T &value) {
     static_assert(serpent::detail::keys_are_distinct<T>(), serpent::detail::duplicate_key_message<T>());
     static_assert(serpent::detail::annotations_make_sense<T>(), serpent::detail::annotation_complaint<T>());
     const auto scope = out.object();
-    object_writer<Options, T> { out, value }.write_members();
+    object_writer<Preference, T> { out, value }.write_members();
 }
 
 #endif // SERPENT_BOUNDED_OBJECT_WRITE

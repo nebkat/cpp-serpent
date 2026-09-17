@@ -107,15 +107,12 @@ std::string digest(const view &value) {
 }
 
 /**
- * Re-encodes a document through the writer's *value* API rather than by copying markers.
- *
- * This is what makes the comparison meaningful: the reference encoder chose every marker
- * from the value, and the values round-trip, so if our bytes match its bytes then the whole
- * ladder agrees - integer widths, float narrowing, the packing measurement, container shapes
- * and key encoding. High precision is the one value that must be re-emitted by marker, since
- * H reads back as an ordinary string.
+ * Re-encodes a document through the writer's *value* API rather than by copying markers, so
+ * that every marker in what comes out is one this writer chose. High precision is the one value
+ * that must be re-emitted by marker, since H reads back as an ordinary string.
  */
-void reencode(basic_writer<reference_parity> &out, view source) {
+template<prefer Preference>
+void reencode(basic_writer<Preference> &out, view source) {
     switch (source.type()) {
     case kind::null: out.null(); return;
     case kind::boolean: out.value(source.as_bool() == true); return;
@@ -270,17 +267,23 @@ int main(int argc, char **argv) {
                 std::string_view { read_text(directory / (name + ".digest")) },
                 name + ": decodes to the same values as the reference implementation");
 
-        // The headline check: re-encoding the decoded values must reproduce the reference bytes.
-        {
+        // Written again by this library, preferring either thing, it is the same values: the
+        // markers may all differ from the fixture's, and what they hold may not.
+        const auto rewritten_as = [&]<prefer Preference>() {
             std::vector<std::byte> produced;
             container_sink out { produced };
-            basic_writer<reference_parity> target { out };
+            basic_writer<Preference> target { out };
             reencode(target, view::over(bytes));
-            const auto finished = target.finish();
-            check(finished.has_value(), name + ": re-encodes cleanly");
-            check_equal(std::string_view { hex(produced) }, std::string_view { hex(bytes) },
-                    name + ": re-encodes to the same bytes as the reference implementation");
-        }
+            check(target.finish().has_value(), name + ": re-encodes cleanly");
+            check(validate(produced).has_value(), name + ": and what it wrote validates");
+            check_equal(std::string_view { digest(view::over(produced)) },
+                    std::string_view { read_text(directory / (name + ".digest")) },
+                    name + ": re-encoded, it decodes to the same values");
+            return produced.size();
+        };
+        const auto small = rewritten_as.template operator()<prefer::size>();
+        const auto fast = rewritten_as.template operator()<prefer::speed>();
+        check(small <= fast, name + ": preferring size is never larger than preferring speed");
 
         // JSON output is checked against the reference's own JSON rendering of the same
         // bytes, so the number formatting, key order, escaping and indentation all have to

@@ -23,8 +23,8 @@ struct fragment {
     // Into BJData the bytes go through untouched. Into JSON they are walked and transcribed.
     // One overload per writer is what to_json is for: neither the type nor its author has to
     // ask what is being written.
-    template<bjdata::writer_options Options>
-    friend void to_json(bjdata::basic_writer<Options> &out, const fragment &value) {
+    template<bjdata::prefer Preference>
+    friend void to_json(bjdata::basic_writer<Preference> &out, const fragment &value) {
         bjdata::write_value(out, bjdata::view::over(value.bytes));
     }
 

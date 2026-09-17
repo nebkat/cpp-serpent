@@ -57,17 +57,17 @@ struct [[= serpent::serializable {}]] interrupted {
     int last = -1;
 };
 
-template<bjdata::writer_options Options, typename T>
+template<bjdata::prefer Preference, typename T>
 std::vector<std::byte> as_a_value(const T &value) {
-    return bjdata::encode<Options>(value);
+    return bjdata::encode<Preference>(value);
 }
 
 /** The same members, written one at a time through the visitor every format shares. */
-template<bjdata::writer_options Options, typename T>
+template<bjdata::prefer Preference, typename T>
 std::vector<std::byte> member_by_member(const T &value) {
     std::vector<std::byte> out;
     serpent::container_sink sink { out };
-    bjdata::basic_writer<Options> target { sink };
+    bjdata::basic_writer<Preference> target { sink };
     {
         const auto scope = target.object();
         serpent::write_members(target, value);
@@ -78,9 +78,8 @@ std::vector<std::byte> member_by_member(const T &value) {
 
 template<typename T>
 void same_either_way(const T &value, std::string_view what) {
-    check(as_a_value<bjdata::writer_options {}>(value) == member_by_member<bjdata::writer_options {}>(value), what);
-    check(as_a_value<bjdata::no_compaction>(value) == member_by_member<bjdata::no_compaction>(value), what);
-    check(as_a_value<bjdata::reference_parity>(value) == member_by_member<bjdata::reference_parity>(value), what);
+    check(as_a_value<bjdata::prefer::size>(value) == member_by_member<bjdata::prefer::size>(value), what);
+    check(as_a_value<bjdata::prefer::speed>(value) == member_by_member<bjdata::prefer::speed>(value), what);
 }
 
 /** Every capacity short of the document fails without losing what fitted; the exact one succeeds. */

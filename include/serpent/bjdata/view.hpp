@@ -9,6 +9,7 @@
 #include <serpent/bjdata/marker.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
+#include <algorithm>
 #include <concepts>
 #include <expected>
 #include <iterator>
@@ -722,6 +723,24 @@ inline view view::operator[](std::string_view key) const noexcept {
         return std::unexpected { error { errc::trailing_data, source.offset_of(source.position) } };
     }
     return {};
+}
+
+/**
+ * Fills a contiguous container of numbers from a typed array of the same numbers, in one copy.
+ *
+ * Found by ordinary lookup from the general container read, which otherwise reads an element at
+ * a time through the iterator. Answers nothing for any other shape - an untyped array, a typed
+ * one of another width - and leaves those to it.
+ */
+template<std::ranges::contiguous_range C, typename T = std::ranges::range_value_t<C>>
+    requires (strong_type_for<T>() != marker::invalid) && std::is_arithmetic_v<T> && requires(C &out) { out.resize(std::size_t {}); }
+std::optional<bool> read_sequence(const view &source, C &out) {
+    const auto values = source.as_span<T>();
+    if (!values) return std::nullopt;
+
+    out.resize(values->size());
+    std::ranges::copy(*values, std::ranges::begin(out));
+    return true;
 }
 
 } // namespace serpent::bjdata

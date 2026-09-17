@@ -62,7 +62,7 @@ See [Reading](reading.md).
 | Allocates | only where you ask it to; reading allocates nothing |
 | Without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
 | Types you do not own | described from outside, with no conversion code — [here](reflection.md#a-type-you-cannot-annotate) |
-| Output | BJData byte-identical to the reference implementation; JSON the same [but for how an extreme real is spelled](json.md#formatting) |
+| Output | BJData [as small or as quick as it can be](bjdata.md#size-or-speed), whichever you prefer |
 
 !!! note "Reflection needs GCC 16.1 with `-freflection`"
 

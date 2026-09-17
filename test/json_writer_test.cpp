@@ -153,19 +153,15 @@ void containers() {
 
     check_equal(
             json::encode(point { 3, 4 }), std::string { "{\"x\":3,\"y\":4}" }, "the macro form writes JSON directly");
-    // One definition. The same call site produces a generic array here, because BJData
-    // measured it and found that smaller...
+    // One definition. The same call site writes a JSON array here...
     check_equal(json::encode(legacy { 7, { 1, 2, 3 } }), std::string { "{\"code\":7,\"readings\":[1,2,3]}" },
             "one templated to_json writes JSON");
-    check_equal(std::string_view { hex(encode<reference_parity>(legacy { 7, { 1, 2, 3 } })) },
-            "7b5504636f64655507550872656164696e67735b5501550255035d7d",
-            "and BJData, generically for three small values");
 
-    // ...and a packed one here, from the very same to_json body.
+    // ...and a typed array of what the readings are here, from the very same to_json body.
     const legacy larger { 7, { 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007 } };
     check_equal(std::string_view { hex(encode(larger)) },
             "7b5504636f64655507550872656164696e67735b2475235508e803e903ea03eb03ec03ed03ee03ef037d",
-            "and a packed array once packing wins, with no change to the type");
+            "and BJData, with no change to the type");
     check_equal(json::encode(larger).substr(0, 24), std::string { "{\"code\":7,\"readings\":[10" },
             "while JSON writes numbers either way");
 

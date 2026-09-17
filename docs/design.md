@@ -63,18 +63,16 @@ the format's, and naming them the same would hide it exactly where it matters.
 
 ## Correctness
 
-Checked against a reference implementation rather than against hand-written vectors. For each
-of 44 documents, the reference implementation encodes it and decodes
-those bytes back, and then:
+Checked against a corpus of 44 documents encoded by another implementation, each with the
+values it holds, its block notation and its JSON alongside:
 
 1. the block notation matches, token for token;
 2. the view decodes to the same values;
-3. **re-encoding those values reproduces the reference bytes exactly**;
+3. written again by this library, preferring size and preferring speed, it decodes to the same
+   values again;
 4. splicing reproduces the document byte for byte;
-5. the JSON output matches the reference implementation's own JSON, but for a very large or
-   very small real, which it spells out in full and this library writes [with an
-   exponent](json.md#formatting);
-6. parsing the reference implementation's JSON gives the same values again.
+5. the JSON output matches, but for a very large or very small real, which this library writes
+   [with an exponent](json.md#formatting), and parsing that JSON gives the same values again.
 
 Every suite also truncates its documents at each byte offset and requires a clean rejection,
 under AddressSanitizer and UndefinedBehaviorSanitizer. Every header compiles on its own.
