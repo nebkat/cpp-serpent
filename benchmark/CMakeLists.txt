@@ -117,7 +117,8 @@ set(BENCH_TARGETS "")
 set(BENCH_DEFAULT_SWITCHES
     SERPENT_USE_ZMIJ=1
     SERPENT_BOUNDED_OBJECT_WRITE=1
-    SERPENT_INTEGER_TABLE=1)
+    SERPENT_INTEGER_TABLE=1
+    SERPENT_USE_FAST_FLOAT=1)
 
 function(serpent_add_benchmark CONFIGURATION)
     set(SWITCHES ${BENCH_DEFAULT_SWITCHES})
@@ -149,7 +150,8 @@ endfunction()
 # As the library comes; with everything off; and with the one switch that costs an image real
 # space turned up.
 serpent_add_benchmark(default)
-serpent_add_benchmark(plain SERPENT_USE_ZMIJ=0 SERPENT_BOUNDED_OBJECT_WRITE=0 SERPENT_INTEGER_TABLE=0)
+serpent_add_benchmark(plain
+    SERPENT_USE_ZMIJ=0 SERPENT_BOUNDED_OBJECT_WRITE=0 SERPENT_INTEGER_TABLE=0 SERPENT_USE_FAST_FLOAT=0)
 serpent_add_benchmark(large SERPENT_INTEGER_TABLE=2)
 
 # `default` with one switch off at a time, which is what says what that switch is worth. Several
@@ -159,6 +161,7 @@ if(SERPENT_BENCH_ABLATIONS)
     serpent_add_benchmark(without_zmij SERPENT_USE_ZMIJ=0)
     serpent_add_benchmark(without_bounded_write SERPENT_BOUNDED_OBJECT_WRITE=0)
     serpent_add_benchmark(without_integer_table SERPENT_INTEGER_TABLE=0)
+    serpent_add_benchmark(without_fast_float SERPENT_USE_FAST_FLOAT=0)
 endif()
 
 find_package(Python3 COMPONENTS Interpreter)

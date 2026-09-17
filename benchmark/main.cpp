@@ -766,6 +766,7 @@ static void print_configuration() {
     std::printf("  SERPENT_USE_ZMIJ              %d\n", SERPENT_USE_ZMIJ);
     std::printf("  SERPENT_BOUNDED_OBJECT_WRITE  %d\n", SERPENT_BOUNDED_OBJECT_WRITE);
     std::printf("  SERPENT_INTEGER_TABLE         %d\n", SERPENT_INTEGER_TABLE);
+    std::printf("  SERPENT_USE_FAST_FLOAT        %d\n", SERPENT_USE_FAST_FLOAT);
 }
 
 int main(int argc, char **argv) {

@@ -11,6 +11,7 @@ set(TESTS
     bjdata_notation
     bjdata_writer
     json_reader
+    json_real_read
     json_indexed
     json_walking
     bjdata_walking

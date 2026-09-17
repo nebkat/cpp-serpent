@@ -11,7 +11,12 @@
 // the cursor where it was so the caller can step over whatever is there instead. A value of the
 // right kind that is malformed fails the cursor itself.
 
+#include <serpent/config.hpp>
 #include <serpent/json/scan.hpp>
+
+#if SERPENT_USE_FAST_FLOAT
+#include <serpent/external/fast_float/fast_float.h>
+#endif
 
 #include <charconv>
 #include <concepts>
@@ -82,16 +87,14 @@ template<std::integral T>
 }
 
 /**
- * A real, converted from exactly the text the grammar accepted.
+ * A real, in two walks: the grammar is checked, then what it accepted is converted.
  *
- * Two walks where an integer needs one, because what std::from_chars accepts as a real is wider
- * than JSON in ways that cannot be told from one character afterwards - "inf", ".5", "5." - so
- * the grammar is checked first and the conversion runs over what it accepted.
+ * Two where an integer needs one, because what std::from_chars accepts as a real is wider than
+ * JSON in ways that cannot be told from one character afterwards - "inf", ".5", "5." - so the
+ * conversion is only ever shown text the grammar has already passed.
  */
 template<std::floating_point T>
-[[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
-    if (!at_number(scan)) return false;
-
+[[nodiscard]] bool read_real_in_two_walks(scanner::cursor &scan, T &into) noexcept {
     const auto text = scanner::scan_number(scan);
     if (!scan.ok()) return false;
 
@@ -104,6 +107,49 @@ template<std::floating_point T>
     }
     into = static_cast<T>(value);
     return true;
+}
+
+#if SERPENT_USE_FAST_FLOAT
+
+/**
+ * A real, in one walk: fast_float can be told to accept what JSON does, so the walk that
+ * converts is also the one that checks.
+ *
+ * With one exception, decided by looking at a single character afterwards as the integer read
+ * does. Given an exponent with no digits - "1e", "1e+" - fast_float takes the number before it
+ * and stops at the 'e', where JSON says the whole is malformed. A number it has taken is never
+ * followed by an 'e' otherwise, so one that is, is that case.
+ *
+ * Text that is refused, either way, is handed to the two-walk read, which refuses it too and
+ * says why and where - the slow way to fail, and failing is not what needs to be fast.
+ */
+template<std::floating_point T>
+[[nodiscard]] bool read_real_in_one_walk(scanner::cursor &scan, T &into) noexcept {
+    namespace fast_float = serpent::external::fast_float;
+
+    double value = 0;
+    const auto converted = fast_float::from_chars(scan.position, scan.limit, value, fast_float::chars_format::json);
+    const bool exponent_without_digits =
+            converted.ptr != scan.limit && (*converted.ptr == 'e' || *converted.ptr == 'E');
+    if (converted.ec == std::errc::invalid_argument || exponent_without_digits)
+        return read_real_in_two_walks(scan, into);
+    if (converted.ec != std::errc {}) return false;
+
+    into = static_cast<T>(value);
+    scan.position = converted.ptr;
+    return true;
+}
+
+#endif
+
+template<std::floating_point T>
+[[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
+    if (!at_number(scan)) return false;
+#if SERPENT_USE_FAST_FLOAT
+    return read_real_in_one_walk(scan, into);
+#else
+    return read_real_in_two_walks(scan, into);
+#endif
 }
 
 /**
