@@ -127,12 +127,23 @@ can read in a hex dump.
 
 | | serpent | struct-mapping lib | DOM lib |
 |---|---:|---:|---:|
-| decode | 2.21 ms | **0.56 ms** (4.0x faster) | 7.30 ms (3.3x slower) |
-| encode | 1.48 ms | **0.28 ms** (5.3x faster) | 4.80 ms (3.2x slower) |
+| decode | 1.58 ms | **0.56 ms** (2.8x faster) | 7.49 ms (4.7x slower) |
+| encode | 1.49 ms | **0.28 ms** (5.4x faster) | 4.80 ms (3.2x slower) |
 | allocations, decode | **15** | 10,015 | 70,029 |
 | allocations, encode | 17 | **12** | 70,023 |
 
-**This is serpent's own use case and it loses it by 4-5x.** That gap is implementation headroom
+The gap depends a good deal on what the fields are. Five of one type at a time, ten thousand
+records, against the same library:
+
+| | strings | reals | integers | booleans |
+|---|---:|---:|---:|---:|
+| behind by | **1.4x** | 3.3x | 4.3x | 5.1x |
+
+A string is most of its own cost in any library, so the overhead around it matters least; a
+boolean is four bytes and a pointer bump, so it matters most. That the shape of the record
+moves the answer by 3.7x is worth knowing before reading a single number as *the* number.
+
+**This is serpent's own use case and it still loses it.** That gap is implementation headroom
 rather than an architectural limit: the other library builds each key's `"name":` at compile
 time and emits it as one fixed-size copy, writes into a pre-padded buffer by index instead of
 through a call, and carries its own number conversion.
@@ -144,13 +155,13 @@ text to parse and the difference is almost entirely the object graph the other o
 
 | | serpent | on-demand | fast DOM A | fast DOM B | DOM lib |
 |---|---:|---:|---:|---:|---:|
-| count every value, citm_catalog.json | 1.16 ms | **0.30 ms** | 0.42 ms | 0.89 ms | 7.35 ms |
-| the same, with an index built first | 0.86 ms | | | | |
-| sum every coordinate, canada.json | 4.58 ms | 1.63 ms | **1.26 ms** | 1.94 ms | 12.60 ms |
-| the same, with an index built first | 2.94 ms | | | | |
+| count every value, citm_catalog.json | 1.24 ms | **0.31 ms** | 0.43 ms | 0.90 ms | 7.39 ms |
+| the same, with an index built first | 0.87 ms | | | | |
+| sum every coordinate, canada.json | 3.69 ms | 1.63 ms | **1.26 ms** | 1.92 ms | 13.26 ms |
+| the same, with an index built first | 2.97 ms | | | | |
 
-A structural scan that returns no values — `json::validate` — takes 0.73 ms on citm, so
-traversal costs about 1.6x merely checking the same file.
+A structural scan that returns no values — `json::validate` — takes 0.74 ms on citm, so
+traversal costs about 1.7x merely checking the same file.
 
 An [index](reading.md#an-index-for-a-document-read-more-than-once) is the answer when a document
 is walked more than once: it costs about what validating costs to build, and takes a third off
@@ -170,12 +181,12 @@ the next table.
 
 | | serpent | on-demand | fast DOM A | fast DOM B | DOM lib |
 |---|---:|---:|---:|---:|---:|
-| first key of citm_catalog.json | **0.09 µs** | 180 µs | 367 µs | 850 µs | 7213 µs |
-| last key of the same file | 709 µs | **272 µs** | 370 µs | 856 µs | 7267 µs |
-| sum ids, twitter.json | 293 µs | **111 µs** | 145 µs | 781 µs | 3329 µs |
+| first key of citm_catalog.json | **0.09 µs** | 181 µs | 369 µs | 873 µs | 7304 µs |
+| last key of the same file | 729 µs | **274 µs** | 370 µs | 867 µs | 7279 µs |
+| sum ids, twitter.json | 297 µs | **114 µs** | 145 µs | 785 µs | 3375 µs |
 
 The two citm rows are the same operation on the same file. serpent stops as soon as it finds
-the key: 0.09 µs at the front of the document, 709 µs at the back. Everything else pays for the
+the key: 0.09 µs at the front of the document, 729 µs at the back. Everything else pays for the
 whole document either way, which is why their numbers barely move between the rows.
 
 So the win is real but narrow: **reach a field early and nothing else is close; read the whole
@@ -206,7 +217,7 @@ into a fixed buffer took it to 13.
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types, and want the most speed | a struct-mapping library is 4-5x quicker |
+| convert your own types, and want the most speed | a struct-mapping library is 1.4-5x quicker, by field type |
 | traverse whole documents repeatedly | an indexed parser is 3-4x quicker |
 | want a mutable document object | serpent has none at all |
 | need BJData and JSON from one definition | serpent |
