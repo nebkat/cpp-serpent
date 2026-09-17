@@ -51,14 +51,15 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
-  - Guide:
-      - Your types: types.md
-      - Reflection: reflection.md
+  - Describing your types:
+      - Annotations: reflection.md
+      - Types you do not own: types.md
+  - Using it:
       - Reading: reading.md
       - Writing: writing.md
-      - A tree: value.md
+      - A document as a tree: value.md
   - Formats:
       - JSON: json.md
       - BJData: bjdata.md
   - Benchmarks: benchmarks.md
-  - Design: design.md
+  - Design notes: design.md

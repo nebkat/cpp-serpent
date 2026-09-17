@@ -140,3 +140,44 @@ reader["name"].string_is("expected");        // compares without materialising
 
     JSON never hands back a `string_view` that happens to work when the data has no escapes.
     An API whose shape depends on its contents passes testing and fails in the field.
+
+## Walking a document costs one pass
+
+A forward iterator has to know where a value ends before it can hand you the next one, and with
+nothing written down the only way to know is to walk it. Left alone, that means a byte is walked
+once by the loop that wants it and again by the loop stepping over it — once for every level of
+nesting above it.
+
+It is not left alone. A reader keeps a note of how far a traversal got, so the step to the next
+value resumes instead of starting again:
+
+```cpp
+for (auto row : document.array())          // outer
+    for (auto value : row.array())         // inner, and it leaves the note
+        total += value.as_int<int>();      // so the outer step resumes
+```
+
+Nothing to switch on and nothing to hold. The note is only ever about one value at a time, so a
+traversal it does not describe simply scans, exactly as it would have anyway — which is why a
+value read twice, two handles held at once, and members taken out of order all keep working.
+
+Decoding into a type gets the same treatment from the other side: a reflected type is read by
+walking the document once and handing each key to the member that claims it, so a document whose
+keys arrive in an order you did not choose costs no more than one that matches your declarations.
+
+## An index, for a document read more than once
+
+Where the same large document is traversed repeatedly, `#!cpp #include <serpent/json/indexed.hpp>`
+records where every value is, once:
+
+```cpp
+const auto index = json::structural_index::over(text);
+
+for (auto row : index.root()["rows"].array())      // every step is a hop, not a scan
+    total += row["value"].as_float<double>().value_or(0);
+```
+
+It answers everything an ordinary reader answers, so anything that takes a reader takes this.
+One entry per value at twenty bytes — for a 1.6 MB document, 0.7 MB, smaller than the document —
+and building it costs about what validating costs. Worth it from the second traversal; for a
+single pass, or for a message rather than a file, read normally.

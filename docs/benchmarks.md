@@ -114,16 +114,22 @@ text to parse and the difference is almost entirely the object graph the other o
 
 | | serpent | on-demand | fast DOM A | fast DOM B | DOM lib |
 |---|---:|---:|---:|---:|---:|
-| sum every coordinate, canada.json | 10.2 ms | 1.96 ms | **1.21 ms** | 1.82 ms | 11.5 ms |
-| count every value, citm_catalog.json | 4.83 ms | **0.32 ms** | 0.40 ms | 0.97 ms | 6.61 ms |
+| count every value, citm_catalog.json | 0.94 ms | **0.32 ms** | 0.42 ms | 0.92 ms | 7.48 ms |
+| sum every coordinate, canada.json | 1.64 ms | 1.63 ms | **1.27 ms** | 1.92 ms | 12.87 ms |
 
-**serpent is 5-15x slower than the indexed parsers here.** The reason is structural: they index
-or materialize the document once and then walk pointers, while serpent re-scans the bytes on
-every step. Traverse a document completely and you pay that scan over and over; they pay it
-once.
+A structural scan that returns no values — `json::validate` — takes 0.99 ms on citm, so
+traversal now costs slightly *less* than merely checking the same file, because validating
+inspects every scalar's grammar and counting needs only the shape.
 
-A structural scan that returns no values — `json::validate` — takes 0.72 ms on the same file,
-so most of the 4.83 ms is the repeated re-walking, not the parsing.
+The indexed parsers keep a lead, and part of it is vectorisation: the on-demand parser ships a
+scalar kernel too, and switching SIMD off costs it 2.1–2.5×, so the vector instructions are the
+*smaller* half of its advantage. The rest is a per-byte scanning rate within about 25% of that
+scalar build.
+
+One property no tuning changes: a lazy reader passes over the bytes of every value you want
+twice — once to find it, once to convert it — where an eager parser reads once and keeps the
+result. Ask for every value in a document and laziness is a straight loss. Ask for a few and see
+the next table.
 
 ## Reading part of a document
 
