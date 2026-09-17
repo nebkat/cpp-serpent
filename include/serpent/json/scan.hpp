@@ -11,6 +11,8 @@
 
 #include <charconv>
 #include <span>
+#include <array>
+#include <bit>
 #include <string_view>
 
 #include <cstddef>
@@ -23,6 +25,49 @@ namespace serpent::json::scanner {
 }
 
 [[nodiscard]] constexpr bool is_digit(char value) noexcept { return value >= '0' && value <= '9'; }
+
+// ---------------- scanning runs of one kind of character ----------------
+
+inline constexpr std::uint8_t class_space = 1 << 0;       ///< space, tab, newline, carriage return
+inline constexpr std::uint8_t class_digit = 1 << 1;       ///< 0-9
+inline constexpr std::uint8_t class_string_body = 1 << 2; ///< anything a string may hold as itself
+
+/**
+ * What each byte is, as bits, so a test is a load and an and rather than a run of comparisons.
+ *
+ * 256 bytes of constants, which is the whole cost.
+ */
+inline constexpr auto character_class = [] {
+    std::array<std::uint8_t, 256> table {};
+    for (std::size_t value = 0; value < table.size(); ++value) {
+        std::uint8_t flags = 0;
+        if (value == ' ' || value == '\t' || value == '\n' || value == '\r') flags |= class_space;
+        if (value >= '0' && value <= '9') flags |= class_digit;
+        // A string holds anything but its own quote, a backslash, and the control characters
+        // JSON insists are escaped. Everything from 0x80 up is UTF-8 and passes through.
+        if (value != '"' && value != '\\' && value >= 0x20) flags |= class_string_body;
+        table[value] = flags;
+    }
+    return table;
+}();
+
+/**
+ * The first byte from `position` that is not of the wanted class.
+ *
+ * One compare for the end and one table lookup for the byte, and nothing else: what this
+ * replaces asked the cursor whether it had failed and whether it was null on every character,
+ * to answer a question that cannot change during a run.
+ *
+ * Deliberately not widened to read several bytes at once. The runs here are short - the
+ * whitespace between two tokens is usually one byte and a number is eight or so - and scanning
+ * sixteen to find a run of one costs far more than it saves. Measured: a sixteen-wide version
+ * of this made a number-heavy document four times slower.
+ */
+[[nodiscard]] constexpr const char *advance_while(
+        const char *position, const char *limit, std::uint8_t wanted) noexcept {
+    while (position < limit && (character_class[static_cast<unsigned char>(*position)] & wanted) != 0) ++position;
+    return position;
+}
 
 [[nodiscard]] constexpr int hex_value(char value) noexcept {
     if (value >= '0' && value <= '9') return value - '0';
@@ -76,8 +121,8 @@ struct cursor {
 };
 
 constexpr void skip_whitespace(cursor &scan) noexcept {
-    while (scan.available(1) && is_space(scan.peek()))
-        scan.advance(1);
+    if (!scan.ok() || scan.position == nullptr) return;
+    scan.position = advance_while(scan.position, scan.limit, class_space);
 }
 
 /** A scanned string: its contents between the quotes, still escaped. */
@@ -103,6 +148,10 @@ struct string_span {
 
     const char *const begin = scan.position;
     while (true) {
+        // Everything a string holds as itself goes by without being looked at twice; what stops
+        // the run is the quote, a backslash, or a control character, and those are rare.
+        scan.position = advance_while(scan.position, scan.limit, class_string_body);
+
         if (!scan.need(1)) return result;
         const char value = scan.take();
 
@@ -198,15 +247,13 @@ struct string_span {
         scan.advance(1);
         if (scan.available(1) && is_digit(scan.peek())) return reject(); // no leading zeros
     } else {
-        while (scan.available(1) && is_digit(scan.peek()))
-            scan.advance(1);
+        scan.position = advance_while(scan.position, scan.limit, class_digit);
     }
 
     if (scan.available(1) && scan.peek() == '.') {
         scan.advance(1);
         if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-        while (scan.available(1) && is_digit(scan.peek()))
-            scan.advance(1);
+        scan.position = advance_while(scan.position, scan.limit, class_digit);
     }
 
     if (scan.available(1) && (scan.peek() == 'e' || scan.peek() == 'E')) {
