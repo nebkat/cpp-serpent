@@ -32,48 +32,78 @@ namespace serpent::json::direct {
     return false;
 }
 
-/** Any arithmetic type but bool, which JSON spells as a word rather than a number. */
-template<typename T>
-concept number = (std::integral<T> || std::floating_point<T>) && !std::same_as<T, bool>;
+/** Whether a number could begin at the cursor: a digit, or the sign before one. */
+[[nodiscard]] constexpr bool at_number(const scanner::cursor &scan) noexcept {
+    return scan.available(1) && (scan.peek() == '-' || scanner::is_digit(scan.peek()));
+}
 
 /**
- * A number, converted from exactly the text the grammar accepted.
+ * An integer, converted in the same walk that finds where it ends.
  *
- * An integer is read as the widest integer of its signedness and then checked against the type
- * asked for, so that "does not fit" is one test whatever the width. Converting an integer stops
- * at a fraction or an exponent, so a real leaves text unconverted - which is how a real is told
- * from an integer here, without looking for the point separately.
+ * std::from_chars reads an integer exactly as JSON writes one, with two exceptions that are both
+ * decided by looking at a single character afterwards: it accepts a leading zero, which JSON
+ * forbids, and it stops happily at the point or exponent of a real, which here means the value
+ * is not an integer at all. So there is no need to walk the digits first to check the grammar.
+ *
+ * Read as the widest integer of its signedness and then checked against the type asked for, so
+ * that "does not fit" is one test whatever the width.
  */
-template<number T>
+template<std::integral T>
+    requires (!std::same_as<T, bool>)
 [[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
-    if (!scan.available(1) || !(scan.peek() == '-' || scanner::is_digit(scan.peek()))) return false;
+    if (!at_number(scan)) return false;
 
     const char *const start = scan.position;
+    const bool negative = *start == '-';
+    const char *const digits = negative ? start + 1 : start;
+
+    T value {};
+    const auto convert = [&]<typename Wide>() -> const char * {
+        Wide wide {};
+        const auto converted = std::from_chars(start, scan.limit, wide);
+        if (converted.ec != std::errc {} || !std::in_range<T>(wide)) return nullptr;
+        value = static_cast<T>(wide);
+        return converted.ptr;
+    };
+    const char *const end = negative ? convert.template operator()<std::int64_t>()
+                                     : convert.template operator()<std::uint64_t>();
+    if (end == nullptr) return false;
+
+    if (*digits == '0' && end - digits > 1) {
+        scan.fail(errc::invalid_number, start);
+        return false;
+    }
+    const bool is_real = end != scan.limit && (*end == '.' || *end == 'e' || *end == 'E');
+    if (is_real) return false;
+
+    into = value;
+    scan.position = end;
+    return true;
+}
+
+/**
+ * A real, converted from exactly the text the grammar accepted.
+ *
+ * Two walks where an integer needs one, because what std::from_chars accepts as a real is wider
+ * than JSON in ways that cannot be told from one character afterwards - "inf", ".5", "5." - so
+ * the grammar is checked first and the conversion runs over what it accepted.
+ */
+template<std::floating_point T>
+[[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
+    if (!at_number(scan)) return false;
+
     const auto text = scanner::scan_number(scan);
     if (!scan.ok()) return false;
-    const char *const end = text.data() + text.size();
 
-    const auto convert = [&]<typename Wide>() {
-        Wide wide {};
-        const auto converted = std::from_chars(text.data(), end, wide);
-        if (converted.ec != std::errc {} || converted.ptr != end) return false;
-        if constexpr (std::integral<T>) {
-            if (!std::in_range<T>(wide)) return false;
-        }
-        into = static_cast<T>(wide);
-        return true;
-    };
-
-    bool fits = false;
-    if constexpr (std::floating_point<T>) {
-        fits = convert.template operator()<double>();
-    } else if (text.front() == '-') {
-        fits = convert.template operator()<std::int64_t>();
-    } else {
-        fits = convert.template operator()<std::uint64_t>();
+    double value = 0;
+    const auto converted = std::from_chars(text.data(), text.data() + text.size(), value);
+    // out_of_range means the literal overflows a double; JSON has no infinity to mean.
+    if (converted.ec != std::errc {}) {
+        scan.position = text.data();
+        return false;
     }
-    if (!fits) scan.position = start;
-    return fits;
+    into = static_cast<T>(value);
+    return true;
 }
 
 /**

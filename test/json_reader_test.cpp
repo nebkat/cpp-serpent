@@ -48,6 +48,27 @@ void scalars() {
     check(!parse("256").as_int<std::uint8_t>().has_value(), "narrowing is range checked");
     check(!parse("-1").as_int<unsigned>().has_value(), "a negative does not read as unsigned");
 
+    // An integer is converted in the same walk that finds its end, so each place the standard
+    // conversion and JSON disagree about what an integer is has to be settled afterwards. These
+    // are those places.
+    check(!parse("1e3").as_int<int>().has_value(), "an exponent makes a real, even with no point");
+    check(!parse("1E3").as_int<int>().has_value(), "in either case");
+    check(!parse("7.0").as_int<int>().has_value(), "a real that happens to be whole is still a real");
+    check_equal(parse("-0").as_int<int>().value_or(9), 0, "negative zero is an integer");
+    check_equal(parse("-0").as_int<unsigned>().value_or(9u), 0u, "and fits an unsigned type");
+    check(!parse("9223372036854775808").as_int<std::int64_t>().has_value(), "one past the widest signed");
+    check(!parse("18446744073709551616").as_int<std::uint64_t>().has_value(), "one past the widest unsigned");
+    check(!parse("-9223372036854775809").as_int<std::int64_t>().has_value(), "one below the narrowest");
+    check_equal(parse("[10,20]")[0].as_int<int>().value_or(0), 10, "an integer ends at a comma");
+    check_equal(parse("[10]")[0].as_int<int>().value_or(0), 10, "or a bracket");
+    check_equal(parse("{\"a\":10}")["a"].as_int<int>().value_or(0), 10, "or a brace");
+    check_equal(parse("10").as_int<int>().value_or(0), 10, "or the end of the text");
+    // Leading zeros are not JSON, whatever a conversion would make of them.
+    check(!json::validate("01"), "a leading zero is not a number");
+    check(!json::decode<int>("01").has_value(), "and does not decode as one");
+    check(!json::decode<int>("-01").has_value(), "behind a sign either");
+    check(!json::decode<std::vector<int>>("[1,02,3]").has_value(), "nor inside a container");
+
     // Grammatically valid but not representable.
     check(parse("1e400").is_real(), "1e400 parses");
     check(!parse("1e400").as_float<double>().has_value(), "1e400 does not fit a double");
