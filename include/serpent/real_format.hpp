@@ -43,13 +43,58 @@ struct real_text {
 };
 
 /**
+ * The shortest digits that read back as a double, and where the decimal point falls among them.
+ *
+ * Finding these is the hard part of writing a real, and the only part that depends on how it is
+ * done: everything after it is layout. So this is the seam - one function produces it, and
+ * which one is chosen when the library is built.
+ */
+struct shortest_digits {
+    std::array<char, 32> storage {}; ///< room for the longest text a provider converts into
+    std::size_t first = 0; ///< where in the storage the digits begin
+    std::size_t count = 0; ///< a double needs at most seventeen
+    int point = 0; ///< how many digits stand before the decimal point: may be negative, or more than there are
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept {
+        return { this->storage.data() + this->first, this->count };
+    }
+};
+
+/**
+ * Finds them with the standard library, for a value that is finite and greater than zero.
+ *
+ * std::to_chars in scientific form writes "d.ddde+XX": the digits either side of a point, then
+ * the power of ten of the first one. The point is all that stands between the first digit and
+ * the rest, so writing the first digit over it leaves the digits as one run, a character later.
+ */
+[[nodiscard]] inline shortest_digits shortest_digits_of(double magnitude) {
+    shortest_digits digits;
+    char *const text = digits.storage.data();
+    const auto converted = std::to_chars(text, text + digits.storage.size(), magnitude, std::chars_format::scientific);
+    const std::string_view written { text, static_cast<std::size_t>(converted.ptr - text) };
+    const auto exponent_at = written.rfind('e');
+
+    if (exponent_at > 1) {
+        text[1] = text[0];
+        digits.first = 1;
+        digits.count = exponent_at - 1;
+    } else {
+        digits.count = 1;
+    }
+
+    int exponent = 0;
+    for (const char digit : written.substr(exponent_at + 2)) exponent = exponent * 10 + (digit - '0');
+    if (written[exponent_at + 1] == '-') exponent = -exponent;
+    digits.point = exponent + 1;
+    return digits;
+}
+
+/**
  * ECMAScript's number-to-string rules, plus a trailing .0 on a whole number.
  *
- * std::to_chars finds the shortest digits that read back as the same double, which is the hard
- * part, and in scientific form it hands them over as "d.ddde+XX": a first digit, the rest after
- * a point, and where the point really belongs. What is left is to lay those same digits out the
- * way the reference implementation does - written out in full between a millionth and 1e21, with
- * an exponent beyond - which is a matter of copying two runs of digits to the right places.
+ * Written out in full between a millionth and 1e21, and with an exponent beyond, as the
+ * reference implementation does it. Given the digits and where the point falls, each of those is
+ * a matter of copying them to the right place with zeros or a point around them.
  */
 inline real_text format_real(double value) {
     real_text out;
@@ -68,55 +113,38 @@ inline real_text format_real(double value) {
     }
     if (value < 0) out.push('-');
 
-    char buffer[32];
-    const auto converted = std::to_chars(buffer, buffer + sizeof(buffer), std::abs(value), std::chars_format::scientific);
-    const std::string_view text { buffer, static_cast<std::size_t>(converted.ptr - buffer) };
-
-    // "d.ddde+XX": one digit, then the rest behind a point that is not there when there are none.
-    const auto exponent_at = text.rfind('e');
-    const std::string_view first = text.substr(0, 1);
-    const std::string_view rest = exponent_at > 1 ? text.substr(2, exponent_at - 2) : std::string_view {};
-    const std::size_t significant = 1 + rest.size();
-
-    const bool exponent_negative = text[exponent_at + 1] == '-';
-    int exponent = 0;
-    for (const char digit : text.substr(exponent_at + 2)) exponent = exponent * 10 + (digit - '0');
-    if (exponent_negative) exponent = -exponent;
-
-    const int point = exponent + 1; // how many digits stand before the decimal point
+    const auto found = shortest_digits_of(std::abs(value));
+    const std::string_view digits = found.view();
+    const int point = found.point;
 
     if (point > 21 || point <= -6) {
-        // Too large or too small to write out: the digits as they came, and the exponent without
-        // the leading zero to_chars pads it with.
-        out.append(first);
-        if (!rest.empty()) {
+        // Too large or too small to write out: one digit, the rest behind a point, and the
+        // power of ten of that first digit.
+        out.append(digits.substr(0, 1));
+        if (digits.size() > 1) {
             out.push('.');
-            out.append(rest);
+            out.append(digits.substr(1));
         }
-        out.push('e');
-        out.push(exponent_negative ? '-' : '+');
-        std::string_view magnitude = text.substr(exponent_at + 2);
-        if (magnitude.size() > 1 && magnitude.front() == '0') magnitude.remove_prefix(1);
-        out.append(magnitude);
+        const int power = point - 1;
+        out.append(power < 0 ? "e-" : "e+");
+        char buffer[8];
+        const auto written = std::to_chars(buffer, buffer + sizeof(buffer), power < 0 ? -power : power);
+        out.append({ buffer, static_cast<std::size_t>(written.ptr - buffer) });
     } else if (point <= 0) {
         // Smaller than one: "0.", the zeros the exponent stands for, then every digit.
         out.append("0.");
         out.append(static_cast<std::size_t>(-point), '0');
-        out.append(first);
-        out.append(rest);
-    } else if (static_cast<std::size_t>(point) >= significant) {
+        out.append(digits);
+    } else if (static_cast<std::size_t>(point) >= digits.size()) {
         // A whole number: every digit, the zeros that pad it out to its size, and ".0".
-        out.append(first);
-        out.append(rest);
-        out.append(static_cast<std::size_t>(point) - significant, '0');
+        out.append(digits);
+        out.append(static_cast<std::size_t>(point) - digits.size(), '0');
         out.append(".0");
     } else {
-        // The point falls among the digits, `point - 1` of the way into the rest.
-        const auto before = static_cast<std::size_t>(point) - 1;
-        out.append(first);
-        out.append(rest.substr(0, before));
+        // The point falls among the digits.
+        out.append(digits.substr(0, static_cast<std::size_t>(point)));
         out.push('.');
-        out.append(rest.substr(before));
+        out.append(digits.substr(static_cast<std::size_t>(point)));
     }
 
     return out;
