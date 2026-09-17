@@ -8,7 +8,9 @@
 // &visitor` and never name the BJData writer. And write_TMP(sink, view) walks a document
 // that already exists, which is what you want for dumping a stored .bjd.
 
+#include <serpent/constant_text.hpp>
 #include <serpent/emitter.hpp>
+#include <serpent/json/scan.hpp>
 #include <serpent/real_format.hpp>
 #include <serpent/serializer.hpp>
 
@@ -61,7 +63,7 @@ class writer : public byte_emitter {
     void separate() noexcept {
         if (this->depth == 0) return;
         const auto bit = 1u << (this->depth - 1);
-        if ((this->written_mask & bit) != 0) this->put_text(",");
+        if ((this->written_mask & bit) != 0) this->put_constant(",");
         this->written_mask |= bit;
         this->indent_to(this->depth);
     }
@@ -80,44 +82,48 @@ class writer : public byte_emitter {
         this->separate();
     }
 
+    /**
+     * Writes a string between quotes, escaping what JSON will not hold as itself.
+     *
+     * Which characters those are is the reader's definition, not a second one: the same table
+     * that tells the scanner where a string's plain text stops tells this where to stop copying.
+     * Almost every string is plain from end to end and goes out in one piece.
+     */
     void write_quoted(std::string_view text) noexcept {
-        this->put_text("\"");
-        std::size_t run = 0;
-        for (std::size_t index = 0; index < text.size(); ++index) {
-            const auto value = static_cast<unsigned char>(text[index]);
-            std::string_view escape;
-            char escaped[7] = { '\\', 'u', '0', '0', '0', '0', '\0' };
-            switch (value) {
-            case '"': escape = "\\\""; break;
-            case '\\': escape = "\\\\"; break;
-            case '\b': escape = "\\b"; break;
-            case '\f': escape = "\\f"; break;
-            case '\n': escape = "\\n"; break;
-            case '\r': escape = "\\r"; break;
-            case '\t': escape = "\\t"; break;
-            default:
-                if (value < 0x20) {
-                    static constexpr char digits[] = "0123456789abcdef";
-                    escaped[4] = digits[(value >> 4) & 0xF];
-                    escaped[5] = digits[value & 0xF];
-                    escape = std::string_view { escaped, 6 };
-                }
-                break;
-            }
-            if (escape.empty()) continue;
-
-            // Flush the unescaped run in one write, then the escape.
-            this->put_text(text.substr(run, index - run));
-            this->put_text(escape);
-            run = index + 1;
+        this->put_constant("\"");
+        const char *run = text.data();
+        const char *const end = run + text.size();
+        while (true) {
+            const char *const stop = scanner::advance_while(run, end, scanner::class_string_body);
+            this->put_text(std::string_view { run, stop });
+            if (stop == end) break;
+            this->write_escape(*stop);
+            run = stop + 1;
         }
-        this->put_text(text.substr(run));
-        this->put_text("\"");
+        this->put_constant("\"");
+    }
+
+    /** One character JSON cannot hold as itself: a short escape where there is one, else \u00XX. */
+    void write_escape(char character) noexcept {
+        switch (character) {
+        case '"': return this->put_constant("\\\"");
+        case '\\': return this->put_constant("\\\\");
+        case '\b': return this->put_constant("\\b");
+        case '\f': return this->put_constant("\\f");
+        case '\n': return this->put_constant("\\n");
+        case '\r': return this->put_constant("\\r");
+        case '\t': return this->put_constant("\\t");
+        default: break;
+        }
+        static constexpr char digits[] = "0123456789abcdef";
+        const auto value = static_cast<unsigned char>(character);
+        const std::array<char, 6> escaped { '\\', 'u', '0', '0', digits[(value >> 4) & 0xF], digits[value & 0xF] };
+        this->put_constant(escaped);
     }
 
     void begin_array() noexcept {
         this->begin_value();
-        this->put_text("[");
+        this->put_constant("[");
         if (!this->push(false)) return;
         this->written_mask &= ~(1u << (this->depth - 1));
     }
@@ -126,12 +132,12 @@ class writer : public byte_emitter {
         const bool populated = this->depth > 0 && (this->written_mask & (1u << (this->depth - 1))) != 0;
         if (!this->pop(false)) return;
         if (populated) this->indent_to(this->depth);
-        this->put_text("]");
+        this->put_constant("]");
     }
 
     void begin_object() noexcept {
         this->begin_value();
-        this->put_text("{");
+        this->put_constant("{");
         if (!this->push(true)) return;
         this->written_mask &= ~(1u << (this->depth - 1));
     }
@@ -140,7 +146,7 @@ class writer : public byte_emitter {
         const bool populated = this->depth > 0 && (this->written_mask & (1u << (this->depth - 1))) != 0;
         if (!this->pop(true)) return;
         if (populated) this->indent_to(this->depth);
-        this->put_text("}");
+        this->put_constant("}");
     }
 
 public:
@@ -155,12 +161,13 @@ public:
 
     void null() noexcept {
         this->begin_value();
-        this->put_text("null");
+        this->put_constant("null");
     }
 
     void boolean(bool value) noexcept {
         this->begin_value();
-        this->put_text(value ? "true" : "false");
+        if (value) this->put_constant("true");
+        else this->put_constant("false");
     }
 
     void integer(std::int64_t value) noexcept { this->number(value); }
@@ -175,7 +182,7 @@ public:
     void real(double value) noexcept {
         this->begin_value();
         if (!std::isfinite(value)) {
-            this->put_text("null");
+            this->put_constant("null");
             return;
         }
         this->put_text(detail::format_real(value).view());
@@ -213,22 +220,19 @@ public:
             return;
         }
 
-        static constexpr auto framed = [] {
-            std::array<char, Name.size() + 3> text {};
-            text[0] = '"';
-            for (std::size_t index = 0; index < Name.size(); ++index)
-                text[1 + index] = Name[index];
-            text[Name.size() + 1] = '"';
-            text[Name.size() + 2] = ':';
-            return text;
-        }();
+        // The key as it stands in the text, and the same behind the comma that separates it from
+        // the member before: one write either way, where a comma and a key would be two.
+        static constexpr auto framed = detail::joined<Name.size() + 3>({ "\"", Name, "\":" });
+        static constexpr auto framed_after_comma = detail::joined<Name.size() + 4>({ ",\"", Name, "\":" });
 
         if (!this->inside_object()) {
             this->fail(errc::key_outside_object);
             return;
         }
-        this->separate();
-        this->put_text(std::string_view { framed.data(), framed.size() });
+        const auto level = 1u << (this->depth - 1);
+        if ((this->written_mask & level) != 0) this->put_constant(framed_after_comma);
+        else this->put_constant(framed);
+        this->written_mask |= level;
         this->pending_value = true;
     }
 
@@ -239,8 +243,8 @@ public:
         }
         this->separate();
         this->write_quoted(name);
-        this->put_text(":");
-        if (this->options.indent != 0) this->put_text(" ");
+        this->put_constant(":");
+        if (this->options.indent != 0) this->put_constant(" ");
         this->pending_value = true;
     }
 

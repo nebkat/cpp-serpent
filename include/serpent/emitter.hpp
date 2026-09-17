@@ -12,6 +12,7 @@
 #include <span>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <string_view>
 #include <type_traits>
@@ -243,6 +244,32 @@ public:
             return;
         }
         this->put_overflowing(std::span<const std::byte> { &value, 1 });
+    }
+
+    /**
+     * Writes text whose length is known when the program is compiled - a marker, a key, a piece
+     * of punctuation - which is most of what a writer writes.
+     *
+     * The same as put(), with the width in the type so that the copy is of a fixed size wherever
+     * this ends up, rather than only where put() happens to be inlined. See constant_text.hpp.
+     */
+    template<std::size_t Width>
+    void put_constant(const std::array<char, Width> &text) noexcept {
+        if (this->failure == errc::ok && Width <= this->room_size - this->room_used) {
+            std::memcpy(this->room + this->room_used, text.data(), Width);
+            this->room_used += Width;
+            this->produced += Width;
+            return;
+        }
+        this->put_overflowing(std::as_bytes(std::span { text }));
+    }
+
+    /** The same for a literal, whose terminator is not written. */
+    template<std::size_t Size>
+    void put_constant(const char (&literal)[Size]) noexcept {
+        std::array<char, Size - 1> text {};
+        for (std::size_t index = 0; index < text.size(); ++index) text[index] = literal[index];
+        this->put_constant(text);
     }
 
     void put_text(std::string_view text) noexcept {

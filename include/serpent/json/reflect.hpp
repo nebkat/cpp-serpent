@@ -18,6 +18,7 @@
 // serializer<T>::read finds read_reflected by ordinary lookup on the source, so the visitor stays
 // the way in for a hand-written conversion, whose body is the user's.
 
+#include <serpent/constant_text.hpp>
 #include <serpent/json/direct.hpp>
 #include <serpent/json/reader.hpp>
 #include <serpent/reflect.hpp>
@@ -35,11 +36,11 @@ namespace serpent::json {
 
 /** `"name":` - a member's key exactly as this library writes it. */
 template<const std::string_view &Name>
-inline constexpr auto written_key = scanner::joined<Name.size() + 3>({ "\"", Name, "\":" });
+inline constexpr auto written_key = serpent::detail::joined<Name.size() + 3>({ "\"", Name, "\":" });
 
 /** `,"name":` - the same, behind the comma that separates it from the member before. */
 template<const std::string_view &Name>
-inline constexpr auto written_next_key = scanner::joined<Name.size() + 4>({ ",\"", Name, "\":" });
+inline constexpr auto written_next_key = serpent::detail::joined<Name.size() + 4>({ ",\"", Name, "\":" });
 
 /**
  * Fills one object of a described type from the text of a JSON object.

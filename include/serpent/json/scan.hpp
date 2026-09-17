@@ -323,23 +323,6 @@ template<std::size_t Size>
     return accept(scan, text);
 }
 
-/**
- * Several pieces of text run together as one array, which makes its length part of its type.
- *
- * `Width` has to be the sum of the pieces' lengths, stated by the caller because a return type
- * cannot depend on an argument's value. Built a character at a time rather than by joining
- * std::strings: under the undefined-behaviour sanitizer GCC will not fold std::string's
- * null-pointer check on a literal, and the concatenation stops being a constant expression.
- */
-template<std::size_t Width>
-[[nodiscard]] consteval std::array<char, Width> joined(std::initializer_list<std::string_view> pieces) {
-    std::array<char, Width> characters {};
-    std::size_t index = 0;
-    for (const auto piece : pieces)
-        for (const char character : piece) characters[index++] = character;
-    return characters;
-}
-
 /** Appends one Unicode code point as UTF-8. */
 template<typename Append>
 constexpr void append_utf8(std::uint32_t code, Append &append) noexcept {
