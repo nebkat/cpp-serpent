@@ -77,10 +77,10 @@ No other released compiler has the whole C++26 feature set this needs yet, so th
 function forms remain first-class — see [Reflection](docs/reflection.md).
 | | |
 |---|---|
-| Header only | C++23, one dependency: [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
+| Headers, and one source file | C++23, one dependency: [cpp-unaligned](https://github.com/nebkat/cpp-unaligned). The source file is a bundled real-number writer; `-DSERPENT_USE_ZMIJ=OFF` does without it |
 | Allocates | only where you ask it to |
 | Without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
-| JSON output | byte-identical to the reference implementation's own JSON |
+| JSON output | the reference implementation's own JSON, but for how a very large or very small real is spelled |
 | BJData output | byte-identical to the reference implementation |
 
 ## Install

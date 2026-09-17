@@ -58,11 +58,11 @@ See [Reading](reading.md).
 
 | | |
 |---|---|
-| Header only | C++23, no dependencies beyond [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) |
+| Headers, and one source file | C++23, one dependency: [cpp-unaligned](https://github.com/nebkat/cpp-unaligned). The source file is the bundled real-number writer, and [can be turned off](json.md#formatting) |
 | Allocates | only where you ask it to; reading allocates nothing |
 | Without exceptions | the whole non-throwing tier stays intact under `-fno-exceptions` |
 | Types you do not own | described from outside, with no conversion code — [here](reflection.md#a-type-you-cannot-annotate) |
-| Output | byte-identical to the reference implementation, in both formats |
+| Output | BJData byte-identical to the reference implementation; JSON the same [but for how an extreme real is spelled](json.md#formatting) |
 
 !!! note "Reflection needs GCC 16.1 with `-freflection`"
 

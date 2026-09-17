@@ -128,7 +128,7 @@ can read in a hex dump.
 | | serpent | struct-mapping lib | DOM lib |
 |---|---:|---:|---:|
 | decode | 0.64 ms | **0.56 ms** (1.2x faster) | 7.56 ms (12x slower) |
-| encode | 1.21 ms | **0.28 ms** (4.4x faster) | 4.85 ms (4.0x slower) |
+| encode | 0.82 ms | **0.28 ms** (2.9x faster) | 4.82 ms (5.9x slower) |
 | allocations, decode | **15** | 10,015 | 70,029 |
 | allocations, encode | 17 | **12** | 70,023 |
 
@@ -138,7 +138,7 @@ records, against the same library — below 1.0 is serpent ahead:
 | | strings | booleans | integers | reals |
 |---|---:|---:|---:|---:|
 | decode | **0.57x** | **0.69x** | 1.29x | 1.68x |
-| encode | 1.73x | 4.90x | 2.27x | 6.27x |
+| encode | 1.63x | 5.33x | 2.47x | 2.12x |
 
 Decoding is won or lost on everything *around* the conversion, and a reader generated for a type
 can expect the bytes it would have written rather than classify them: a key, its quotes, its
@@ -146,16 +146,18 @@ colon and the comma before it are one comparison. Where the conversion itself is
 work - a real - the two libraries converge on the cost of the conversion, and serpent's is
 `std::from_chars` behind a grammar check where the other library has its own parser.
 
-Encoding is the other way round. What is left there is almost entirely number formatting:
-serpent uses `std::to_chars`, and for a real lays the digits out again to match the reference
-implementation byte for byte, which together cost about 40 ns where the other library's own
-table-driven formatter costs 6. The record above holds two reals, and they are two thirds of
-its encode time. Closing that means shipping a float formatter, which this library has chosen
-not to do; hand-written appends to a `std::string` with `std::to_chars` measure within a fifth
-of serpent on every row, so the machinery around the conversion is no longer the cost. That gap is implementation headroom
-rather than an architectural limit: the other library builds each key's `"name":` at compile
-time and emits it as one fixed-size copy, writes into a pre-padded buffer by index instead of
-through a call, and carries its own number conversion.
+Encoding a real used to be the whole story here: 6.3x behind, because `std::to_chars` and a
+re-layout to match the reference implementation together cost about 40 ns where the other
+library's formatter costs 6. It is 2.1x now. Reals are written by a bundled copy of
+[Żmij](https://github.com/vitaut/zmij) — the same algorithm the other library uses — in about
+15 ns inside a document, at the price of [spelling a very large or very small real with an
+exponent](json.md#formatting) where the reference writes it out.
+
+What is left on every row is the writer itself. It is a general, stateful writer that anyone
+can drive by hand and that checks what it is asked to do — a key outside an object is an error,
+not a malformed document — where the other library writes into a pre-sized buffer by index, with
+a table-driven integer formatter. A boolean is where that shows most, because there is nothing
+else in it to cost anything.
 
 Against the DOM library serpent is ahead on every row, and by more in binary, where there is no
 text to parse and the difference is almost entirely the object graph the other one builds.
@@ -226,7 +228,7 @@ into a fixed buffer took it to 13.
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types, and want the most speed | decoding is level, ahead on strings and booleans; encoding reals, a struct-mapping library is 6x quicker |
+| convert your own types, and want the most speed | decoding is level, ahead on strings and booleans; encoding, a struct-mapping library is 2-3x quicker |
 | traverse whole documents repeatedly | an indexed parser is 3-4x quicker |
 | want a mutable document object | serpent has none at all |
 | need BJData and JSON from one definition | serpent |

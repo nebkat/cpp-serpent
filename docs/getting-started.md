@@ -15,6 +15,12 @@ target_link_libraries(your_target PRIVATE serpent::serpent)
 It pulls [cpp-unaligned](https://github.com/nebkat/cpp-unaligned) itself, so the first
 configure needs network access.
 
+Everything is headers but one bundled source file, which writes real numbers and is built into a
+small library that `serpent::serpent` links for you. Set `SERPENT_USE_ZMIJ` to `OFF` before
+`FetchContent_MakeAvailable` to go without it: the output is identical, reals are written about
+three times slower, and the library is header-only. Using the headers without CMake gets that
+by default.
+
 ## Your first program
 
 ```cpp

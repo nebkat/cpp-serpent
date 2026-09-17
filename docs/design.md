@@ -71,7 +71,9 @@ those bytes back, and then:
 2. the view decodes to the same values;
 3. **re-encoding those values reproduces the reference bytes exactly**;
 4. splicing reproduces the document byte for byte;
-5. the JSON output matches the reference implementation's own JSON;
+5. the JSON output matches the reference implementation's own JSON, but for a very large or
+   very small real, which it spells out in full and this library writes [with an
+   exponent](json.md#formatting);
 6. parsing the reference implementation's JSON gives the same values again.
 
 Every suite also truncates its documents at each byte offset and requires a clean rejection,
