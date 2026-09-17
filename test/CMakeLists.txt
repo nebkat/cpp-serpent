@@ -12,6 +12,7 @@ set(TESTS
     bjdata_writer
     json_reader
     json_real_read
+    real_text
     json_indexed
     json_walking
     bjdata_walking
@@ -39,6 +40,18 @@ foreach(TEST_NAME IN LISTS TESTS)
 
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME}_test)
 endforeach()
+
+# The same check of a real's text against Żmij built the other way: without its table of powers
+# of ten, which is how it builds itself under -Os and what SERPENT_ZMIJ_OPTIMIZE_SIZE asks for.
+if(SERPENT_USE_ZMIJ)
+    serpent_add_zmij(serpent_zmij_small_for_test ON)
+    add_executable(real_text_small_test real_text_test.cpp)
+    target_link_libraries(real_text_small_test PRIVATE serpent_headers serpent_zmij_small_for_test)
+    target_include_directories(real_text_small_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
+    target_compile_definitions(real_text_small_test PRIVATE SERPENT_USE_ZMIJ=1)
+    target_compile_options(real_text_small_test PRIVATE -Wall -Wextra)
+    add_test(NAME real_text_small COMMAND real_text_small_test)
+endif()
 
 # An integer's text, produced each of the ways SERPENT_INTEGER_TABLE chooses between. Not linked
 # to the library target, which would fix the setting to the one this build was configured with.

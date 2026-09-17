@@ -118,7 +118,14 @@ set(BENCH_DEFAULT_SWITCHES
     SERPENT_USE_ZMIJ=1
     SERPENT_BOUNDED_OBJECT_WRITE=1
     SERPENT_INTEGER_TABLE=1
-    SERPENT_USE_FAST_FLOAT=1)
+    SERPENT_USE_FAST_FLOAT=1
+    SERPENT_ZMIJ_OPTIMIZE_SIZE=0)
+
+# Żmij both ways, whichever way this build has it, since a configuration may ask for either.
+serpent_add_zmij(serpent_bench_zmij_fast OFF)
+serpent_add_zmij(serpent_bench_zmij_small ON)
+target_compile_options(serpent_bench_zmij_fast PRIVATE -O3 -DNDEBUG)
+target_compile_options(serpent_bench_zmij_small PRIVATE -O3 -DNDEBUG)
 
 function(serpent_add_benchmark CONFIGURATION)
     set(SWITCHES ${BENCH_DEFAULT_SWITCHES})
@@ -132,7 +139,11 @@ function(serpent_add_benchmark CONFIGURATION)
     add_executable(${NAME} main.cpp)
     target_link_libraries(${NAME} PRIVATE serpent::headers glaze::glaze serpent_bench_others)
     if("SERPENT_USE_ZMIJ=1" IN_LIST SWITCHES)
-        target_link_libraries(${NAME} PRIVATE serpent::zmij)
+        if("SERPENT_ZMIJ_OPTIMIZE_SIZE=1" IN_LIST SWITCHES)
+            target_link_libraries(${NAME} PRIVATE serpent_bench_zmij_small)
+        else()
+            target_link_libraries(${NAME} PRIVATE serpent_bench_zmij_fast)
+        endif()
     endif()
     target_include_directories(${NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${rapidjson_SOURCE_DIR}/include")
     target_compile_definitions(${NAME} PRIVATE
@@ -147,12 +158,13 @@ function(serpent_add_benchmark CONFIGURATION)
     set(BENCH_TARGETS "${BENCH_TARGETS}" PARENT_SCOPE)
 endfunction()
 
-# As the library comes; with everything off; and with the one switch that costs an image real
-# space turned up.
+# As the library comes; with everything off; with the one switch that costs an image real space
+# turned up; and with the tables an image may not have room for left out.
 serpent_add_benchmark(default)
 serpent_add_benchmark(plain
     SERPENT_USE_ZMIJ=0 SERPENT_BOUNDED_OBJECT_WRITE=0 SERPENT_INTEGER_TABLE=0 SERPENT_USE_FAST_FLOAT=0)
 serpent_add_benchmark(large SERPENT_INTEGER_TABLE=2)
+serpent_add_benchmark(small SERPENT_ZMIJ_OPTIMIZE_SIZE=1 SERPENT_USE_FAST_FLOAT=0)
 
 # `default` with one switch off at a time, which is what says what that switch is worth. Several
 # more builds of a slow translation unit, so only on request: tools/bench.sh --ablations.

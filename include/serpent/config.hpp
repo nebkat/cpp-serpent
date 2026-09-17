@@ -14,6 +14,11 @@
  *
  * Off unless the build says otherwise, because it is the one switch that needs a source file
  * compiled: the CMake target `serpent` turns it on and builds that file.
+ *
+ * That file has a switch of its own, SERPENT_ZMIJ_OPTIMIZE_SIZE, which no header here reads:
+ * defined to 1 when it is compiled, Żmij computes powers of ten as it goes rather than keeping a
+ * table of them, and is somewhat slower: 36 KB of code rather than 67 KB, built for arm64. Left undefined, Żmij chooses that for itself
+ * when the compiler is optimising for size. The CMake option of the same name sets it.
  */
 #ifndef SERPENT_USE_ZMIJ
 #define SERPENT_USE_ZMIJ 0

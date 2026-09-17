@@ -115,13 +115,26 @@ target_compile_definitions(serpent INTERFACE SERPENT_INTEGER_TABLE=${SERPENT_INT
 # a library serpent links. Ported into a header instead it would cost every translation unit that
 # writes JSON about half a second, which is more than the rest of this library costs to include.
 # Turn the option off to go without it and stay header-only.
-if(SERPENT_USE_ZMIJ OR SERPENT_BUILD_BENCHMARKS)
-    add_library(serpent_zmij STATIC include/serpent/external/zmij/zmij.cc)
-    add_library(serpent::zmij ALIAS serpent_zmij)
-    target_compile_features(serpent_zmij PRIVATE cxx_std_20)
-    set_target_properties(serpent_zmij PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endif()
+#
+# SERPENT_ZMIJ_OPTIMIZE_SIZE is Żmij's own switch between its two builds: with its table of
+# powers of ten, or computing them as it goes - 67 KB of code or 36 KB, built for arm64. AUTO leaves the choice to Żmij, which
+# takes the small build when the compiler is optimising for size (-Os) and the fast one otherwise.
+set(SERPENT_ZMIJ_OPTIMIZE_SIZE AUTO CACHE STRING
+    "Build Żmij without its power-of-ten table: AUTO (only under -Os), ON or OFF")
+set_property(CACHE SERPENT_ZMIJ_OPTIMIZE_SIZE PROPERTY STRINGS AUTO ON OFF)
+
+function(serpent_add_zmij NAME SIZE_MODE)
+    add_library(${NAME} STATIC "${PROJECT_SOURCE_DIR}/include/serpent/external/zmij/zmij.cc")
+    target_compile_features(${NAME} PRIVATE cxx_std_20)
+    set_target_properties(${NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(NOT SIZE_MODE STREQUAL "AUTO")
+        target_compile_definitions(${NAME} PRIVATE SERPENT_ZMIJ_OPTIMIZE_SIZE=$<BOOL:${SIZE_MODE}>)
+    endif()
+endfunction()
+
 if(SERPENT_USE_ZMIJ)
+    serpent_add_zmij(serpent_zmij ${SERPENT_ZMIJ_OPTIMIZE_SIZE})
+    add_library(serpent::zmij ALIAS serpent_zmij)
     target_link_libraries(serpent INTERFACE serpent_zmij)
     target_compile_definitions(serpent INTERFACE SERPENT_USE_ZMIJ=1)
 endif()
