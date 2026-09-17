@@ -11,6 +11,7 @@
 #include <serpent/constant_text.hpp>
 #include <serpent/emitter.hpp>
 #include <serpent/json/scan.hpp>
+#include <serpent/json/text.hpp>
 #include <serpent/real_format.hpp>
 #include <serpent/serializer.hpp>
 
@@ -166,26 +167,50 @@ public:
 
     void boolean(bool value) noexcept {
         this->begin_value();
-        if (value) this->put_constant("true");
-        else this->put_constant("false");
+        this->scalar(value);
+    }
+
+    /** A scalar's text, composed where it will be kept. How it is spelled is write_text's business. */
+    template<typename T>
+    void scalar(T value) noexcept {
+        this->compose(widest_text<T>, [value](char *to) { return static_cast<std::size_t>(write_text(to, value) - to); });
+    }
+
+    /**
+     * Writes whole members of the object that is open - keys, values and the commas between them -
+     * into room claimed once for all of them, where each would otherwise ask for its own.
+     *
+     * `write` is handed room for `at_most` characters and returns how many it used; what it
+     * writes has to be exactly what key() and value() would have written, commas included. False
+     * where that cannot be done - this writer is indenting, or the destination has not that much
+     * room in one piece - and nothing has been written: the members are then written the usual
+     * way, one at a time.
+     */
+    template<typename Write>
+    [[nodiscard]] bool compose_members(std::size_t at_most, Write write) noexcept {
+        if (this->options.indent != 0 || !this->inside_object() || this->pending_value) return false;
+        char *const to = this->room_for(at_most);
+        if (to == nullptr) return false;
+        this->used(write(to));
+        this->written_mask |= 1u << (this->depth - 1);
+        return true;
+    }
+
+    /** Whether the object that is open has had a member written yet, and so whether the next needs a comma. */
+    [[nodiscard]] bool has_members() const noexcept {
+        return this->depth > 0 && (this->written_mask & (1u << (this->depth - 1))) != 0;
     }
 
     void integer(std::int64_t value) noexcept { this->number(value); }
     void integer(std::uint64_t value) noexcept { this->number(value); }
 
     /**
-     * JSON has no NaN or infinity, so a non-finite value is written as null.
-     *
-     * Finite values use the same rendering as the reference implementation's own JSON output,
-     * so a document transcribed here is byte-identical to what the reference implementation prints for it.
+     * JSON has no NaN or infinity, so a non-finite value is written as null. How a finite one is
+     * spelled is real_format.hpp's business.
      */
     void real(double value) noexcept {
         this->begin_value();
-        if (!std::isfinite(value)) {
-            this->put_constant("null");
-            return;
-        }
-        this->compose(detail::real_text_capacity, [value](char *to) { return detail::write_real(to, value); });
+        this->scalar(value);
     }
 
     void string(std::string_view text) noexcept {
@@ -209,13 +234,7 @@ public:
      */
     template<const std::string_view &Name>
     void key_literal() noexcept {
-        static constexpr bool plain = [] {
-            for (const char value : Name)
-                if (value == '"' || value == '\\' || static_cast<unsigned char>(value) < 0x20) return false;
-            return true;
-        }();
-
-        if (this->options.indent != 0 || !plain) {
+        if (this->options.indent != 0 || !scanner::is_plain_text(Name)) {
             this->key(Name);
             return;
         }
@@ -270,11 +289,7 @@ private:
     template<typename T>
     void number(T value) noexcept {
         this->begin_value();
-        // Twenty characters hold any 64-bit integer, sign included.
-        constexpr std::size_t widest = 24;
-        this->compose(widest, [value](char *to) {
-            return static_cast<std::size_t>(std::to_chars(to, to + widest, value).ptr - to);
-        });
+        this->scalar(value);
     }
 };
 

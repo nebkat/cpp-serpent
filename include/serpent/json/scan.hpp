@@ -52,6 +52,13 @@ inline constexpr auto character_class = [] {
     return table;
 }();
 
+/** Whether text can stand between quotes exactly as it is, with nothing in it to escape. */
+[[nodiscard]] constexpr bool is_plain_text(std::string_view text) noexcept {
+    for (const char value : text)
+        if (value == '"' || value == '\\' || static_cast<unsigned char>(value) < 0x20) return false;
+    return true;
+}
+
 /**
  * The first byte from `position` that is not of the wanted class.
  *

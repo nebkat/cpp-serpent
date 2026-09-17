@@ -78,12 +78,12 @@ class byte_emitter {
     std::size_t next_chunk = first_chunk;
 
     /** Hands back what was used and asks for the next chunk. */
-    bool renew_room(std::size_t at_least) noexcept {
+    bool renew_room(std::size_t at_least, std::size_t preferred = 0) noexcept {
         this->keep_room(this->context, this->room_used);
         this->next_chunk = std::min(this->next_chunk * 2, largest_chunk);
         // The floor and the preference go separately: what must land in one piece is not
         // negotiable, the rest is, and the sink is the only one that knows its own storage.
-        const auto next = this->lend_room(this->context, at_least, this->next_chunk);
+        const auto next = this->lend_room(this->context, at_least, std::max(preferred, this->next_chunk));
         if (next.empty()) {
             // The room in hand stays in hand, used as far as it was: finish() keeps it again, and
             // keeping the same room twice has to land on the same answer.
@@ -274,6 +274,24 @@ public:
         this->put_constant(text);
     }
 
+    /**
+     * Room for `bytes` more characters in one piece, to be written into directly, or null where
+     * the destination cannot give that much at once. What is written there is claimed with used().
+     *
+     * Usually the room in hand already has it and this is a comparison. Otherwise a sink that
+     * lends is asked for a chunk at least that large, and one that does not is flushed so that
+     * the batch is empty - which helps only if the batch is large enough, and that is the case
+     * that answers null.
+     */
+    [[nodiscard]] char *room_for(std::size_t bytes) noexcept {
+        if (this->failure == errc::ok && bytes <= this->room_size - this->room_used)
+            return reinterpret_cast<char *>(this->room + this->room_used);
+        return this->make_room_for(bytes);
+    }
+
+    /** Claims the first `bytes` of what room_for() handed out. */
+    void used(std::size_t bytes) noexcept { this->room_used += bytes; }
+
     /** The most compose() can be asked for: enough for any number as text, with room to spare. */
     static constexpr std::size_t composed_capacity = 64;
 
@@ -282,24 +300,39 @@ public:
      * copied in - a number, which a conversion writes out a digit at a time.
      *
      * `write` is handed room for `at_most` characters and returns how many it used. That room is
-     * the destination's own whenever it has that much left, which is nearly always; at the end
-     * of a chunk it is a scratch buffer instead, put in the ordinary way. So nothing is asked of
-     * a sink that it could not already do, and the common case loses a copy.
+     * the destination's own whenever it can be had, which is nearly always; where it cannot, it
+     * is a scratch buffer instead, put in the ordinary way. So nothing is asked of a sink that it
+     * could not already do, and the common case loses a copy.
      */
     template<typename Write>
     void compose(std::size_t at_most, Write write) noexcept {
-        if (this->failure == errc::ok && at_most <= this->room_size - this->room_used) {
-            const std::size_t used = write(reinterpret_cast<char *>(this->room + this->room_used));
-            this->room_used += used;
+        if (char *const to = this->room_for(at_most)) {
+            this->used(write(to));
             return;
         }
         char scratch[composed_capacity];
-        const std::size_t used = write(scratch);
-        this->put_text(std::string_view { scratch, used });
+        const std::size_t written = write(scratch);
+        this->put_text(std::string_view { scratch, written });
     }
 
     void put_text(std::string_view text) noexcept {
         this->put(std::span<const std::byte> { reinterpret_cast<const std::byte *>(text.data()), text.size() });
+    }
+
+    /** The part of room_for() that has to go and get the room. */
+    [[gnu::noinline]] char *make_room_for(std::size_t bytes) noexcept {
+        if (!this->ok()) return nullptr;
+        if (this->lend_room != nullptr) {
+            // Preferred, not demanded. What is asked for here is a worst case - the longest an
+            // integer could be, not the length of this one - so a fixed buffer near its end may
+            // well not have it and still have room for what is actually written. Demanding it
+            // would fail a document that fits.
+            if (!this->renew_room(0, bytes)) return nullptr;
+        } else if (bytes > buffer_capacity || !this->flush()) {
+            return nullptr;
+        }
+        if (bytes > this->room_size - this->room_used) return nullptr;
+        return reinterpret_cast<char *>(this->room + this->room_used);
     }
 
     /** Everything put() is not: a flush, an oversized write, or a sink that has failed. */

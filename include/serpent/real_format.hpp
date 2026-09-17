@@ -1,5 +1,7 @@
 #pragma once
 
+#include <serpent/config.hpp>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -9,12 +11,7 @@
 
 // How a real is turned into text: by the copy of Żmij under external/, or by std::to_chars. The
 // text is the same either way, character for character; Żmij produces it in about a third of the
-// time. It has a source file that must be built, which the CMake target does - so the macro
-// defaults to off here, for anyone using the headers without it, and CMake turns it on.
-#ifndef SERPENT_USE_ZMIJ
-#define SERPENT_USE_ZMIJ 0
-#endif
-
+// time. SERPENT_USE_ZMIJ, in config.hpp, chooses.
 #if SERPENT_USE_ZMIJ
 #include <serpent/external/zmij/zmij.h>
 #endif

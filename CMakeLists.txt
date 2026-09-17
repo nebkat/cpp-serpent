@@ -17,6 +17,11 @@ option(SERPENT_TEST_SANITIZE "Build the tests with AddressSanitizer and Undefine
 option(SERPENT_BUILD_BENCHMARKS "Build the benchmarks, which fetch another library and a test corpus" OFF)
 option(SERPENT_USE_ZMIJ "Write reals with the bundled Żmij rather than std::to_chars; builds one source file" ON)
 
+# The optimisations that have a plainer alternative, each of which include/serpent/config.hpp
+# describes. All on unless turned off; the target serpent::plain has every one of them off.
+option(SERPENT_BOUNDED_OBJECT_WRITE "Write runs of boolean and number members into room claimed once" ON)
+set(SERPENT_HEADER_SWITCHES SERPENT_BOUNDED_OBJECT_WRITE)
+
 # Reading and writing unaligned values has nothing to do with serialization, so it is its own
 # library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
 include(FetchContent)
@@ -86,6 +91,10 @@ target_include_directories(serpent INTERFACE
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(serpent INTERFACE unaligned::unaligned)
 
+foreach(SWITCH IN LISTS SERPENT_HEADER_SWITCHES)
+    target_compile_definitions(serpent INTERFACE ${SWITCH}=$<BOOL:${${SWITCH}}>)
+endforeach()
+
 # Writing a real is mostly finding its shortest digits, and Żmij - a copy of which is kept under
 # include/serpent/external, see tools/vendor-zmij.sh - does the whole job in about a third of the
 # time std::to_chars and our own layout take. The text is the same either way.
@@ -111,6 +120,9 @@ add_library(serpent::plain ALIAS serpent_plain)
 target_include_directories(serpent_plain INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>)
 target_link_libraries(serpent_plain INTERFACE unaligned::unaligned)
 target_compile_definitions(serpent_plain INTERFACE SERPENT_USE_ZMIJ=0)
+foreach(SWITCH IN LISTS SERPENT_HEADER_SWITCHES)
+    target_compile_definitions(serpent_plain INTERFACE ${SWITCH}=0)
+endforeach()
 
 # Declaring the minimum puts a -std flag on every consumer's command line, which is right for a
 # CMake-managed build and wrong for one that sets the standard itself with raw flags - ESP-IDF

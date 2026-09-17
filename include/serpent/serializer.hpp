@@ -61,6 +61,10 @@ struct serializer {
             detail::table_convert(visitor, value);
         } else if constexpr (requires { to_json(out, value); }) {
             to_json(out, value);
+        } else if constexpr (reflected_type<T> && requires { write_reflected(out, value); }) {
+            // A writer that can write a described type better than member by member says so by
+            // offering this, found by ordinary lookup against the writer as read_reflected is.
+            write_reflected(out, value);
         } else if constexpr (reflected_type<T>) {
             write_visitor<Writer> visitor { out };
             const auto scope = out.object();

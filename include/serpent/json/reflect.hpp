@@ -18,14 +18,17 @@
 // serializer<T>::read finds read_reflected by ordinary lookup on the source, so the visitor stays
 // the way in for a hand-written conversion, whose body is the user's.
 
+#include <serpent/config.hpp>
 #include <serpent/constant_text.hpp>
 #include <serpent/json/direct.hpp>
 #include <serpent/json/reader.hpp>
+#include <serpent/json/writer.hpp>
 #include <serpent/reflect.hpp>
 #include <serpent/serializer.hpp>
 
 #include <concepts>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -292,6 +295,163 @@ std::optional<bool> read_sequence(const reader &source, C &out) {
     source.note_end(scan.position);
     return true;
 }
+
+#if SERPENT_BOUNDED_OBJECT_WRITE
+
+/**
+ * Writes one object of a described type.
+ *
+ * A member whose text has a longest possible length - a boolean, an integer, a real - does not
+ * need to ask whether there is room for it if room for the longest it could be has already been
+ * found. So consecutive members of that kind are written as a run: room for the whole run is
+ * claimed once, and keys, values and commas go into it as one piece of text, where each key and
+ * each value would otherwise ask for its own. Any other member - a string, a container, another
+ * described type - is written the usual way, and the run simply ends before it and another may
+ * begin after.
+ *
+ * Which members are in which run is settled when this is compiled; nothing about it is decided
+ * as it runs but whether the room could be had.
+ */
+template<typename T>
+class object_writer {
+    static constexpr auto members = std::define_static_array(serpent::detail::members_including_bases<T>());
+
+    static consteval std::size_t position_of(std::meta::info member) {
+        return static_cast<std::size_t>(std::ranges::find(members, member) - members.begin());
+    }
+
+    /** The most text one member can take - comma, key and value - or zero if it has no limit. */
+    template<std::meta::info Member>
+    static consteval std::size_t widest_member() {
+        if (serpent::detail::has_annotation<skip>(Member)) return 0;
+        if (serpent::detail::annotation_of<tagged>(Member).has_value()) return 0;
+
+        using field = std::remove_cvref_t<typename [:std::meta::type_of(Member):]>;
+        constexpr std::string_view name = serpent::detail::field_key<T, Member>();
+        if (widest_text<field> == 0 || !scanner::is_plain_text(name)) return 0;
+        constexpr std::size_t comma_quotes_and_colon = 4;
+        return comma_quotes_and_colon + name.size() + widest_text<field>;
+    }
+
+    /** widest_member of each, by position. */
+    static constexpr auto widest = [] {
+        std::array<std::size_t, members.size()> each {};
+        template for (constexpr auto member : members) each[position_of(member)] = widest_member<member>();
+        return each;
+    }();
+
+    static consteval bool begins_run(std::size_t position) {
+        return widest[position] != 0 && (position == 0 || widest[position - 1] == 0);
+    }
+
+    /** One past the last member of the run that `position` is in. */
+    static consteval std::size_t run_end(std::size_t position) {
+        while (position < widest.size() && widest[position] != 0) ++position;
+        return position;
+    }
+
+    /** The most text the members from `first` up to `last` can take together. */
+    static consteval std::size_t widest_run(std::size_t first, std::size_t last) {
+        std::size_t total = 0;
+        for (std::size_t position = first; position < last; ++position) total += widest[position];
+        return total;
+    }
+
+    writer &out;
+    const T &value;
+
+public:
+    object_writer(writer &out, const T &value) noexcept : out(out), value(value) {}
+
+    void write_members() {
+        template for (constexpr auto member : members) {
+            constexpr std::size_t position = position_of(member);
+
+            if constexpr (serpent::detail::has_annotation<skip>(member)) {
+                // Not written at all.
+            } else if constexpr (widest[position] == 0) {
+                this->write_member<member>();
+            } else if constexpr (begins_run(position)) {
+                // Writes every member of the run, so the rest of it have nothing left to do here.
+                if (!this->write_run<position, run_end(position)>())
+                    this->write_run_one_at_a_time<position, run_end(position)>();
+            }
+        }
+    }
+
+private:
+    /** One member, the usual way: its key, then whatever writes its value. */
+    template<std::meta::info Member>
+    void write_member() {
+        static constexpr std::string_view name = serpent::detail::field_key<T, Member>();
+        const auto &field = this->value.[:Member:];
+
+        this->out.template key_literal<name>();
+        if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
+            using declared = [:std::meta::type_of(Member):];
+            static_assert(serpent::detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
+            this->out.value(make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field));
+        } else {
+            this->out.value(field);
+        }
+    }
+
+    /**
+     * The members from `First` up to `Last` as one piece of text, if room for it can be had.
+     *
+     * Only the first member written into an object goes without a comma, and whether anything
+     * has been written yet is the one thing here not known until it runs.
+     */
+    template<std::size_t First, std::size_t Last>
+    [[nodiscard]] bool write_run() {
+        return this->out.compose_members(widest_run(First, Last), [this](char *const to) {
+            char *at = to;
+            bool first_in_object = !this->out.has_members();
+
+            template for (constexpr auto member : members) {
+                if constexpr (position_of(member) >= First && position_of(member) < Last) {
+                    static constexpr std::string_view name = serpent::detail::field_key<T, member>();
+                    at = first_in_object ? copy_constant(at, written_key<name>)
+                                         : copy_constant(at, written_next_key<name>);
+                    at = write_text(at, this->value.[:member:]);
+                    first_in_object = false;
+                }
+            }
+            return static_cast<std::size_t>(at - to);
+        });
+    }
+
+    /** The same members when that room could not be had: each the usual way. */
+    template<std::size_t First, std::size_t Last>
+    void write_run_one_at_a_time() {
+        template for (constexpr auto member : members) {
+            if constexpr (position_of(member) >= First && position_of(member) < Last) this->write_member<member>();
+        }
+    }
+
+    template<std::size_t Width>
+    [[nodiscard]] static char *copy_constant(char *to, const std::array<char, Width> &text) noexcept {
+        std::memcpy(to, text.data(), Width);
+        return to + Width;
+    }
+};
+
+/**
+ * Writes a described type as a JSON object.
+ *
+ * Found by ordinary lookup from serializer<T>::write, as read_reflected is, so that a writer with
+ * no such function - the binary one - does not take this path.
+ */
+template<reflected_type T>
+    requires (!serpent::detail::is_discriminated<T>())
+void write_reflected(writer &out, const T &value) {
+    static_assert(serpent::detail::keys_are_distinct<T>(), serpent::detail::duplicate_key_message<T>());
+    static_assert(serpent::detail::annotations_make_sense<T>(), serpent::detail::annotation_complaint<T>());
+    const auto scope = out.object();
+    object_writer<T> { out, value }.write_members();
+}
+
+#endif // SERPENT_BOUNDED_OBJECT_WRITE
 
 #endif
 
