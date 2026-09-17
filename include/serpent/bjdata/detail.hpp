@@ -1,5 +1,6 @@
 #pragma once
 
+#include <serpent/config.hpp>
 #include <serpent/error.hpp>
 #include <serpent/bjdata/marker.hpp>
 #include <nonstd/unaligned_ptr.hpp>
@@ -97,27 +98,34 @@ struct cursor {
 };
 
 /** Reads a <marker><integer> pair, failing with marker_error if the marker is not integral. */
-[[nodiscard]] inline std::int64_t read_marked_integer(cursor &source, errc marker_error) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline std::int64_t read_marked_integer(cursor &source, errc marker_error) noexcept {
     const auto *at = source.position;
     if (!source.need(1)) return 0;
 
-    const auto kind = to_marker(source.peek());
-    if (!is_integer(kind)) {
-        source.fail(marker_error, at);
-        return 0;
+    // The marker is looked at once: each arm knows the type stored under it, and so its width.
+    const auto payload_as = [&]<typename Stored>() -> std::int64_t {
+        source.advance(1);
+        if (!source.need(sizeof(Stored))) return 0;
+        const auto value = load<Stored>(source.position);
+        source.advance(sizeof(Stored));
+        return static_cast<std::int64_t>(value);
+    };
+
+    switch (to_marker(source.peek())) {
+    case marker::uint8: return payload_as.template operator()<std::uint8_t>();
+    case marker::int8: return payload_as.template operator()<std::int8_t>();
+    case marker::uint16: return payload_as.template operator()<std::uint16_t>();
+    case marker::int16: return payload_as.template operator()<std::int16_t>();
+    case marker::uint32: return payload_as.template operator()<std::uint32_t>();
+    case marker::int32: return payload_as.template operator()<std::int32_t>();
+    case marker::uint64: return payload_as.template operator()<std::uint64_t>();
+    case marker::int64: return payload_as.template operator()<std::int64_t>();
+    default: source.fail(marker_error, at); return 0;
     }
-    source.advance(1);
-
-    const auto width = payload_width(kind);
-    if (!source.need(width)) return 0;
-
-    const auto value = load_integer(kind, source.position);
-    source.advance(width);
-    return value;
 }
 
 /** Reads a length or count prefix. Negative values are a format error, not a wrap. */
-[[nodiscard]] inline std::uint64_t read_length(cursor &source) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline std::uint64_t read_length(cursor &source) noexcept {
     const auto *at = source.position;
     const auto value = read_marked_integer(source, errc::invalid_length);
     if (!source.ok()) return 0;
@@ -135,7 +143,7 @@ inline void skip_key(cursor &source) noexcept {
     source.advance(length);
 }
 
-[[nodiscard]] inline std::string_view read_key(cursor &source) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline std::string_view read_key(cursor &source) noexcept {
     const auto length = read_length(source);
     if (!source.need(length)) return {};
     const auto *begin = source.position;

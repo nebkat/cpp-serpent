@@ -12,6 +12,7 @@
 // Binary only. JSON stays on the generic path, where the reader is worth reading.
 
 #include <serpent/bjdata/detail.hpp>
+#include <serpent/bjdata/direct.hpp>
 #include <serpent/bjdata/view.hpp>
 #include <serpent/bjdata/writer.hpp>
 #include <serpent/config.hpp>
@@ -19,6 +20,8 @@
 #include <serpent/reflect.hpp>
 #include <serpent/serializer.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -39,175 +42,206 @@ template<std::string_view const &Name>
 } // namespace detail
 
 /**
- * Fills a reflected type from an object, in one pass over its members.
+ * Fills one object of a described type, consuming it.
  *
- * Found by argument-dependent lookup from serializer<T>::read, so a source that has no such
- * function - json::reader - simply does not take this path.
- */
-namespace detail {
-
-/**
- * Reads an object's members, leaving the cursor immediately after it.
+ * In two steps, because nearly every document read here was written by this library, and one
+ * that was holds no surprises: its members are the type's, in the order the type declares them,
+ * each key spelled the one way this library spells it. So the first step expects exactly that -
+ * a key is one comparison against a constant, and the value after it is read as the type the
+ * member is, straight off the cursor. Whatever that leaves - a document from another writer,
+ * members in another order, keys this type does not name, an object that is counted or typed -
+ * the second step reads entry by entry, matching each key by name.
  *
- * The cursor starts on the byte after the opening brace. Consuming the object rather than
- * merely reading it is what lets a sequence of these be walked once instead of twice.
+ * The cursor is borrowed and left after the object, which is what lets a sequence of objects be
+ * walked once rather than read and then stepped over.
  */
 template<typename T>
-    requires reflected_type<T>
-bool read_object_body(detail::cursor &scanner, const std::span<const std::byte> buffer, T &value) {
-    const auto info = detail::parse_object_prefix(scanner);
-    if (!scanner.ok() || info.body == nullptr) return false;
+class object_filler {
+    static constexpr auto members = std::define_static_array(serpent::detail::members_including_bases<T>());
+    static_assert(members.size() <= 64, "a type with more than 64 members needs a wider seen mask");
 
-    std::uint64_t remaining = info.count;
-    const bool counted = !info.unbounded;
-    bool complete = true;
+    static consteval std::uint64_t bit_of(std::meta::info member) {
+        return std::uint64_t { 1 } << (std::ranges::find(members, member) - members.begin());
+    }
 
-    // One bit per member, set as it is read, so that what the type insists on can be checked
-    // once at the end. An OR per member and a compare per object, nothing per byte.
-    static constexpr std::size_t member_count =
-            std::define_static_array(serpent::detail::members_including_bases<T>())
-                    .size();
-    static_assert(member_count <= 64, "a type with more than 64 members needs a wider seen mask");
-
-    static constexpr std::uint64_t required_mask = [] {
+    /** One bit for each member the type insists on, to be compared once with those seen. */
+    static constexpr std::uint64_t required = [] {
         std::uint64_t mask = 0;
-        std::size_t position = 0;
-        template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
+        template for (constexpr auto member : members) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)
-                    && serpent::detail::member_is_required<T, member>()) {
-                mask |= std::uint64_t { 1 } << position;
-            }
-            ++position;
+                    && serpent::detail::member_is_required<T, member>())
+                mask |= bit_of(member);
         }
         return mask;
     }();
+
+    detail::cursor &scan;
+    std::span<const std::byte> buffer;
+    T &value;
+
+    detail::container_prefix prefix;
+    std::uint64_t entries_left = 0;
     std::uint64_t seen = 0;
+    bool every_value_read = true;
 
-    while (scanner.ok()) {
-        while (scanner.position < scanner.limit && to_marker(*scanner.position) == marker::noop)
-            ++scanner.position;
+public:
+    /** The cursor stands just after the opening brace. */
+    object_filler(detail::cursor &scan, std::span<const std::byte> buffer, T &value) noexcept
+    : scan(scan)
+    , buffer(buffer)
+    , value(value)
+    , prefix(detail::parse_object_prefix(scan))
+    , entries_left(prefix.count) {}
 
-        if (counted) {
-            if (remaining == 0) break;
-            if (scanner.position >= scanner.limit) return false;
-        } else if (scanner.position >= scanner.limit) {
-            return false;
-        } else if (to_marker(*scanner.position) == marker::object_end) {
-            ++scanner.position; // consumed, so the caller resumes after the object
-            break;
-        }
+    void read_members_as_written() {
+        // A counted or typed object is laid out differently, and this library writes neither.
+        if (!this->scan.ok() || !this->prefix.unbounded || this->prefix.typed()) return;
 
-        // Reading a value into a field, given the marker that precedes it. One definition,
-        // reached either by recognising the encoded key or by parsing it.
-        bool consumed = false;
-        const auto take = [&]<std::meta::info Member>(marker kind) {
-            const view held { kind, buffer, scanner.position };
-            auto &field = value.[:Member:];
-
-            // A string is the one field whose length prefix would otherwise be read twice: once
-            // for the text, and again by skip_value to step over it.
-            using field_type = std::remove_cvref_t<decltype(field)>;
-            if constexpr (std::same_as<field_type, std::string>) {
-                if (kind == marker::string) {
-                    const auto length = detail::read_length(scanner);
-                    if (!scanner.ok() || !scanner.need(length)) return false;
-                    field.assign(reinterpret_cast<const char *>(scanner.position), static_cast<std::size_t>(length));
-                    scanner.advance(length);
-                    consumed = true;
-                    return true;
-                }
-            }
-
-            // The same field handling reflect_convert does; a tagged variant is read through the
-            // wrapper that carries its names, not as a bare variant.
-            if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
-                using declared = [:std::meta::type_of(Member):];
-                constexpr serpent::tagged resolved = serpent::detail::resolved_tag<declared, *tag>();
-                auto wrapper = make_tagged<resolved>(field);
-                if (!read_into(held, wrapper)) complete = false;
-            } else {
-                if (!read_into(held, field)) complete = false;
-            }
-            return true;
-        };
-
-        // Reads the marker that introduces a value, which a strongly typed object omits.
-        const auto value_marker = [&]() -> marker {
-            if (info.element != marker::invalid) return info.element;
-            if (!scanner.need(1)) return marker::invalid;
-            const auto kind = to_marker(scanner.peek());
-            if (!is_value(kind)) return marker::invalid;
-            scanner.advance(1);
-            return kind;
-        };
-
-        // The key exactly as we would have written it, compared whole. A hit skips parsing the
-        // length marker, the length and the bytes separately.
-        bool matched = false;
-        marker kind = marker::invalid;
-        std::size_t position = 0;
-        template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
+        template for (constexpr auto member : members) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
-                static constexpr auto encoded = detail::encoded_key<name>;
+                static constexpr auto &key = detail::encoded_key<name>;
 
-                // A length under 128 is the same byte whether its marker calls it uint8 or int8,
-                // so both spellings are recognised at once: the length and the name come from
-                // one constant, and either marker is allowed in front. Any other legal spelling
-                // of the same key - a length written wider than it needs to be, say - misses
-                // here and is parsed below, which is what makes the guess safe to make.
-                static constexpr bool short_length = encoded.size() == name.size() + 2 && name.size() < 128;
-                const bool lead_matches = short_length
-                        ? (*scanner.position == static_cast<std::byte>(marker::uint8)
-                                  || *scanner.position == static_cast<std::byte>(marker::int8))
-                        : *scanner.position == encoded[0];
-
-                if (!matched && static_cast<std::size_t>(scanner.limit - scanner.position) >= encoded.size()
-                        && lead_matches
-                        && std::memcmp(scanner.position + 1, encoded.data() + 1, encoded.size() - 1) == 0) {
-                    matched = true;
-                    seen |= std::uint64_t { 1 } << position;
-                    scanner.advance(encoded.size());
-                    kind = value_marker();
-                    if (kind == marker::invalid || !take.template operator()<member>(kind)) return false;
-                }
-            }
-            ++position;
-        }
-
-        // Not written the way we write it: parse the key properly and match it by name, so a
-        // document from another encoder still reads.
-        if (!matched) {
-            position = 0;
-            const auto key = detail::read_key(scanner);
-            if (!scanner.ok()) return false;
-            kind = value_marker();
-            if (kind == marker::invalid) return false;
-
-            template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
-                if constexpr (!serpent::detail::has_annotation<skip>(member)) {
-                    static constexpr std::string_view name = serpent::detail::field_key<T, member>();
-                    if (!matched && detail::key_matches<name>(key)) {
-                        matched = true;
-                        seen |= std::uint64_t { 1 } << position;
-                        if (!take.template operator()<member>(kind)) return false;
-                    }
-                    ++position;
+                // A member that is not here next - left out, or written later - is not an error:
+                // the next member is looked for in the same place, and read_remaining_entries
+                // finds by name whatever is never matched this way.
+                if (this->at(key)) {
+                    this->scan.advance(key.size());
+                    if (!this->template read_value<member>(this->marker_after_key())) return;
                 }
             }
         }
-
-        if (!consumed) {
-            detail::skip_value(scanner, kind, 1);
-            if (!scanner.ok()) return false;
-        }
-        if (counted && remaining > 0) --remaining;
     }
 
-    // A member the type insists on has to have been there; keeping its default instead is how a
-    // half-specified document passes for a whole one.
-    if ((seen & required_mask) != required_mask) return false;
-    return complete;
+    void read_remaining_entries() {
+        while (this->at_next_entry()) {
+            const auto key = detail::read_key(this->scan);
+            if (!this->scan.ok()) return;
+            if (!this->read_member_named(key, this->value_marker())) return;
+            if (!this->prefix.unbounded) --this->entries_left;
+        }
+    }
+
+    /** Whether the object was well formed, every value was one its member could hold, and
+     *  every member the type insists on was there. */
+    [[nodiscard]] bool succeeded() const noexcept {
+        return this->scan.ok() && this->every_value_read && (this->seen & required) == required;
+    }
+
+private:
+    /** Whether this key is next, with at least the byte of a marker after it. */
+    template<std::size_t Width>
+    SERPENT_ALWAYS_INLINE [[nodiscard]] bool at(const std::array<std::byte, Width> &key) const noexcept {
+        return this->scan.remaining() > Width && std::memcmp(this->scan.position, key.data(), Width) == 0;
+    }
+
+    /** The marker at() has already found room for. Whether it opens a value is read_value's to say. */
+    SERPENT_ALWAYS_INLINE [[nodiscard]] marker marker_after_key() noexcept {
+        if (this->prefix.typed()) return this->prefix.element;
+        const auto kind = static_cast<marker>(this->scan.peek());
+        this->scan.advance(1);
+        return kind;
+    }
+
+    /** Steps to the next entry's key, or past the end of the object and answers false. */
+    [[nodiscard]] bool at_next_entry() noexcept {
+        if (!this->scan.ok() || this->prefix.body == nullptr) return false;
+
+        while (this->scan.available(1) && this->scan.peek_marker() == marker::noop) this->scan.advance(1);
+
+        if (!this->prefix.unbounded) return this->entries_left != 0 && this->scan.need(1);
+        if (!this->scan.need(1)) return false;
+        if (this->scan.peek_marker() != marker::object_end) return true;
+        this->scan.advance(1);
+        return false;
+    }
+
+    /** The marker that introduces the next value, which a strongly typed object leaves out. */
+    [[nodiscard]] marker value_marker() noexcept {
+        if (this->prefix.typed()) return this->prefix.element;
+        if (!this->scan.need(1)) return marker::invalid;
+        const auto kind = static_cast<marker>(this->scan.peek());
+        this->scan.advance(1);
+        return kind;
+    }
+
+    [[nodiscard]] bool read_member_named(std::string_view key, marker kind) {
+        bool known = false;
+        bool went_on = true;
+        template for (constexpr auto member : members) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
+                static constexpr std::string_view name = serpent::detail::field_key<T, member>();
+                if (!known && detail::key_matches<name>(key)) {
+                    known = true;
+                    went_on = this->template read_value<member>(kind);
+                }
+            }
+        }
+        if (known) return went_on;
+
+        // A key this type does not name: its value is stepped over, whatever it is.
+        if (!is_value(kind)) {
+            if (this->scan.ok()) this->scan.fail(errc::unexpected_marker, this->scan.position - 1);
+            return false;
+        }
+        detail::skip_value(this->scan, kind, 1);
+        return this->scan.ok();
+    }
+
+    /**
+     * Reads the value under `kind` into a member, leaving the cursor after the value whether or
+     * not it was one the member could hold. False only where the document cannot be read on.
+     *
+     * A member that is a number, a boolean or a string is read as that, straight off the cursor,
+     * and a marker it cannot be read from is only then asked whether it opens a value at all -
+     * so the usual case looks at the marker once.
+     */
+    template<std::meta::info Member>
+    SERPENT_ALWAYS_INLINE [[nodiscard]] bool read_value(marker kind) {
+        static constexpr std::uint64_t bit = bit_of(Member);
+        this->seen |= bit;
+
+        auto &field = this->value.[:Member:];
+        using field_type = std::remove_cvref_t<decltype(field)>;
+        constexpr auto tag = serpent::detail::annotation_of<tagged>(Member);
+
+        if constexpr (!tag.has_value() && direct::readable<field_type>) {
+            if (direct::read(this->scan, kind, field)) return this->scan.ok();
+        }
+        return this->read_value_through_view<Member>(kind);
+    }
+
+    /** Anything else - and a value that was not what its member is - through a view of it, then stepped over. */
+    template<std::meta::info Member>
+    [[nodiscard]] bool read_value_through_view(marker kind) {
+        if (!is_value(kind)) {
+            if (this->scan.ok()) this->scan.fail(errc::unexpected_marker, this->scan.position - 1);
+            return false;
+        }
+
+        auto &field = this->value.[:Member:];
+        const view held { kind, this->buffer, this->scan.position };
+        if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
+            using declared = [:std::meta::type_of(Member):];
+            auto wrapper = make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field);
+            if (!read_into(held, wrapper)) this->every_value_read = false;
+        } else {
+            if (!read_into(held, field)) this->every_value_read = false;
+        }
+        detail::skip_value(this->scan, kind, 1);
+        return this->scan.ok();
+    }
+};
+
+namespace detail {
+
+/** Reads one object at a cursor that stands just after its opening brace, and consumes it. */
+template<reflected_type T>
+bool read_object_body(detail::cursor &scan, const std::span<const std::byte> buffer, T &value) {
+    object_filler<T> filler { scan, buffer, value };
+    filler.read_members_as_written();
+    filler.read_remaining_entries();
+    return filler.succeeded();
 }
 
 } // namespace detail

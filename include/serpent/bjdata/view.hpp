@@ -1,6 +1,7 @@
 #pragma once
 
 #include <serpent/bjdata/detail.hpp>
+#include <serpent/bjdata/direct.hpp>
 #include <serpent/concepts.hpp>
 #include <serpent/error.hpp>
 #include <serpent/kind.hpp>
@@ -153,40 +154,21 @@ public:
     // ---------------- scalars ----------------
 
     [[nodiscard]] constexpr std::optional<bool> as_bool() const noexcept {
-        if (this->element == marker::boolean_true) return true;
-        if (this->element == marker::boolean_false) return false;
-        return std::nullopt;
+        return direct::boolean_under(this->element);
     }
 
     template<std::integral T>
     [[nodiscard]] std::optional<T> as_int() const noexcept {
-        if (this->type() != kind::integer) return std::nullopt;
-        if (this->available() < payload_width(this->element)) return std::nullopt;
-
-        if (this->element == marker::uint64) {
-            const auto value = detail::load<std::uint64_t>(this->payload);
-            if (!std::in_range<T>(value)) return std::nullopt;
-            return static_cast<T>(value);
-        }
-        const auto value = detail::load_integer(this->element, this->payload);
-        if (!std::in_range<T>(value)) return std::nullopt;
-        return static_cast<T>(value);
+        T value {};
+        if (!direct::load_integer(this->element, this->payload, this->available(), value)) return std::nullopt;
+        return value;
     }
 
     template<std::floating_point T>
     [[nodiscard]] std::optional<T> as_float() const noexcept {
-        if (this->available() < payload_width(this->element)) return std::nullopt;
-        switch (this->element) {
-        case marker::float16: return static_cast<T>(decode_float16(detail::load<std::uint16_t>(this->payload)));
-        case marker::float32: return static_cast<T>(detail::load<float>(this->payload));
-        case marker::float64: return static_cast<T>(detail::load<double>(this->payload));
-        default: break;
-        }
-        if (this->element == marker::uint64) {
-            return static_cast<T>(detail::load<std::uint64_t>(this->payload));
-        }
-        if (this->type() == kind::integer) return static_cast<T>(detail::load_integer(this->element, this->payload));
-        return std::nullopt;
+        T value {};
+        if (!direct::load_real(this->element, this->payload, this->available(), value)) return std::nullopt;
+        return value;
     }
 
     /** S and H yield their raw bytes; C yields a one-character view. Never copies. */

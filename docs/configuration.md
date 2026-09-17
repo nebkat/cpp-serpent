@@ -16,6 +16,7 @@ options of the same names. Set them on the compiler's command line if you are no
 | `SERPENT_BOUNDED_OBJECT_WRITE` | on | writes runs of number and boolean members into room claimed once | asks for room per key and per value | nothing but the code |
 | `SERPENT_INTEGER_TABLE` | `1` | `1`: integers two digits at a time from a 400-byte table. `2`: four at a time from a 40 KB one | `0`: `std::to_chars` | the table |
 | `SERPENT_USE_FAST_FLOAT` | on | reads reals in one walk with the bundled fast_float | checks the grammar, then `std::from_chars` | 28 KB of code and tables on arm64 - largely a second copy, where the standard library's own `from_chars` is built on fast_float, as libstdc++'s is - and a large header to compile |
+| `SERPENT_FORCE_INLINE` | on | marks the few small functions on the path of every value always-inline | leaves inlining to the compiler, whose budget for it is per translation unit and runs out in a large one - the same source then runs two to four times slower | somewhat more code where those functions are used |
 | `SERPENT_WIDE_STRING_SCAN` | on | finds what a string must escape eight bytes at a time | looks at every byte | nothing but the code |
 
 The CMake target `serpent::plain` is the library with every one of them off, whatever the build

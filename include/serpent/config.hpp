@@ -65,3 +65,22 @@
 #ifndef SERPENT_WIDE_STRING_SCAN
 #define SERPENT_WIDE_STRING_SCAN 1
 #endif
+
+/**
+ * Insists that the few small functions on the path of every value are inlined.
+ *
+ * A compiler inlines by a budget for the whole translation unit, and in a large one the budget
+ * runs out: functions of three lines that vanish in a small program become calls, their constant
+ * widths become run-time arguments, and the same source runs two to four times slower for
+ * reasons that have nothing to do with it. Those functions are marked SERPENT_ALWAYS_INLINE,
+ * which with this off is nothing, and the compiler decides as it would have.
+ */
+#ifndef SERPENT_FORCE_INLINE
+#define SERPENT_FORCE_INLINE 1
+#endif
+
+#if SERPENT_FORCE_INLINE && (defined(__GNUC__) || defined(__clang__))
+#define SERPENT_ALWAYS_INLINE [[gnu::always_inline]]
+#else
+#define SERPENT_ALWAYS_INLINE
+#endif

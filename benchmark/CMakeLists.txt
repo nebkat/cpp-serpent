@@ -120,7 +120,8 @@ set(BENCH_DEFAULT_SWITCHES
     SERPENT_INTEGER_TABLE=1
     SERPENT_USE_FAST_FLOAT=1
     SERPENT_ZMIJ_OPTIMIZE_SIZE=0
-    SERPENT_WIDE_STRING_SCAN=1)
+    SERPENT_WIDE_STRING_SCAN=1
+    SERPENT_FORCE_INLINE=1)
 
 # Żmij both ways, whichever way this build has it, since a configuration may ask for either.
 serpent_add_zmij(serpent_bench_zmij_fast OFF)
@@ -164,7 +165,7 @@ endfunction()
 serpent_add_benchmark(default)
 serpent_add_benchmark(plain
     SERPENT_USE_ZMIJ=0 SERPENT_BOUNDED_OBJECT_WRITE=0 SERPENT_INTEGER_TABLE=0 SERPENT_USE_FAST_FLOAT=0
-    SERPENT_WIDE_STRING_SCAN=0)
+    SERPENT_WIDE_STRING_SCAN=0 SERPENT_FORCE_INLINE=0)
 serpent_add_benchmark(large SERPENT_INTEGER_TABLE=2)
 serpent_add_benchmark(small SERPENT_ZMIJ_OPTIMIZE_SIZE=1 SERPENT_USE_FAST_FLOAT=0)
 
@@ -177,6 +178,7 @@ if(SERPENT_BENCH_ABLATIONS)
     serpent_add_benchmark(without_integer_table SERPENT_INTEGER_TABLE=0)
     serpent_add_benchmark(without_fast_float SERPENT_USE_FAST_FLOAT=0)
     serpent_add_benchmark(without_wide_string_scan SERPENT_WIDE_STRING_SCAN=0)
+    serpent_add_benchmark(without_force_inline SERPENT_FORCE_INLINE=0)
 endif()
 
 find_package(Python3 COMPONENTS Interpreter)

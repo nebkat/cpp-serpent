@@ -768,6 +768,7 @@ static void print_configuration() {
     std::printf("  SERPENT_INTEGER_TABLE         %d\n", SERPENT_INTEGER_TABLE);
     std::printf("  SERPENT_USE_FAST_FLOAT        %d\n", SERPENT_USE_FAST_FLOAT);
     std::printf("  SERPENT_WIDE_STRING_SCAN      %d\n", SERPENT_WIDE_STRING_SCAN);
+    std::printf("  SERPENT_FORCE_INLINE          %d\n", SERPENT_FORCE_INLINE);
     std::printf("  SERPENT_ZMIJ_OPTIMIZE_SIZE    %d  (how the Zmij this is linked to was built)\n",
             SERPENT_ZMIJ_OPTIMIZE_SIZE);
 }

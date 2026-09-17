@@ -22,7 +22,9 @@ option(SERPENT_USE_ZMIJ "Write reals with the bundled Żmij rather than std::to_
 option(SERPENT_BOUNDED_OBJECT_WRITE "Write runs of boolean and number members into room claimed once" ON)
 option(SERPENT_USE_FAST_FLOAT "Read reals with the bundled fast_float rather than std::from_chars" ON)
 option(SERPENT_WIDE_STRING_SCAN "Look for what a string must escape eight bytes at a time" ON)
-set(SERPENT_HEADER_SWITCHES SERPENT_BOUNDED_OBJECT_WRITE SERPENT_USE_FAST_FLOAT SERPENT_WIDE_STRING_SCAN)
+option(SERPENT_FORCE_INLINE "Insist that the small functions on the path of every value are inlined" ON)
+set(SERPENT_HEADER_SWITCHES
+    SERPENT_BOUNDED_OBJECT_WRITE SERPENT_USE_FAST_FLOAT SERPENT_WIDE_STRING_SCAN SERPENT_FORCE_INLINE)
 
 set(SERPENT_INTEGER_TABLE 1 CACHE STRING
     "How integers are written: 0 std::to_chars, 1 a 400-byte digit table, 2 a 40 KB one")
