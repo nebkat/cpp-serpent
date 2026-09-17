@@ -16,6 +16,7 @@
 #include <string_view>
 
 #include <cstddef>
+#include <initializer_list>
 #include <cstdint>
 
 namespace serpent::json::scanner {
@@ -289,14 +290,54 @@ constexpr void scan_literal(cursor &scan, std::string_view word) noexcept {
  * Steps over `text` if that is exactly what stands at the cursor, and says whether it did.
  *
  * The answering sibling of scan_literal: not finding the text is an answer rather than a failure,
- * and the cursor is left where it was. Meant for text known when the program is compiled - a
- * literal, a key and its punctuation - where the comparison is of a width the compiler can see.
+ * and the cursor is left where it was. For text known when the program is compiled - a literal, a
+ * key and its punctuation.
+ *
+ * The width is part of the type, and the comparison is char_traits' rather than string_view's,
+ * both on purpose. Comparing two string_views goes through basic_string_view::compare, which is
+ * of fixed width only where the compiler happens to inline it - and whether it does depends on
+ * what else the translation unit holds: the same call measured three times slower in a larger
+ * program, as thirteen calls to compare() for every object read. This way the width is a
+ * constant wherever the code ends up.
  */
-[[nodiscard]] constexpr bool accept(cursor &scan, std::string_view text) noexcept {
-    if (!scan.available(text.size())) return false;
-    if (std::string_view { scan.position, text.size() } != text) return false;
-    scan.advance(text.size());
+template<std::size_t Width>
+[[nodiscard]] constexpr bool accept(cursor &scan, const std::array<char, Width> &text) noexcept {
+    if (!scan.available(Width)) return false;
+    if (std::char_traits<char>::compare(scan.position, text.data(), Width) != 0) return false;
+    scan.advance(Width);
     return true;
+}
+
+/** The same for one character, which is what most punctuation is. */
+[[nodiscard]] constexpr bool accept(cursor &scan, char character) noexcept {
+    if (!scan.available(1) || scan.peek() != character) return false;
+    scan.advance(1);
+    return true;
+}
+
+/** The same for a literal, whose terminator is not part of what is looked for. */
+template<std::size_t Size>
+[[nodiscard]] constexpr bool accept(cursor &scan, const char (&literal)[Size]) noexcept {
+    std::array<char, Size - 1> text {};
+    for (std::size_t index = 0; index < text.size(); ++index) text[index] = literal[index];
+    return accept(scan, text);
+}
+
+/**
+ * Several pieces of text run together as one array, which makes its length part of its type.
+ *
+ * `Width` has to be the sum of the pieces' lengths, stated by the caller because a return type
+ * cannot depend on an argument's value. Built a character at a time rather than by joining
+ * std::strings: under the undefined-behaviour sanitizer GCC will not fold std::string's
+ * null-pointer check on a literal, and the concatenation stops being a constant expression.
+ */
+template<std::size_t Width>
+[[nodiscard]] consteval std::array<char, Width> joined(std::initializer_list<std::string_view> pieces) {
+    std::array<char, Width> characters {};
+    std::size_t index = 0;
+    for (const auto piece : pieces)
+        for (const char character : piece) characters[index++] = character;
+    return characters;
 }
 
 /** Appends one Unicode code point as UTF-8. */

@@ -130,6 +130,22 @@ public:
 
     [[nodiscard]] constexpr walk_memo *notes() const noexcept { return this->memo; }
 
+    /**
+     * Records where this value ends, so that stepping to the next need not scan it again.
+     *
+     * A container says this when a walk of it reaches the end. A scalar knows it as soon as it
+     * has been read at all - the grammar scan that reads it is the same one an iterator would
+     * run to step over it - and saying so is what keeps every scalar in an object from being
+     * scanned twice, once to convert and once to find the member after it.
+     *
+     * An extent is a fact about the grammar, not about the conversion, so it is recorded
+     * whenever the scan succeeded - including where the value scanned cleanly and then failed
+     * to convert, as a real does when asked for an integer.
+     */
+    void note_end(const char *end) const noexcept {
+        if (this->memo != nullptr) this->memo->note(this->source.data(), this->first, end, 0);
+    }
+
     [[nodiscard]] constexpr std::string_view buffer() const noexcept { return this->source; }
     [[nodiscard]] constexpr const char *data() const noexcept { return this->first; }
 
@@ -331,21 +347,6 @@ private:
         return value;
     }
 
-    /**
-     * Records where this value ends, so that stepping to the next need not scan it again.
-     *
-     * A container says this when a walk of it reaches the end. A scalar knows it as soon as it
-     * has been read at all - the grammar scan that reads it is the same one an iterator would
-     * run to step over it - and saying so is what keeps every scalar in an object from being
-     * scanned twice, once to convert and once to find the member after it.
-     *
-     * An extent is a fact about the grammar, not about the conversion, so it is recorded
-     * whenever the scan succeeded - including where the value scanned cleanly and then failed
-     * to convert, as a real does when asked for an integer.
-     */
-    void note_end(const char *end) const noexcept {
-        if (this->memo != nullptr) this->memo->note(this->source.data(), this->first, end, 0);
-    }
 
     friend class array_iterator;
     friend class member_iterator;
