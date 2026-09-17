@@ -16,6 +16,7 @@
 
 #include <serpent/json/reader.hpp>
 
+#include <charconv>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -227,14 +228,50 @@ public:
 
     [[nodiscard]] std::optional<bool> as_bool() const noexcept { return this->at_position().as_bool(); }
 
-    template<std::integral T>
-    [[nodiscard]] std::optional<T> as_int() const noexcept {
-        return this->at_position().template as_int<T>();
-    }
-
+    /**
+     * Converted straight from the text, with no grammar check.
+     *
+     * The one place this handle does more than delegate, and it is not a second opinion about
+     * what a number is: an index only exists for a document that parsed, and building it scanned
+     * every number against the same grammar. A scanning reader has to check because it cannot
+     * know that; this one knows. So the digits are walked once, by the conversion, rather than
+     * once to validate and again to convert.
+     */
     template<std::floating_point T>
     [[nodiscard]] std::optional<T> as_float() const noexcept {
-        return this->at_position().template as_float<T>();
+        if (!this->valid) return std::nullopt;
+        const auto text = this->index->buffer();
+        const char *const begin = text.data() + this->index->at(this->position).first;
+        double value = 0;
+        const auto parsed = std::from_chars(begin, text.data() + text.size(), value);
+        if (parsed.ec != std::errc {}) return std::nullopt;
+        return static_cast<T>(value);
+    }
+
+    template<std::integral T>
+    [[nodiscard]] std::optional<T> as_int() const noexcept {
+        if (!this->valid) return std::nullopt;
+        const auto text = this->index->buffer();
+        const char *const begin = text.data() + this->index->at(this->position).first;
+        const char *const limit = text.data() + text.size();
+
+        const auto reject_real = [limit](const char *end) {
+            // from_chars stops at the point or exponent that makes this a real, so what follows
+            // is what says whether it was one.
+            return end != limit && (*end == '.' || *end == 'e' || *end == 'E');
+        };
+
+        if (*begin == '-') {
+            std::int64_t value = 0;
+            const auto parsed = std::from_chars(begin, limit, value);
+            if (parsed.ec != std::errc {} || reject_real(parsed.ptr) || !std::in_range<T>(value))
+                return std::nullopt;
+            return static_cast<T>(value);
+        }
+        std::uint64_t value = 0;
+        const auto parsed = std::from_chars(begin, limit, value);
+        if (parsed.ec != std::errc {} || reject_real(parsed.ptr) || !std::in_range<T>(value)) return std::nullopt;
+        return static_cast<T>(value);
     }
 
     [[nodiscard]] std::optional<std::string> as_string() const { return this->at_position().as_string(); }

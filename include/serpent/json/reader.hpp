@@ -99,9 +99,11 @@ public:
 
     template<std::integral T>
     [[nodiscard]] std::optional<T> as_int() const noexcept {
-        if (this->type() != kind::integer) return std::nullopt;
+        // As above, with the one thing the grammar scan does not settle: a real is a number and
+        // would convert, so the text is checked for the point or exponent that makes it one.
+        // That is the same walk number_kind() does, done here on text already in hand.
         const auto text = this->number_text();
-        if (text.empty()) return std::nullopt;
+        if (text.empty() || text.find_first_of(".eE") != std::string_view::npos) return std::nullopt;
 
         if (text.front() == '-') {
             std::int64_t value = 0;
@@ -117,7 +119,9 @@ public:
 
     template<std::floating_point T>
     [[nodiscard]] std::optional<T> as_float() const noexcept {
-        if (!this->is_number()) return std::nullopt;
+        // One grammar scan and one conversion. is_number() would walk the digits to answer a
+        // question the conversion answers anyway, and it answers it by telling an integer from
+        // a real - which this does not care about and which costs a second walk to decide.
         const auto text = this->number_text();
         if (text.empty()) return std::nullopt;
 
