@@ -2,6 +2,7 @@
 
 // Rendering a document from another format as JSON lives beside that format.
 
+#include <serpent/json/decode.hpp>
 #include <serpent/json/reader.hpp>
 #include <serpent/json/writer.hpp>
 #include <serpent/error.hpp>

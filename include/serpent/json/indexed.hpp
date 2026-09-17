@@ -386,10 +386,32 @@ public:
         return {};
     }
 
-    /** Whatever this value holds, as one of your types - the same dispatch every reader makes. */
+    /**
+     * Whatever this value holds, as one of your types.
+     *
+     * Read through *this* handle, not the plain one underneath: a container filled from the
+     * document has to walk it by the index, or the reading gives up the index and is correct but
+     * pointless.
+     */
     template<typename T>
     [[nodiscard]] std::optional<T> try_get() const {
-        return this->at_position().template try_get<T>();
+        if constexpr (std::same_as<T, bool>) {
+            return this->as_bool();
+        } else if constexpr (serpent::detail::string_like<T> && std::constructible_from<T, std::string_view>) {
+            return this->at_position().template try_get<T>();
+        } else if constexpr (std::floating_point<T>) {
+            return this->template as_float<T>();
+        } else if constexpr (std::integral<T>) {
+            return this->template as_int<T>();
+        } else if constexpr (serpent::detail::structurally_readable<T>) {
+            T item {};
+            if (!read_into(*this, item)) return std::nullopt;
+            return item;
+        } else {
+            T item {};
+            if (!serializer<T>::read(*this, item)) return std::nullopt;
+            return item;
+        }
     }
 };
 

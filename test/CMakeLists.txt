@@ -12,6 +12,7 @@ set(TESTS
     bjdata_writer
     json_reader
     json_indexed
+    json_walking
     fixture
     manual
     value)
