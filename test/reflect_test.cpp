@@ -458,7 +458,33 @@ void naming_styles() {
     static_assert(convert_case("mtuBytes", naming_style::as_written).view() == "mtuBytes");
 }
 
+// Two members happening to be called first and second does not make a type a pair. It used to:
+// such a type was written as a two-element array of those two, every other member was dropped
+// without a word, and what was written could not be read back.
+struct [[= serpent::serializable {}]] podium {
+    std::string first;
+    std::string second;
+    std::string third;
+
+    friend bool operator==(const podium &, const podium &) = default;
+};
+
+void members_called_first_and_second_are_still_members() {
+    const podium value { "gold", "silver", "bronze" };
+    check_equal(json::encode(value), std::string { R"({"first":"gold","second":"silver","third":"bronze"})" },
+            "a type with members called first and second is an object, with all of them");
+    check(json::decode<podium>(json::encode(value)) == value, "and reads back");
+    check(bjdata::decode<podium>(bjdata::encode(value)) == value, "in both formats");
+
+    // A real pair is still a pair.
+    check_equal(json::encode(std::pair { 1, std::string { "one" } }), std::string { R"([1,"one"])" },
+            "a std::pair is still a two-element array");
+    static_assert(!serpent::detail::pair_like<podium>);
+    static_assert(serpent::detail::pair_like<std::pair<int, int>>);
+}
+
 int main() {
+    members_called_first_and_second_are_still_members();
     an_enum_can_say_what_it_is_on_the_wire();
     a_sequence_is_walked_once();
     a_constant_key_is_framed_once();

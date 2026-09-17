@@ -4,6 +4,7 @@
 #include <variant>
 #include <ranges>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 
 #include <cstddef>
@@ -37,12 +38,19 @@ concept keyed_but_not_an_object = std::ranges::input_range<T> && requires {
     typename T::mapped_type;
 } && !map_like<T>;
 
-/** A pair, which is a two-element array wherever one is needed. */
+/**
+ * A pair, which is a two-element array wherever one is needed.
+ *
+ * Having members called first and second is not what makes a type a pair - a struct may well
+ * call two of its members that, and it is an object with however many members it has. A pair
+ * also says it is one, through std::tuple_size, and that is what is asked here.
+ */
 template<typename T>
 concept pair_like = requires(T &value) {
     typename std::remove_cvref_t<decltype(value.first)>;
     typename std::remove_cvref_t<decltype(value.second)>;
-} && !std::ranges::input_range<T> && !requires { typename T::key_type; };
+    { std::tuple_size<T>::value } -> std::convertible_to<std::size_t>;
+} && std::tuple_size<T>::value == 2 && !std::ranges::input_range<T> && !requires { typename T::key_type; };
 
 template<typename T>
 concept optional_like = requires(const T &value) {
