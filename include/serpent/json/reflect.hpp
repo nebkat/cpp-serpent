@@ -165,10 +165,16 @@ bool read_reflected(const reader &source, T &value) {
 
     for (const auto entry : source.items()) {
         // An escaped key is rare and cannot be compared in place, so it is decoded only then.
-        const auto key = entry.key.escaped ? std::string_view {} : entry.key.contents;
-        const std::string decoded = entry.key.escaped ? entry.key_string() : std::string {};
-        const std::string_view name = entry.key.escaped ? std::string_view { decoded } : key;
+        std::string decoded;
+        std::string_view name = entry.key.contents;
+        if (entry.key.escaped) [[unlikely]] {
+            decoded = entry.key_string();
+            name = decoded;
+        }
 
+        // A document written from this type arrives in this order, and so does one written by
+        // anyone following the same schema. Left unannotated on purpose: a branch this
+        // consistent is what a predictor is best at, and saying so measured no different.
         if (expected < member_count && member_key[expected] == name) {
             seen |= std::uint64_t { 1 } << expected;
             if (!fillers[expected](entry.value, value)) complete = false;
