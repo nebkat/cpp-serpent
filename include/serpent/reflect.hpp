@@ -221,13 +221,13 @@ struct naming {
 /**
  * The opt-in for a type you cannot annotate. Specialize to true_type.
  *
- * A specialization may also carry a naming style. Reflection reads the fields directly, so
- * there is no conversion function to hang a setting on, and the type cannot be annotated -
- * this trait is the only type-level surface the consumer owns:
+ * A specialization may also carry a naming rule, spelled as the annotation is. Reflection reads
+ * the fields directly, so there is no conversion function to hang a setting on, and the type
+ * cannot be annotated - this trait is the only type-level surface the consumer owns:
  *
  *     template<>
  *     struct serpent::enable_reflection<foreign> : std::true_type {
- *         static constexpr naming_style style = naming_style::snake_case;
+ *         static constexpr serpent::naming naming { serpent::naming_style::snake_case };
  *     };
  */
 template<typename T>
@@ -522,7 +522,7 @@ private:
  *         };
  *     };
  *
- * A naming style may sit beside it as `static constexpr naming_style style`, and a type only
+ * A naming rule may sit beside it as `static constexpr serpent::naming naming`, and a type only
  * some of whose members belong on the wire says `static constexpr bool partial = true` - without
  * that, leaving one out is a build error, so a member added upstream cannot quietly stop being
  * written.
@@ -583,8 +583,8 @@ consteval bool has_annotation(std::meta::info entity) {
  */
 template<typename T>
 consteval naming_style naming_for() {
-    if constexpr (requires { enable_reflection<T>::style; })
-        return enable_reflection<T>::style;
+    if constexpr (requires { enable_reflection<T>::naming; })
+        return enable_reflection<T>::naming.style;
     else
         return annotation_of<naming>(^^T).value_or(naming {}).style;
 }
@@ -826,11 +826,8 @@ concept tabulated_type = requires { members_of<T>::value; };
 template<typename T>
 consteval naming_style table_naming_for() {
     // Spelled as the annotation is, so a table reads like the annotations it stands in for.
-    // `style` is accepted too, because enable_reflection established that spelling first.
     if constexpr (requires { members_of<T>::naming; })
         return members_of<T>::naming.style;
-    else if constexpr (requires { members_of<T>::style; })
-        return members_of<T>::style;
     else
         return naming_style::as_written;
 }
