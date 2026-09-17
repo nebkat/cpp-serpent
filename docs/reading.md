@@ -178,6 +178,6 @@ for (auto row : index.root()["rows"].array())      // every step is a hop, not a
 ```
 
 It answers everything an ordinary reader answers, so anything that takes a reader takes this.
-One entry per value at twenty bytes — for a 1.6 MB document, 0.7 MB, smaller than the document —
-and building it costs about what validating costs. Worth it from the second traversal; for a
+One entry per value at twelve bytes — for a 1.6 MB document, 0.4 MB — and building it costs
+about what validating costs. Worth it from the second traversal; for a
 single pass, or for a message rather than a file, read normally.

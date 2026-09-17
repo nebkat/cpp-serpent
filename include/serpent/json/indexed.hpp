@@ -17,6 +17,7 @@
 #include <serpent/json/reader.hpp>
 
 #include <charconv>
+#include <cstring>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -37,13 +38,28 @@ class indexed_reader;
  */
 class structural_index {
 public:
+    /**
+     * Twelve bytes: where the value is, where its subtree ends, and where its key is.
+     *
+     * The key's length is not kept. A stored key runs to the next quote, so comparing one
+     * against a name the caller already has the length of is that many bytes and then a check
+     * that a quote follows - which is the same work a length would have saved and no storage.
+     * The high bit of the key offset says the key carries an escape and cannot be compared
+     * where it lies, which caps a document at two gigabytes.
+     *
+     * How many children a container has is not kept either: counting them is a walk along the
+     * siblings, each step a load, and only size() and size_hint() ever ask.
+     */
     struct node {
-        std::uint32_t first = 0;    ///< offset of the value's first character
-        std::uint32_t key = 0;      ///< offset of its key's contents, when it is a member
-        std::uint32_t end = 0;      ///< one past this value's subtree, in entries
-        std::uint32_t children = 0; ///< how many values are directly inside it
-        std::uint16_t key_length = 0;
-        bool key_escaped = false;
+        std::uint32_t first = 0; ///< offset of the value's first character
+        std::uint32_t end = 0;   ///< one past this value's subtree, in entries
+        std::uint32_t key = 0;   ///< offset of its key, high bit set when the key has an escape
+
+        static constexpr std::uint32_t escaped_bit = std::uint32_t { 1 } << 31;
+
+        [[nodiscard]] constexpr bool has_key() const noexcept { return this->key != 0; }
+        [[nodiscard]] constexpr bool key_escaped() const noexcept { return (this->key & escaped_bit) != 0; }
+        [[nodiscard]] constexpr std::uint32_t key_offset() const noexcept { return this->key & ~escaped_bit; }
     };
 
 private:
@@ -73,11 +89,10 @@ private:
         }
 
         const auto self = static_cast<std::uint32_t>(this->nodes.size());
-        this->nodes.push_back(node { this->offset_of(scan.position),
-                key.contents.empty() ? 0 : this->offset_of(key.contents.data()), 0, 0,
-                static_cast<std::uint16_t>(key.contents.size()), key.escaped });
-
-        std::uint32_t children = 0;
+        const std::uint32_t key_field = key.contents.empty()
+                ? 0
+                : this->offset_of(key.contents.data()) | (key.escaped ? node::escaped_bit : 0);
+        this->nodes.push_back(node { this->offset_of(scan.position), 0, key_field });
         const char opening = scan.peek();
 
         if (opening == '[' || opening == '{') {
@@ -108,7 +123,6 @@ private:
 
                     this->record(scan, member_key, depth + 1);
                     if (!scan.ok()) break;
-                    ++children;
 
                     scanner::skip_whitespace(scan);
                     if (!scan.available(1)) {
@@ -133,7 +147,6 @@ private:
         }
 
         this->nodes[self].end = static_cast<std::uint32_t>(this->nodes.size());
-        this->nodes[self].children = children;
     }
 
 public:
@@ -179,6 +192,23 @@ public:
  * Answers what a reader answers, because for everything but navigation it hands the position to
  * a reader and asks. Only finding a sibling or a member is different.
  */
+/**
+ * The span of a recorded key.
+ *
+ * The length was not stored, so the closing quote gives it - one scan of a key, and only when a
+ * caller asks for the key itself rather than to compare it, which the lookup below does without
+ * building a span at all.
+ */
+[[nodiscard]] inline scanner::string_span span_of_key(
+        const structural_index &index, const structural_index::node &entry) noexcept {
+    if (!entry.has_key()) return {};
+    const auto text = index.buffer();
+    const char *const first = text.data() + entry.key_offset();
+    scanner::cursor scan { text, first - 1 };   // the opening quote
+    const auto span = scanner::scan_string(scan);
+    return scanner::string_span { span.contents, entry.key_escaped() };
+}
+
 class indexed_reader {
     const structural_index *index = nullptr;
     std::uint32_t position = 0;
@@ -190,10 +220,9 @@ class indexed_reader {
         return reader { this->index->buffer(), this->index->buffer().data() + here.first };
     }
 
+    /** The key of this value, if it is a member: found by its recorded start and its own quote. */
     [[nodiscard]] scanner::string_span key_span() const noexcept {
-        const auto &here = this->index->at(this->position);
-        return scanner::string_span { std::string_view { this->index->buffer().data() + here.key, here.key_length },
-            here.key_escaped };
+        return span_of_key(*this->index, this->index->at(this->position));
     }
 
 public:
@@ -276,14 +305,19 @@ public:
 
     [[nodiscard]] std::optional<std::string> as_string() const { return this->at_position().as_string(); }
 
-    /** Counted while recording, where a scanning reader counts by walking. */
-    [[nodiscard]] std::optional<std::size_t> size_hint() const noexcept {
-        if (!this->valid) return std::nullopt;
-        return this->index->at(this->position).children;
+    /** How many values are directly inside this one: a walk along the siblings, each step a load. */
+    [[nodiscard]] std::size_t size() const noexcept {
+        if (!this->valid) return 0;
+        const auto &here = this->index->at(this->position);
+        if (here.end <= this->position + 1) return 0;
+        std::size_t count = 0;
+        for (auto child = this->position + 1; child < here.end; child = this->index->at(child).end) ++count;
+        return count;
     }
 
-    [[nodiscard]] std::size_t size() const noexcept {
-        return this->valid ? this->index->at(this->position).children : 0;
+    [[nodiscard]] std::optional<std::size_t> size_hint() const noexcept {
+        if (!this->valid) return std::nullopt;
+        return this->size();
     }
 
     // ---------------- navigation: the only part an index knows about ----------------
@@ -360,10 +394,12 @@ public:
     [[nodiscard]] indexed_reader operator[](std::size_t element) const noexcept {
         if (!this->valid || !this->is_array()) return {};
         const auto &here = this->index->at(this->position);
-        if (element >= here.children) return {};
         auto found = this->position + 1;
-        for (std::size_t step = 0; step < element; ++step) found = this->index->at(found).end;
-        return indexed_reader { *this->index, found };
+        for (std::size_t step = 0; step < element; ++step) {
+            if (found >= here.end) return {};
+            found = this->index->at(found).end;
+        }
+        return found < here.end ? indexed_reader { *this->index, found } : indexed_reader {};
     }
 
     /**
@@ -376,12 +412,22 @@ public:
     [[nodiscard]] indexed_reader operator[](std::string_view name) const noexcept {
         if (!this->valid || !this->is_object()) return {};
         const auto &here = this->index->at(this->position);
+        const auto text = this->index->buffer();
         for (auto member = this->position + 1; member != here.end; member = this->index->at(member).end) {
             const auto &entry = this->index->at(member);
-            const scanner::string_span key { std::string_view { this->index->buffer().data() + entry.key,
-                                                     entry.key_length },
-                entry.key_escaped };
-            if (scanner::equals(key, name)) return indexed_reader { *this->index, member };
+            if (!entry.has_key()) continue;
+            const char *const key = text.data() + entry.key_offset();
+
+            if (!entry.key_escaped()) [[likely]] {
+                // The quote that ends the stored key is what a length would have told us.
+                const auto room = static_cast<std::size_t>(text.data() + text.size() - key);
+                if (room > name.size() && key[name.size()] == '"'
+                        && std::memcmp(key, name.data(), name.size()) == 0) {
+                    return indexed_reader { *this->index, member };
+                }
+            } else if (scanner::equals(span_of_key(*this->index, entry), name)) {
+                return indexed_reader { *this->index, member };
+            }
         }
         return {};
     }
@@ -452,10 +498,7 @@ public:
             , position(position) {}
 
     [[nodiscard]] key_value operator*() const noexcept {
-        const auto &entry = this->index->at(this->position);
-        return key_value { scanner::string_span { std::string_view { this->index->buffer().data() + entry.key,
-                                                      entry.key_length },
-                                   entry.key_escaped },
+        return key_value { span_of_key(*this->index, this->index->at(this->position)),
             indexed_reader { *this->index, this->position } };
     }
 
