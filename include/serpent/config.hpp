@@ -51,8 +51,8 @@
  *
  * std::from_chars accepts more than JSON does, so text has to be walked once to check it and
  * again to convert it; fast_float has a mode that accepts exactly JSON, and does both in one
- * walk. It brings about 10 KB of tables - which a standard library whose own from_chars is
- * built on fast_float, as libstdc++'s is, has a copy of already.
+ * walk. It brings 28 KB of code and tables, built for arm64 - much of which a standard library
+ * whose own from_chars is built on fast_float, as libstdc++'s is, has a copy of already.
  */
 #ifndef SERPENT_USE_FAST_FLOAT
 #define SERPENT_USE_FAST_FLOAT 1

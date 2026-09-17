@@ -125,39 +125,73 @@ can read in a hex dump.
 
 ## Your own types, as JSON
 
-| | serpent | struct-mapping lib | DOM lib |
-|---|---:|---:|---:|
-| decode | 0.64 ms | **0.56 ms** (1.2x faster) | 7.56 ms (12x slower) |
-| encode | 0.82 ms | **0.28 ms** (2.9x faster) | 4.82 ms (5.9x slower) |
-| allocations, decode | **15** | 10,015 | 70,029 |
-| allocations, encode | 17 | **12** | 70,023 |
+| | serpent | struct-mapping lib | the same, built for size | DOM lib |
+|---|---:|---:|---:|---:|
+| decode | **0.54 ms** | 0.55 ms | 0.86 ms | 7.50 ms (14x slower) |
+| encode | 0.42 ms | **0.28 ms** (1.5x faster) | 0.34 ms | 4.31 ms (10x slower) |
+| allocations, decode | **15** | 10,015 | 10,015 | 70,029 |
+| allocations, encode | 17 | **12** | **12** | 70,023 |
 
 The answer depends a good deal on what the fields are. Five of one type at a time, ten thousand
-records, against the same library — below 1.0 is serpent ahead:
+records, against the same library as it comes — below 1.0 is serpent ahead:
 
 | | strings | booleans | integers | reals |
 |---|---:|---:|---:|---:|
-| decode | **0.57x** | **0.69x** | 1.29x | 1.68x |
-| encode | 1.63x | 5.33x | 2.47x | 2.12x |
+| decode | **0.87x** | **0.72x** | 1.12x | 1.18x |
+| encode | 1.35x | 2.16x | **0.62x** | 1.18x |
 
 Decoding is won or lost on everything *around* the conversion, and a reader generated for a type
 can expect the bytes it would have written rather than classify them: a key, its quotes, its
-colon and the comma before it are one comparison. Where the conversion itself is most of the
-work - a real - the two libraries converge on the cost of the conversion, and serpent's is
-`std::from_chars` behind a grammar check where the other library has its own parser.
+colon and the comma before it are one comparison.
 
-Encoding a real used to be the whole story here: 6.3x behind, because `std::to_chars` and a
-re-layout to match the reference implementation together cost about 40 ns where the other
-library's formatter costs 6. It is 2.1x now. Reals are written by a bundled copy of
-[Żmij](https://github.com/vitaut/zmij) — the same algorithm the other library uses — in about
-15 ns inside a document, at the price of [spelling a very large or very small real with an
-exponent](json.md#formatting) where the reference writes it out.
+### What the switches are worth
 
-What is left on every row is the writer itself. It is a general, stateful writer that anyone
-can drive by hand and that checks what it is asked to do — a key outside an object is an error,
-not a malformed document — where the other library writes into a pre-sized buffer by index, with
-a table-driven integer formatter. A boolean is where that shows most, because there is nothing
-else in it to cost anything.
+Most of what closed this gap is code with a plainer alternative, and every such piece is behind a
+switch in [`serpent/config.hpp`](configuration.md) with the plain way kept beside it. The
+benchmark is built once per configuration, so what each is worth is measured, not remembered:
+
+| 10k records, µs | default | large | small | plain | struct-mapping lib | the same, for size |
+|---|---:|---:|---:|---:|---:|---:|
+| decode, mixed | 537 | 546 | 687 | 691 | 553 | 858 |
+| encode, mixed | 418 | 412 | 455 | 1,216 | 282 | 343 |
+| decode, five integers | 316 | 321 | 337 | 330 | 282 | 470 |
+| encode, five integers | 148 | 139 | 152 | 376 | 239 | 109 |
+| decode, five reals | 633 | 631 | 985 | 978 | 538 | 1,098 |
+| encode, five reals | 419 | 416 | 527 | 2,346 | 354 | 488 |
+| decode, five strings | 1,007 | 1,019 | 1,005 | 1,157 | 1,156 | 1,216 |
+| encode, five strings | 503 | 501 | 509 | 640 | 372 | 409 |
+| decode, five booleans | 137 | 137 | 135 | 137 | 190 | 318 |
+| encode, five booleans | 98 | 98 | 97 | 220 | 45 | 45 |
+
+`default` is the library as it comes. `large` swaps the 400-byte integer table for the 40 KB one.
+`small` is for an image that counts its flash: Żmij without its table of powers of ten and
+`std::from_chars` rather than fast_float. `plain` has every switch off, and is the standard
+library throughout.
+
+What each switch does, in the order of what it bought:
+
+- **Reals are written by [Żmij](https://github.com/vitaut/zmij)** rather than `std::to_chars`
+  and a re-layout: about 47 ns a member became about 8, at the price of [spelling a very large or
+  very small real with an exponent](json.md#formatting).
+- **Runs of number and boolean members are written into room claimed once.** Each has a longest
+  possible text, so a run of them asks for room once rather than once per key and once per
+  value. Where that much room cannot be had in one piece - a fixed buffer near its end - they are
+  written one at a time as before, so a document that fits still fits.
+- **Integers are written two digits at a time** from a 400-byte table, or four from a 40 KB one,
+  which is Glaze's formatter under its licence. The large table is worth another 6% here.
+- **Reals are read by [fast_float](https://github.com/fastfloat/fast_float) in its JSON mode**,
+  in one walk, where `std::from_chars` accepts more than JSON does and so needs the grammar
+  checked first.
+- **A string's plain text is found eight bytes at a time**, reading and writing.
+
+What is left on the encode rows is the writer itself. It is a general, stateful writer that
+anyone can drive by hand and that checks what it is asked to do — a key outside an object is an
+error, not a malformed document — where the other library writes into a pre-sized buffer by
+index. A boolean is where that shows most, because there is nothing else in it to cost anything.
+
+One row is not what it seems: the other library's own integer encode is *faster built for size*
+(109 µs) than as it comes (239 µs), on every distribution of values tried. That is its object
+writer, not its integer formatter, and it is why the integer column flatters serpent.
 
 Against the DOM library serpent is ahead on every row, and by more in binary, where there is no
 text to parse and the difference is almost entirely the object graph the other one builds.
@@ -168,7 +202,7 @@ text to parse and the difference is almost entirely the object graph the other o
 |---|---:|---:|---:|---:|---:|
 | count every value, citm_catalog.json | 1.24 ms | **0.31 ms** | 0.43 ms | 0.90 ms | 7.39 ms |
 | the same, with an index built first | 0.87 ms | | | | |
-| sum every coordinate, canada.json | 3.69 ms | 1.63 ms | **1.26 ms** | 1.92 ms | 13.26 ms |
+| sum every coordinate, canada.json | 2.80 ms | 1.62 ms | **1.25 ms** | 1.97 ms | 13.36 ms |
 | the same, with an index built first | 2.97 ms | | | | |
 
 A structural scan that returns no values — `json::validate` — takes 0.74 ms on citm, so
@@ -228,7 +262,7 @@ into a fixed buffer took it to 13.
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types, and want the most speed | decoding is level, ahead on strings and booleans; encoding, a struct-mapping library is 2-3x quicker |
+| convert your own types, and want the most speed | decoding is level, ahead on strings and booleans; encoding, a struct-mapping library is about 1.5x quicker |
 | traverse whole documents repeatedly | an indexed parser is 3-4x quicker |
 | want a mutable document object | serpent has none at all |
 | need BJData and JSON from one definition | serpent |
@@ -268,7 +302,7 @@ fast, and the whole-document benchmark caught exactly that: asking the on-demand
 root field count only touches the top level, so it had to be replaced with a real recursive
 traversal before the row meant anything.
 
-Measured on an Apple M4 Pro, macOS 26.5, `-O3 -DNDEBUG`, best of seven rounds, every table
+Measured on an Apple M4 Pro, macOS 26.5, `-O3 -DNDEBUG`, medians as nanobench takes them, every table
 GCC 16 with `-freflection` — the path serpent means you to use, and one compiler throughout, since
 comparing two libraries built by different ones says more about the compilers than the libraries.
 

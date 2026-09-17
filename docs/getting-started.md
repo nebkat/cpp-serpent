@@ -19,7 +19,8 @@ Everything is headers but one bundled source file, which writes real numbers and
 small library that `serpent::serpent` links for you. Set `SERPENT_USE_ZMIJ` to `OFF` before
 `FetchContent_MakeAvailable` to go without it: the output is identical, reals are written about
 three times slower, and the library is header-only. Using the headers without CMake gets that
-by default.
+by default. It is one of several such switches, each with a plainer way kept beside it;
+[Configuration](configuration.md) lists them and what each costs.
 
 ## Your first program
 

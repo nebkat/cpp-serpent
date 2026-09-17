@@ -61,5 +61,6 @@ nav:
   - Formats:
       - JSON: json.md
       - BJData: bjdata.md
+  - Configuration: configuration.md
   - Benchmarks: benchmarks.md
   - Design notes: design.md
