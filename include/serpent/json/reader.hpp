@@ -207,10 +207,20 @@ public:
         return static_cast<T>(value);
     }
 
-    /** Always decodes. There is no borrow-when-unescaped path, deliberately. */
+    /**
+     * Always copies. There is no borrow-when-unescaped path, deliberately - a string read out
+     * of a document owns its bytes, whatever the document does next.
+     *
+     * The copy is not always the same copy. The scan that found the closing quote already knows
+     * whether anything between the quotes needs decoding, and most strings need nothing, so
+     * those are taken whole; only a string that actually carries an escape is walked a character
+     * at a time to resolve it.
+     */
     [[nodiscard]] std::optional<std::string> as_string() const noexcept {
         const auto text = this->scanned_string();
         if (!text) return std::nullopt;
+
+        if (!text->escaped) return std::string { text->contents };
 
         std::string decoded;
         decoded.reserve(scanner::decoded_length(*text));
