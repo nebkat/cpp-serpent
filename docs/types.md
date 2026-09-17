@@ -96,7 +96,7 @@ have:
 
 ```cpp
 template<>
-struct serpent::enable_reflection<foreign_reading> : std::true_type {
+struct serpent::describe<foreign_reading> {
     static constexpr serpent::naming naming { serpent::naming_style::snake_case };
 };
 ```

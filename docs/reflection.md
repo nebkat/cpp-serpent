@@ -242,8 +242,8 @@ you restate — so only the exceptions are written down, and one list serves bot
 
 ```cpp
 template<>
-struct serpent::members_of<esp_netif_ip_info_t> {
-    static constexpr serpent::member_entry value[] {
+struct serpent::describe<esp_netif_ip_info_t> {
+    static constexpr serpent::member_entry members[] {
         ^^esp_netif_ip_info_t::ip,                                       // key is "ip"
         { ^^esp_netif_ip_info_t::netmask, serpent::key("mask") },        // the exception
         { ^^esp_netif_ip_info_t::gw, serpent::defaulted {} },
@@ -264,23 +264,24 @@ the same primitive rather than two features:
 === "All of them"
 
     ```cpp
-    static constexpr auto value = serpent::all_members_of<T>();
+    static constexpr auto members = serpent::all_members_of<T>();
     ```
 
 === "Narrowed"
 
     ```cpp
-    static constexpr auto value = std::define_static_array(
+    static constexpr auto members = std::define_static_array(
             std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())
             | std::views::filter([](std::meta::info member) {
                   return std::meta::identifier_of(member) != "reserved";
               }));
+    static constexpr bool partial = true;
     ```
 
 === "Hand-rolled"
 
     ```cpp
-    static constexpr serpent::member_entry value[] {
+    static constexpr serpent::member_entry members[] {
         ^^T::first,
         { ^^T::second, serpent::key("2nd") },
     };
@@ -307,7 +308,7 @@ enumerator, of any of the kinds `as` takes, and one fallback:
 
 ```cpp
 template<>
-struct serpent::enum_values<uart_stop_bits_t> {
+struct serpent::describe<uart_stop_bits_t> {
     static constexpr serpent::enum_entry<uart_stop_bits_t> values[] {
         { UART_STOP_BITS_1,   1,   serpent::fallback {} },
         { UART_STOP_BITS_1_5, 1.5 },
@@ -327,7 +328,7 @@ way to map an enumeration on a toolchain that has none.
     can see, and one it does not name is a compile error naming the one it missed:
 
     ```
-    error: static assertion failed: this serpent::enum_values table does not name every
+    error: static assertion failed: this serpent::describe table does not name every
     enumerator of its type. Not named: UART_PARITY_MARK. Give each a value, or say
     { enumerator, serpent::skip {} } to keep it off the wire deliberately
     ```
@@ -344,7 +345,7 @@ nowhere else for a type-level setting to live — the trait is the only surface 
 
 ```cpp
 template<>
-struct serpent::enable_reflection<foreign_reading> : std::true_type {
+struct serpent::describe<foreign_reading> {
     static constexpr serpent::naming_style style = serpent::naming_style::snake_case;
 };
 ```
@@ -411,7 +412,7 @@ error rather than something you find by reading a document that came out wrong:
 | two members that are the same key | one would overwrite the other reading, and both would be written |
 | an enumeration with two enumerators of the same wire value | whichever was written, only one could ever be read back |
 | more than one `fallback {}` | nothing says which |
-| a `serpent::enum_values` table that does not name every enumerator | the one it missed would quietly become the fallback |
+| a `serpent::describe` table that does not name every enumerator | the one it missed would quietly become the fallback |
 | `required {}` on a member that is not an optional | it is required already; the annotation says nothing |
 | `required {}` and `defaulted {}` together | they are opposites |
 | `skip {}` beside `key("…")` | a member that is not in the document has no key |
@@ -430,7 +431,7 @@ error: static assertion failed: this enumeration cannot be read back as it is wr
 off and standby are the same value on the wire
 ```
 
-Two of these hold without reflection, because a `serpent::enum_values` table is ordinary data:
+Two of these hold without reflection, because a `serpent::describe` table is ordinary data:
 duplicate entries and a second fallback are refused wherever the table compiles. The rest need
 the member or enumerator list, so **on a toolchain without reflection they are simply absent** —
 the code still builds and the mistake still ships. Build once with reflection somewhere, and it

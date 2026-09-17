@@ -43,7 +43,7 @@ struct serializer {
     template<typename Writer>
     static void write(Writer &out, const T &value) {
         static_assert(!(detail::tabulated_type<T> && (convertible_type<T> || requires { to_json(out, value); })),
-                "this type has a serpent::members_of table and also a hand-written conversion. The "
+                "this type has a serpent::describe table and also a hand-written conversion. The "
                 "table would be used and one of them would do nothing; remove whichever you did not "
                 "mean");
         static_assert(!(reflected_type<T> && (convertible_type<T> || requires { to_json(out, value); })),
@@ -115,7 +115,7 @@ struct serializer {
     template<typename Source>
     static bool read(Source source, T &value) {
         static_assert(!(detail::tabulated_type<T> && (convertible_type<T> || requires { from_json(source, value); })),
-                "this type has a serpent::members_of table and also a hand-written conversion. The "
+                "this type has a serpent::describe table and also a hand-written conversion. The "
                 "table would be used and one of them would do nothing; remove whichever you did not "
                 "mean");
         static_assert(!(reflected_type<T> && (convertible_type<T> || requires { from_json(source, value); })),

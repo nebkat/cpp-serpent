@@ -43,7 +43,7 @@ struct site {
     std::map<std::string, int> counters {};
 };
 template<>
-struct serpent::enable_reflection<site> : std::true_type {};
+struct serpent::describe<site> {};
 
 // Hand-written and never annotated: reflection must keep out of its way entirely.
 struct hand_written {
@@ -61,7 +61,7 @@ struct foreign_reading {
     double degreesCelsius = 21.5;
 };
 template<>
-struct serpent::enable_reflection<foreign_reading> : std::true_type {
+struct serpent::describe<foreign_reading> {
     static constexpr serpent::naming naming { serpent::naming_style::snake_case };
 };
 

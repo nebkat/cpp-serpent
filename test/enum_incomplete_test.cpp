@@ -14,7 +14,7 @@ enum parity { parity_none = 0x0, parity_even = 0x2, parity_odd = 0x3, parity_mar
 } // namespace
 
 template<>
-struct serpent::enum_values<parity> {
+struct serpent::describe<parity> {
     static constexpr serpent::enum_entry<parity> values[] {
         { parity_none, "none", serpent::fallback {} },
         { parity_even, "even" },

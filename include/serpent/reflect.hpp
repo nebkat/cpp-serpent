@@ -181,29 +181,6 @@ struct enum_entry {
     consteval enum_entry(E value, skip) : value(value), is_excluded(true) {}
 };
 
-/**
- * @brief The opt-in for an enumeration whose declaration is not yours to annotate.
- *
- * The counterpart of enable_reflection for a type: an annotation cannot be put on an
- * enumeration declared in someone else's header, so the table goes here instead and carries
- * exactly what the annotations carry - a value per enumerator, of any of the kinds `as` takes,
- * and one fallback.
- *
- *     template<>
- *     struct serpent::enum_values<uart_stop_bits_t> {
- *         static constexpr serpent::enum_entry<uart_stop_bits_t> values[] {
- *             { UART_STOP_BITS_1,   1,   serpent::fallback {} },
- *             { UART_STOP_BITS_1_5, 1.5 },
- *             { UART_STOP_BITS_2,   2   },
- *         };
- *     };
- *
- * Unlike the annotations this needs no reflection, so it is the way to map an enumeration on a
- * toolchain that has none.
- */
-template<typename E>
-struct enum_values;
-
 enum class naming_style {
     as_written,
     snake_case,
@@ -219,19 +196,59 @@ struct naming {
 };
 
 /**
- * The opt-in for a type you cannot annotate. Specialize to true_type.
+ * @brief Everything a type says about itself, when its declaration is not yours to annotate.
  *
- * A specialization may also carry a naming rule, spelled as the annotation is. Reflection reads
- * the fields directly, so there is no conversion function to hang a setting on, and the type
- * cannot be annotated - this trait is the only type-level surface the consumer owns:
+ * The annotations put that in one place, on the declaration. This is the same place for a type
+ * from someone else's header: specializing it is the opt-in, and what it carries is what the
+ * annotations carry, under the same names.
+ *
+ * With nothing but a naming rule, every member is on the wire, as `serializable` alone would
+ * have it:
  *
  *     template<>
- *     struct serpent::enable_reflection<foreign> : std::true_type {
+ *     struct serpent::describe<foreign> {
  *         static constexpr serpent::naming naming { serpent::naming_style::snake_case };
  *     };
+ *
+ * A `members` table is for when a member needs to say more than its declaration does. It stands
+ * in for the per-member annotations, and takes the same ones:
+ *
+ *     template<>
+ *     struct serpent::describe<esp_netif_ip_info_t> {
+ *         static constexpr serpent::member_entry members[] {
+ *             ^^esp_netif_ip_info_t::ip,
+ *             { ^^esp_netif_ip_info_t::netmask, serpent::key("mask") },
+ *             { ^^esp_netif_ip_info_t::gw, serpent::defaulted {} },
+ *         };
+ *     };
+ *
+ * A table must name every member, so one added upstream cannot quietly stop being written; a
+ * type only some of whose members belong on the wire says `static constexpr bool partial = true`.
+ * Only non-static data members can be listed - a value that lives behind a pointer, or is
+ * computed rather than stored, wants a serializer<T>, because there is no declaration to point
+ * at. Listing members needs reflection, since addressing one without naming it is a splice.
+ *
+ * A `values` table describes an enumeration, a value per enumerator of any of the kinds `as`
+ * takes, and one fallback:
+ *
+ *     template<>
+ *     struct serpent::describe<uart_stop_bits_t> {
+ *         static constexpr serpent::enum_entry<uart_stop_bits_t> values[] {
+ *             { UART_STOP_BITS_1,   1,   serpent::fallback {} },
+ *             { UART_STOP_BITS_1_5, 1.5 },
+ *             { UART_STOP_BITS_2,   2   },
+ *         };
+ *     };
+ *
+ * That one needs no reflection, so it is also the way to map an enumeration on a toolchain
+ * that has none.
  */
 template<typename T>
-struct enable_reflection : std::false_type {};
+struct describe;
+
+/** Whether a type has been described from outside, whatever the description says. */
+template<typename T>
+concept described = requires { sizeof(describe<T>); };
 
 // ---------------- what an enumerator is on the wire ----------------
 
@@ -252,7 +269,7 @@ consteval bool same_wire_form(const as &left, const as &right) {
 
 /** An enumeration that carries a table, whoever declared it. */
 template<typename E>
-concept tabulated_enum = std::is_enum_v<E> && requires { enum_values<E>::values; };
+concept tabulated_enum = std::is_enum_v<E> && requires { describe<E>::values; };
 
 /**
  * Writes one enumerator's wire form, whatever kind of value it is.
@@ -307,7 +324,7 @@ bool source_is(Source source) {
 template<typename E>
     requires tabulated_enum<E>
 consteval bool table_forms_are_distinct() {
-    const auto &values = enum_values<E>::values;
+    const auto &values = describe<E>::values;
     for (std::size_t first = 0; first < std::size(values); ++first) {
         if (values[first].is_excluded) continue;
         for (std::size_t second = first + 1; second < std::size(values); ++second) {
@@ -323,7 +340,7 @@ template<typename E>
     requires tabulated_enum<E>
 consteval bool table_fallback_is_unique() {
     std::size_t count = 0;
-    for (const auto &entry : enum_values<E>::values)
+    for (const auto &entry : describe<E>::values)
         if (entry.is_fallback) ++count;
     return count <= 1;
 }
@@ -332,13 +349,13 @@ consteval bool table_fallback_is_unique() {
 template<typename Emitter, typename E>
     requires tabulated_enum<E>
 bool emit_table_enum(Emitter &out, E value) {
-    for (const auto &entry : enum_values<E>::values) {
+    for (const auto &entry : describe<E>::values) {
         if (!entry.is_excluded && entry.value == value) {
             emit_wire_form(out, entry.wire);
             return true;
         }
     }
-    for (const auto &entry : enum_values<E>::values) {
+    for (const auto &entry : describe<E>::values) {
         if (entry.is_fallback && !entry.is_excluded) {
             emit_wire_form(out, entry.wire);
             return true;
@@ -353,13 +370,13 @@ template<typename Source, typename E>
 bool read_table_enum(Source source, E &value) {
     if (!source.is_valid()) return false;
 
-    for (const auto &entry : enum_values<E>::values) {
+    for (const auto &entry : describe<E>::values) {
         if (!entry.is_excluded && source_is(source, entry.wire)) {
             value = entry.value;
             return true;
         }
     }
-    for (const auto &entry : enum_values<E>::values) {
+    for (const auto &entry : describe<E>::values) {
         if (entry.is_fallback && !entry.is_excluded) {
             value = entry.value;
             return true;
@@ -507,36 +524,6 @@ private:
 };
 
 /**
- * @brief The opt-in for a type whose declaration is not yours to annotate.
- *
- * The counterpart of enum_values for a struct: an annotation cannot go on a type declared in
- * someone else's header, so the member list goes here and carries what the annotations carry.
- * One definition serves both directions, as an annotated type's does.
- *
- *     template<>
- *     struct serpent::members_of<esp_netif_ip_info_t> {
- *         static constexpr serpent::member_entry value[] {
- *             ^^esp_netif_ip_info_t::ip,
- *             { ^^esp_netif_ip_info_t::netmask, serpent::key("mask") },
- *             { ^^esp_netif_ip_info_t::gw, serpent::defaulted {} },
- *         };
- *     };
- *
- * A naming rule may sit beside it as `static constexpr serpent::naming naming`, and a type only
- * some of whose members belong on the wire says `static constexpr bool partial = true` - without
- * that, leaving one out is a build error, so a member added upstream cannot quietly stop being
- * written.
- *
- * Only non-static data members can be named this way. A wrapper whose values live behind a
- * pointer, or a member that is computed rather than stored, wants a serializer<T> - there is no
- * declaration for a table to point at.
- *
- * Unlike enum_values this needs reflection: addressing a member without naming it is a splice.
- */
-template<typename T>
-struct members_of;
-
-/**
  * Every non-static data member of a type, for a table that wants all of them.
  *
  * A convenience over writing the identifiers out, and nothing more than that: it fills the same
@@ -544,9 +531,9 @@ struct members_of;
  * code path. Narrowing it is ordinary code over an ordinary range - views::filter on
  * identifier_of, say - rather than a vocabulary this library would have to invent:
  *
- *     static constexpr auto value = serpent::all_members_of<T>();
+ *     static constexpr auto members = serpent::all_members_of<T>();
  *
- *     static constexpr auto value = std::define_static_array(
+ *     static constexpr auto members = std::define_static_array(
  *             std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())
  *             | std::views::filter([](std::meta::info member) {
  *                   return std::meta::identifier_of(member) != "reserved";
@@ -583,8 +570,8 @@ consteval bool has_annotation(std::meta::info entity) {
  */
 template<typename T>
 consteval naming_style naming_for() {
-    if constexpr (requires { enable_reflection<T>::naming; })
-        return enable_reflection<T>::naming.style;
+    if constexpr (requires { describe<T>::naming; })
+        return describe<T>::naming.style;
     else
         return annotation_of<naming>(^^T).value_or(naming {}).style;
 }
@@ -652,9 +639,16 @@ consteval std::string_view field_key() {
     }
 }
 
+/** Whether a description lists the members itself, rather than leaving the compiler to. */
+template<typename T>
+concept lists_members = requires { describe<T>::members; };
+
 template<typename T>
 consteval bool opted_in() {
-    return has_annotation<serializable>(^^T) || enable_reflection<T>::value || has_annotation<discriminant>(^^T);
+    // A listed type is read from its table instead, so the two routes never both answer for one
+    // type - which is what lets a description say either without saying which it is saying.
+    if constexpr (lists_members<T>) return false;
+    return has_annotation<serializable>(^^T) || described<T> || has_annotation<discriminant>(^^T);
 }
 
 template<typename T>
@@ -820,16 +814,49 @@ consteval bool annotations_make_sense() {
 
 /** A type whose members are listed out of line rather than annotated. */
 template<typename T>
-concept tabulated_type = requires { members_of<T>::value; };
+concept tabulated_type = lists_members<T>;
 
-/** The naming rule a member table asks for, if it asks for one. */
+/**
+ * Whether a member table still accounts for every member of its type.
+ *
+ * The counterpart of table_names_every_enumerator, for the same reason: a member added upstream,
+ * which is what an SDK upgrade does, would otherwise quietly stop being written. Naming a member
+ * with serpent::skip counts as accounting for it - that is the deliberate way to keep one off
+ * the wire - and a type that only ever wants a subset says `partial`.
+ */
 template<typename T>
-consteval naming_style table_naming_for() {
-    // Spelled as the annotation is, so a table reads like the annotations it stands in for.
-    if constexpr (requires { members_of<T>::naming; })
-        return members_of<T>::naming.style;
-    else
-        return naming_style::as_written;
+consteval bool table_names_every_member() {
+    if constexpr (requires { describe<T>::partial; }) {
+        if constexpr (describe<T>::partial) return true;
+    }
+    for (const auto member :
+            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())) {
+        bool found = false;
+        for (const auto &listed : describe<T>::members) found = found || member_entry(listed).which == member;
+        if (!found) return false;
+    }
+    return true;
+}
+
+/** The diagnostic for that, naming what the table missed. */
+template<typename T>
+consteval std::string_view incomplete_member_table_message() {
+    std::string missing;
+    for (const auto member :
+            std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())) {
+        bool found = false;
+        for (const auto &listed : describe<T>::members) found = found || member_entry(listed).which == member;
+        if (!found) {
+            if (!missing.empty()) missing += ", ";
+            missing += std::meta::identifier_of(member);
+        }
+    }
+    return std::define_static_string("this serpent::describe table does not name every member of "
+            "its type. Not named: "
+            + missing
+            + ". List them, or say { member, serpent::skip {} } to keep one off the wire "
+              "deliberately, or say `static constexpr bool partial = true` if the table is meant "
+              "to be a subset");
 }
 
 /** What one listed member is called on the wire: its rename, else its declared identifier. */
@@ -838,7 +865,7 @@ consteval std::string_view table_key() {
     if constexpr (Entry.is_renamed()) {
         return std::define_static_string(Entry.rename());
     } else {
-        constexpr auto style = table_naming_for<T>();
+        constexpr auto style = naming_for<T>();
         if constexpr (style == naming_style::as_written) {
             return std::define_static_string(std::meta::identifier_of(Entry.which));
         } else {
@@ -852,7 +879,7 @@ consteval std::string_view table_key() {
 template<typename T, member_entry Entry>
 consteval bool table_member_is_required() {
     using declared = [:std::meta::type_of(Entry.which):];
-    constexpr bool table_is_defaulted = requires { members_of<T>::defaulted; };
+    constexpr bool table_is_defaulted = requires { describe<T>::defaulted; };
     if constexpr (optional_like<declared>) return Entry.insisted;
     else if constexpr (Entry.insisted) return true;
     else return !Entry.optional_in_document && !table_is_defaulted;
@@ -862,7 +889,7 @@ consteval bool table_member_is_required() {
 template<typename T>
 consteval bool table_keys_are_distinct() {
     std::vector<std::string_view> keys;
-    template for (constexpr auto listed : std::define_static_array(members_of<T>::value)) {
+    template for (constexpr auto listed : std::define_static_array(describe<T>::members)) {
         constexpr member_entry entry = listed;
         if constexpr (!entry.excluded) keys.push_back(table_key<T, entry>());
     }
@@ -883,10 +910,11 @@ template<typename Visitor, typename Object, typename T = std::remove_cvref_t<Obj
     requires tabulated_type<T>
 void table_members(Visitor &visitor, Object &value) {
     static_assert(table_keys_are_distinct<T>(),
-            "two members of this serpent::members_of table are the same key on the wire; rename one "
+            "two members of this serpent::describe table are the same key on the wire; rename one "
             "with serpent::key");
+    static_assert(table_names_every_member<T>(), incomplete_member_table_message<T>());
 
-    template for (constexpr auto listed : std::define_static_array(members_of<T>::value)) {
+    template for (constexpr auto listed : std::define_static_array(describe<T>::members)) {
         // A sequence of plain std::meta::info is a table of members with nothing said about
         // them, which is the common case; member_entry is how one of them says more.
         constexpr member_entry entry = listed;
@@ -997,7 +1025,7 @@ consteval bool table_names_every_enumerator() {
     bool complete = true;
     template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
         bool found = false;
-        for (const auto &entry : enum_values<E>::values)
+        for (const auto &entry : describe<E>::values)
             found = found || entry.value == std::meta::extract<E>(enumerator);
         complete = complete && found;
     }
@@ -1016,14 +1044,14 @@ consteval std::string_view incomplete_table_message() {
     std::string missing;
     template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
         bool found = false;
-        for (const auto &entry : enum_values<E>::values)
+        for (const auto &entry : describe<E>::values)
             found = found || entry.value == std::meta::extract<E>(enumerator);
         if (!found) {
             if (!missing.empty()) missing += ", ";
             missing += std::meta::identifier_of(enumerator);
         }
     }
-    return std::define_static_string("this serpent::enum_values table does not name every enumerator of "
+    return std::define_static_string("this serpent::describe table does not name every enumerator of "
             "its type. Not named: "
             + missing
             + ". Give each a value, or say { enumerator, serpent::skip {} } to keep it off the wire "
@@ -1254,7 +1282,7 @@ consteval std::string_view first_discriminant_key();
 /**
  * An enumeration that says what it is on the wire rather than going out as a number.
  *
- * Either by annotating its enumerators, or by a serpent::enum_values table where the
+ * Either by annotating its enumerators, or by a serpent::describe table where the
  * declaration is not yours to annotate.
  */
 template<typename T>
@@ -1264,7 +1292,7 @@ concept mapped_enum = detail::annotated_enum<T> || detail::tabulated_enum<T>;
 template<typename Emitter, typename E>
 bool emit_mapped_enum(Emitter &out, E value) {
     static_assert(!(detail::tabulated_enum<E> && detail::annotated_enum<E>),
-            "this enumeration is annotated and also has a serpent::enum_values table. The table "
+            "this enumeration is annotated and also has a serpent::describe table. The table "
             "would be used and the annotations would do nothing; remove whichever of the two you "
             "did not mean");
     if constexpr (detail::tabulated_enum<E>) {
@@ -1272,10 +1300,10 @@ bool emit_mapped_enum(Emitter &out, E value) {
         static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
 #endif
         static_assert(detail::table_forms_are_distinct<E>(),
-                "two entries of this serpent::enum_values table are the same value on the wire, so "
+                "two entries of this serpent::describe table are the same value on the wire, so "
                 "one could never be read back");
         static_assert(detail::table_fallback_is_unique<E>(),
-                "more than one entry of this serpent::enum_values table is the fallback");
+                "more than one entry of this serpent::describe table is the fallback");
     }
 #if SERPENT_HAS_REFLECTION
     else {
@@ -1296,7 +1324,7 @@ template<typename Source, typename E>
     requires mapped_enum<E>
 bool read_mapped_enum(Source source, E &value) {
     static_assert(!(detail::tabulated_enum<E> && detail::annotated_enum<E>),
-            "this enumeration is annotated and also has a serpent::enum_values table. The table "
+            "this enumeration is annotated and also has a serpent::describe table. The table "
             "would be used and the annotations would do nothing; remove whichever of the two you "
             "did not mean");
     if constexpr (detail::tabulated_enum<E>) {
@@ -1304,10 +1332,10 @@ bool read_mapped_enum(Source source, E &value) {
         static_assert(detail::table_names_every_enumerator<E>(), detail::incomplete_table_message<E>());
 #endif
         static_assert(detail::table_forms_are_distinct<E>(),
-                "two entries of this serpent::enum_values table are the same value on the wire, so "
+                "two entries of this serpent::describe table are the same value on the wire, so "
                 "one could never be read back");
         static_assert(detail::table_fallback_is_unique<E>(),
-                "more than one entry of this serpent::enum_values table is the fallback");
+                "more than one entry of this serpent::describe table is the fallback");
     }
 #if SERPENT_HAS_REFLECTION
     else {

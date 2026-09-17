@@ -155,8 +155,8 @@ struct foreign_counts {
 } // namespace
 
 template<>
-struct serpent::members_of<foreign_endpoint> {
-    static constexpr serpent::member_entry value[] {
+struct serpent::describe<foreign_endpoint> {
+    static constexpr serpent::member_entry members[] {
         ^^foreign_endpoint::address,
         { ^^foreign_endpoint::netmask, serpent::key("mask") },
         { ^^foreign_endpoint::gateway, serpent::defaulted {} },
@@ -164,13 +164,14 @@ struct serpent::members_of<foreign_endpoint> {
 };
 
 template<>
-struct serpent::members_of<foreign_counts> {
+struct serpent::describe<foreign_counts> {
     // Narrowed by ordinary code over an ordinary range, rather than by a vocabulary for it.
-    static constexpr auto value = std::define_static_array(
+    static constexpr auto members = std::define_static_array(
             std::meta::nonstatic_data_members_of(^^foreign_counts, std::meta::access_context::current())
             | std::views::filter([](std::meta::info member) {
                   return std::meta::identifier_of(member) != "reserved";
               }));
+    static constexpr bool partial = true;
 };
 
 namespace {
@@ -621,7 +622,7 @@ void reflection_seam() {
         int x;
     };
     static_assert(!reflected_type<unannotated>, "an aggregate is not reflected merely for being one");
-    static_assert(!enable_reflection<unannotated>::value, "and the trait says no until told otherwise");
+    static_assert(!described<unannotated>, "and it is not described from outside either");
 
     // A type that does say so carries both formats through the annotation alone.
     static_assert(reflected_type<point>, "an annotated type is reflected");

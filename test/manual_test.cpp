@@ -22,7 +22,7 @@ enum foreign_parity { parity_none = 0x0, parity_even = 0x2, parity_odd = 0x3 };
 enum foreign_stop_bits { stop_bits_1 = 0x1, stop_bits_1_5 = 0x2, stop_bits_2 = 0x3, stop_bits_max };
 
 template<>
-struct serpent::enum_values<foreign_parity> {
+struct serpent::describe<foreign_parity> {
     static constexpr serpent::enum_entry<foreign_parity> values[] {
         { parity_none, "none", serpent::fallback {} },
         { parity_even, "even" },
@@ -31,7 +31,7 @@ struct serpent::enum_values<foreign_parity> {
 };
 
 template<>
-struct serpent::enum_values<foreign_stop_bits> {
+struct serpent::describe<foreign_stop_bits> {
     static constexpr serpent::enum_entry<foreign_stop_bits> values[] {
         { stop_bits_1, 1 },
         { stop_bits_1_5, 1.5 },
