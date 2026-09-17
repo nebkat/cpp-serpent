@@ -38,22 +38,96 @@ class array_range;
 class member_iterator;
 class member_range;
 
+/**
+ * @brief How far a traversal has got, and into which value.
+ *
+ * A forward iterator has to know where the current value ends before it can hand over the next,
+ * and the only way to know is to walk it - so a byte would be walked once by the loop that wants
+ * it and again by the loop stepping over it, once for every level of nesting above it. The loops
+ * already walk those bytes; this is how they tell each other.
+ *
+ * It describes one value at a time, because that is all a step ever needs: the point reached
+ * inside the value being left, and how many containers were open there. Each level takes it over
+ * as control comes back, so it is a small struct rather than a stack.
+ *
+ * A traversal that finds the memo is about some other value simply scans, which is what every
+ * traversal did before this existed.
+ */
+struct walk_memo {
+    const char *base = nullptr;    ///< the document these positions are into
+    const char *owner = nullptr;   ///< first character of the value being walked
+    const char *reached = nullptr; ///< how far into it anything has scanned
+    int open = 0;                  ///< containers still open at `reached`, counting from `owner`
+
+    /**
+     * Whether this says anything about the value beginning at `first` of this document.
+     *
+     * The document is part of the question, not only the value. A memo outlives the document it
+     * was taken about - the default one lives as long as the thread - so a later document
+     * allocated where an earlier one stood would otherwise match a note about the dead one and
+     * resume into a position that means nothing. Comparing the buffer as well as the value makes
+     * that impossible rather than unlikely.
+     */
+    [[nodiscard]] constexpr bool describes(const char *document, const char *first) const noexcept {
+        return this->base == document && this->owner == first && this->reached != nullptr;
+    }
+
+    constexpr void note(const char *document, const char *first, const char *position, int still_open) noexcept {
+        this->base = document;
+        this->owner = first;
+        this->reached = position;
+        this->open = still_open;
+    }
+};
+
+/**
+ * The memo a reader uses when it is not given one.
+ *
+ * One of them, so a reader carries no ownership burden and construction is a constant address
+ * rather than a lookup. Two traversals that overlap simply take it from each other, which costs
+ * them the note and nothing else: a memo about another value, or another document, is ignored.
+ *
+ * It is not synchronised. Reading one document from two threads at once wants a memo each -
+ * over(text, memo) - because a torn note could be believed. A single reader is unaffected, and
+ * decode() already keeps its own.
+ */
+[[nodiscard]] inline walk_memo &ambient_memo() noexcept {
+    static walk_memo memo;
+    return memo;
+}
+
 /** @brief A handle to one JSON value inside a text buffer. */
 class reader {
     std::string_view source;
     const char *first = nullptr; ///< this value's first character, whitespace already skipped
+    walk_memo *memo = &ambient_memo();
 
 public:
     constexpr reader() = default;
-    constexpr reader(std::string_view source, const char *first) noexcept : source(source), first(first) {}
+    reader(std::string_view source, const char *first) noexcept : source(source), first(first) {}
+    constexpr reader(std::string_view source, const char *first, walk_memo *memo) noexcept
+            : source(source)
+            , first(first)
+            , memo(memo) {}
 
     /** Wraps a document, skipping leading whitespace. Performs no deep parsing. */
-    [[nodiscard]] static reader over(std::string_view text) noexcept {
+    [[nodiscard]] static reader over(std::string_view text) noexcept { return over(text, ambient_memo()); }
+
+    /**
+     * The same, with a memo of your own.
+     *
+     * For a traversal that would otherwise contend with another on the same thread - two
+     * documents walked in lockstep, say. Every handle taken from this one shares it, which is
+     * what lets a nested loop tell the loop above it how far it got.
+     */
+    [[nodiscard]] static reader over(std::string_view text, walk_memo &memo) noexcept {
         scanner::cursor scan { text, text.data() };
         scanner::skip_whitespace(scan);
         if (!scan.available(1)) return {};
-        return reader { text, scan.position };
+        return reader { text, scan.position, &memo };
     }
+
+    [[nodiscard]] constexpr walk_memo *notes() const noexcept { return this->memo; }
 
     [[nodiscard]] constexpr std::string_view buffer() const noexcept { return this->source; }
     [[nodiscard]] constexpr const char *data() const noexcept { return this->first; }
@@ -289,6 +363,33 @@ struct key_value {
     [[nodiscard]] bool key_is(std::string_view other) const noexcept { return scanner::equals(this->key, other); }
 };
 
+namespace scanner {
+
+/** Consumes forward until `open` containers have been closed, leaving the cursor just past. */
+inline void close_containers(cursor &scan, int open) noexcept {
+    while (open > 0) {
+        skip_whitespace(scan);
+        if (!scan.available(1)) {
+            scan.fail(errc::unexpected_end);
+            return;
+        }
+        const char here = scan.peek();
+        if (here == '"') {
+            // A bracket inside a string is not a bracket, so a string is consumed whole.
+            (void)scan_string(scan);
+            continue;
+        }
+        if (here == '[' || here == '{') {
+            ++open;
+        } else if (here == ']' || here == '}') {
+            --open;
+        }
+        scan.advance(1);
+    }
+}
+
+} // namespace scanner
+
 /** Forward iterator over the elements of an array. */
 class array_iterator {
 public:
@@ -301,33 +402,54 @@ public:
 private:
     std::string_view source;
     const char *cursor = nullptr;
+    const char *container_at = nullptr;
+    walk_memo *memo = nullptr;
     bool exhausted = true;
 
 public:
     array_iterator() = default;
 
-    explicit array_iterator(const reader &container) noexcept : source(container.source) {
+    explicit array_iterator(const reader &container) noexcept
+            : source(container.source)
+            , container_at(container.first)
+            , memo(container.memo) {
         if (container.type() != kind::array) return;
         scanner::cursor scan { this->source, container.first + 1 };
         scanner::skip_whitespace(scan);
         if (!scan.available(1) || scan.peek() == ']') return;
         this->cursor = scan.position;
         this->exhausted = false;
+        // This value is what is being walked now, one container deep into it.
+        if (this->memo != nullptr) this->memo->note(this->source.data(), this->container_at, scan.position, 1);
     }
 
     [[nodiscard]] reader operator*() const noexcept {
         if (this->exhausted) return {};
-        return reader { this->source, this->cursor };
+        return reader { this->source, this->cursor, this->memo };
     }
 
     array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
         scanner::cursor scan { this->source, this->cursor };
-        scanner::skip_value(scan, 1);
+        int open = 0;
+        if (this->memo != nullptr && this->memo->describes(this->source.data(), this->cursor)) {
+            // Something walked into this element. Finish what is left of it rather than all.
+            scan.position = this->memo->reached;
+            open = this->memo->open;
+        }
+        if (open > 0) {
+            scanner::close_containers(scan, open);
+        } else if (scan.position == this->cursor) {
+            scanner::skip_value(scan, 1);
+        }
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
             this->exhausted = true;
+            if (this->memo != nullptr && scan.ok() && scan.available(1) && scan.peek() == ']') {
+                scan.advance(1);
+                this->memo->note(this->source.data(), this->container_at, scan.position, 0);
+            }
             return *this;
         }
         scan.advance(1);
@@ -337,6 +459,8 @@ public:
             return *this;
         }
         this->cursor = scan.position;
+        // This level owns the memo again, between elements of its own container.
+        if (this->memo != nullptr) this->memo->note(this->source.data(), this->container_at, scan.position, 1);
         return *this;
     }
 
@@ -364,12 +488,28 @@ public:
 private:
     std::string_view source;
     const char *cursor = nullptr; ///< at the opening quote of the key
+    const char *container_at = nullptr;
+    walk_memo *memo = nullptr;
     bool exhausted = true;
+
+    /** Where this member's value begins, which is what the memo is kept about. */
+    [[nodiscard]] const char *value_position() const noexcept {
+        scanner::cursor scan { this->source, this->cursor };
+        (void)scanner::scan_string(scan);
+        scanner::skip_whitespace(scan);
+        if (!scan.ok() || !scan.available(1) || scan.peek() != ':') return nullptr;
+        scan.advance(1);
+        scanner::skip_whitespace(scan);
+        return scan.available(1) ? scan.position : nullptr;
+    }
 
 public:
     member_iterator() = default;
 
-    explicit member_iterator(const reader &container) noexcept : source(container.source) {
+    explicit member_iterator(const reader &container) noexcept
+            : source(container.source)
+            , container_at(container.first)
+            , memo(container.memo) {
         if (container.type() != kind::object) return;
         scanner::cursor scan { this->source, container.first + 1 };
         scanner::skip_whitespace(scan);
@@ -388,7 +528,7 @@ public:
         scan.advance(1);
         scanner::skip_whitespace(scan);
         if (!scan.available(1)) return {};
-        return key_value { key, reader { this->source, scan.position } };
+        return key_value { key, reader { this->source, scan.position, this->memo } };
     }
 
     member_iterator &operator++() noexcept {
@@ -402,10 +542,29 @@ public:
             return *this;
         }
         scan.advance(1);
-        scanner::skip_value(scan, 1);
+        scanner::skip_whitespace(scan);
+
+        // The value may have been walked by a loop of its own; finish what is left of it.
+        const char *const value_at = scan.available(1) ? scan.position : nullptr;
+        int open = 0;
+        if (this->memo != nullptr && value_at != nullptr && this->memo->describes(this->source.data(), value_at)) {
+            scan.position = this->memo->reached;
+            open = this->memo->open;
+        }
+        if (open > 0) {
+            scanner::close_containers(scan, open);
+        } else if (scan.position == value_at) {
+            // Nothing had been walked, or it was walked to the end: only skip if we are still
+            // standing at the start of it.
+            scanner::skip_value(scan, 1);
+        }
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
             this->exhausted = true;
+            if (this->memo != nullptr && scan.ok() && scan.available(1) && scan.peek() == '}') {
+                scan.advance(1);
+                this->memo->note(this->source.data(), this->container_at, scan.position, 0);
+            }
             return *this;
         }
         scan.advance(1);

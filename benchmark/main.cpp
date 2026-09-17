@@ -11,6 +11,7 @@
 #include <serpent/bjdata.hpp>
 #include <serpent/json.hpp>
 #include <serpent/json/indexed.hpp>
+#include <serpent/json/walking.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -43,6 +44,18 @@ namespace query {
 inline double canada_coordinates(const std::string &text) {
     double total = 0;
     auto document = json::reader::over(text);
+    for (auto feature : document["features"].array())
+        for (auto ring : feature["geometry"]["coordinates"].array())
+            for (auto point : ring.array())
+                for (auto number : point.array())
+                    total += number.as_float<double>().value_or(0);
+    return total;
+}
+
+inline double canada_coordinates_walking(const std::string &text) {
+    double total = 0;
+    json::walk_memo memo;
+    const auto document = json::walking_reader::over(text, memo);
     for (auto feature : document["features"].array())
         for (auto ring : feature["geometry"]["coordinates"].array())
             for (auto point : ring.array())
@@ -178,6 +191,16 @@ inline std::uint64_t count_values(json::reader value) {
     } else if (value.is_object()) {
         for (auto member : value.items())
             total += count_values(member.value);
+    }
+    return total;
+}
+
+inline std::uint64_t count_values_walking(json::walking_reader value) {
+    std::uint64_t total = 1;
+    if (value.is_array()) {
+        for (auto child : value.array()) total += count_values_walking(child);
+    } else if (value.is_object()) {
+        for (auto member : value.items()) total += count_values_walking(member.value);
     }
     return total;
 }
@@ -497,6 +520,8 @@ static void whole_document_scan(const std::string &canada, const std::string &tw
 
     bench::measure("sum coordinates, canada.json", "serpent", canada.size(),
             [&] { return query::canada_coordinates(canada); });
+    bench::measure("sum coordinates, canada.json", "serpent (walking)", canada.size(),
+            [&] { return query::canada_coordinates_walking(canada); });
     bench::measure("sum coordinates, canada.json", "serpent (indexed)", canada.size(),
             [&] { return query::canada_coordinates_indexed(canada); });
     bench::measure(
@@ -602,6 +627,10 @@ static void full_read(const std::string &citm) {
     // Every value in the document actually visited, in every library.
     bench::measure("count every value, citm_catalog.json", "serpent", citm.size(),
             [&] { return query::count_values(json::reader::over(citm)); });
+    bench::measure("count every value, citm_catalog.json", "serpent (walking)", citm.size(), [&] {
+        json::walk_memo memo;
+        return query::count_values_walking(json::walking_reader::over(citm, memo));
+    });
     bench::measure("count every value, citm_catalog.json", "serpent (indexed)", citm.size(), [&] {
         const auto index = json::structural_index::over(citm);
         return query::count_values_indexed(index.root());

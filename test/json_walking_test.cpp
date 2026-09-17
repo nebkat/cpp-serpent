@@ -9,7 +9,6 @@
 #include "check.hpp"
 
 #include <serpent/json.hpp>
-#include <serpent/json/walking.hpp>
 
 #include <string>
 #include <string_view>
@@ -62,9 +61,13 @@ void compare(Plain left, Walking right, const std::string &path) {
 
 int main() {
     const std::string text { document };
+    // Two readers over one document, each with its own memo, so the comparison is between a
+    // traversal that leaves notes and one that cannot use them.
+    // Two readers over one document: one with a memo of its own, one with none at all, so the
+    // comparison is between a traversal that leaves notes and one that cannot.
     json::walk_memo memo;
-    const auto walking = json::walking_reader::over(text, memo);
-    const auto plain = json::reader::over(text);
+    const auto walking = json::reader::over(text, memo);
+    const auto plain = json::reader { text, json::reader::over(text).data(), nullptr };
 
     compare(plain, walking, "");
 
@@ -119,6 +122,26 @@ int main() {
     // And a type decodes from it, because it answers what a source answers.
     const auto rows_out = walking["rows"].try_get<std::vector<std::vector<int>>>();
     check(rows_out && rows_out->size() == 4 && (*rows_out)[0][2] == 3, "a type reads out of it");
+
+    // A memo says which document it is about, not only which value. Two documents walked in
+    // turn through the one ambient memo must not take each other's notes - and a document
+    // allocated where a dead one stood is the same question with worse odds.
+    const std::string other = R"({"name": [[9, 9], [9]], "rows": "not an array"})";
+    const auto second = json::reader::over(other);
+    std::size_t first_rows = 0, second_names = 0;
+    auto outer = json::reader::over(text)["rows"].array().begin();
+    for (auto name : second["name"].array()) {
+        (void)name;
+        ++second_names;
+    }
+    for (auto row : json::reader::over(text)["rows"].array()) {
+        (void)row;
+        ++first_rows;
+    }
+    check_equal(second_names, std::size_t { 2 }, "the other document walks");
+    check_equal(first_rows, std::size_t { 4 }, "and the first is unaffected by its notes");
+    check(second["rows"].is_string(), "a key that means something else in the other document");
+    (void)outer;
 
     return report("json_walking");
 }

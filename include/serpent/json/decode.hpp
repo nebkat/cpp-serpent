@@ -1,13 +1,9 @@
 #pragma once
 
-// decode() and try_decode(), which own the whole of a read and so can keep the memo on their own
-// stack. A caller navigating with handles has to hold one; a caller handing over a document and
-// asking for a type does not, so it costs them nothing and they get the walk for free.
-//
-// Its own header because reader.hpp cannot include walking.hpp, which includes reader.hpp.
+// decode() and try_decode(), which own the whole of a read and so keep a memo of their own -
+// isolating the traversal from anything else the thread is reading at the same time.
 
 #include <serpent/json/reader.hpp>
-#include <serpent/json/walking.hpp>
 
 #include <expected>
 #include <optional>
@@ -25,7 +21,7 @@ namespace serpent::json {
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::string_view text) {
     walk_memo memo;
-    return walking_reader::over(text, memo).template try_get<T>();
+    return reader::over(text, memo).template try_get<T>();
 }
 
 /**
@@ -39,7 +35,7 @@ template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::string_view text) {
     if (const auto checked = validate(text); !checked) return std::unexpected { checked.error() };
     walk_memo memo;
-    auto value = walking_reader::over(text, memo).template try_get<T>();
+    auto value = reader::over(text, memo).template try_get<T>();
     if (!value) {
         if (const auto absent = first_missing_member<T>(reader::over(text)); !absent.empty()) {
             return std::unexpected { error { errc::missing_key, 0, absent } };
