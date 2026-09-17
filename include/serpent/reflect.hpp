@@ -126,21 +126,25 @@ private:
 struct as {
     enum class kind : unsigned char { null, boolean, integer, real, text };
 
+    // A variant in all but name. An annotation's value must be a structural type, which rules
+    // out std::variant - its storage is private - but not a union whose members are public.
     kind held = kind::text;
-    bool truth = false;
-    std::int64_t whole = 0;
-    double number = 0;
-    char letters[64] {};
+    union {
+        bool truth;
+        std::int64_t whole;
+        double number;
+        char letters[64];
+    };
     std::size_t length = 0;
 
-    consteval as(std::nullptr_t) : held(kind::null) {}
+    consteval as(std::nullptr_t) : held(kind::null), truth(false) {}
     consteval as(bool value) : held(kind::boolean), truth(value) {}
     consteval as(int value) : held(kind::integer), whole(value) {}
     consteval as(long long value) : held(kind::integer), whole(value) {}
     consteval as(unsigned long long value) : held(kind::integer), whole(static_cast<std::int64_t>(value)) {}
     consteval as(double value) : held(kind::real), number(value) {}
-    consteval as(const char *text) : held(kind::text) { this->copy(text); }
-    consteval as(std::string_view text) : held(kind::text) { this->copy(text); }
+    consteval as(const char *text) : held(kind::text), letters {} { this->copy(text); }
+    consteval as(std::string_view text) : held(kind::text), letters {} { this->copy(text); }
 
     [[nodiscard]] constexpr std::string_view text() const { return { this->letters, this->length }; }
 
