@@ -127,23 +127,32 @@ can read in a hex dump.
 
 | | serpent | struct-mapping lib | DOM lib |
 |---|---:|---:|---:|
-| decode | 1.58 ms | **0.56 ms** (2.8x faster) | 7.49 ms (4.7x slower) |
-| encode | 1.49 ms | **0.28 ms** (5.4x faster) | 4.80 ms (3.2x slower) |
+| decode | 0.64 ms | **0.56 ms** (1.2x faster) | 7.56 ms (12x slower) |
+| encode | 1.21 ms | **0.28 ms** (4.4x faster) | 4.85 ms (4.0x slower) |
 | allocations, decode | **15** | 10,015 | 70,029 |
 | allocations, encode | 17 | **12** | 70,023 |
 
-The gap depends a good deal on what the fields are. Five of one type at a time, ten thousand
-records, against the same library:
+The answer depends a good deal on what the fields are. Five of one type at a time, ten thousand
+records, against the same library — below 1.0 is serpent ahead:
 
-| | strings | reals | integers | booleans |
+| | strings | booleans | integers | reals |
 |---|---:|---:|---:|---:|
-| behind by | **1.4x** | 3.3x | 4.3x | 5.1x |
+| decode | **0.57x** | **0.69x** | 1.29x | 1.68x |
+| encode | 1.73x | 4.90x | 2.27x | 6.27x |
 
-A string is most of its own cost in any library, so the overhead around it matters least; a
-boolean is four bytes and a pointer bump, so it matters most. That the shape of the record
-moves the answer by 3.7x is worth knowing before reading a single number as *the* number.
+Decoding is won or lost on everything *around* the conversion, and a reader generated for a type
+can expect the bytes it would have written rather than classify them: a key, its quotes, its
+colon and the comma before it are one comparison. Where the conversion itself is most of the
+work - a real - the two libraries converge on the cost of the conversion, and serpent's is
+`std::from_chars` behind a grammar check where the other library has its own parser.
 
-**This is serpent's own use case and it still loses it.** That gap is implementation headroom
+Encoding is the other way round. What is left there is almost entirely number formatting:
+serpent uses `std::to_chars`, and for a real lays the digits out again to match the reference
+implementation byte for byte, which together cost about 40 ns where the other library's own
+table-driven formatter costs 6. The record above holds two reals, and they are two thirds of
+its encode time. Closing that means shipping a float formatter, which this library has chosen
+not to do; hand-written appends to a `std::string` with `std::to_chars` measure within a fifth
+of serpent on every row, so the machinery around the conversion is no longer the cost. That gap is implementation headroom
 rather than an architectural limit: the other library builds each key's `"name":` at compile
 time and emits it as one fixed-size copy, writes into a pre-padded buffer by index instead of
 through a call, and carries its own number conversion.
@@ -217,7 +226,7 @@ into a fixed buffer took it to 13.
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types, and want the most speed | a struct-mapping library is 1.4-5x quicker, by field type |
+| convert your own types, and want the most speed | decoding is level, ahead on strings and booleans; encoding reals, a struct-mapping library is 6x quicker |
 | traverse whole documents repeatedly | an indexed parser is 3-4x quicker |
 | want a mutable document object | serpent has none at all |
 | need BJData and JSON from one definition | serpent |
