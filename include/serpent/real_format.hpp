@@ -7,6 +7,18 @@
 #include <cstddef>
 #include <string_view>
 
+// How a real is turned into text: by the copy of Żmij under external/, or by std::to_chars. The
+// text is the same either way, character for character; Żmij produces it in about a third of the
+// time. It has a source file that must be built, which the CMake target does - so the macro
+// defaults to off here, for anyone using the headers without it, and CMake turns it on.
+#ifndef SERPENT_USE_ZMIJ
+#define SERPENT_USE_ZMIJ 0
+#endif
+
+#if SERPENT_USE_ZMIJ
+#include <serpent/external/zmij/zmij.h>
+#endif
+
 namespace serpent::detail {
 
 /**
@@ -18,7 +30,7 @@ namespace serpent::detail {
  * with a sign.
  */
 struct real_text {
-    std::array<char, 40> storage {};
+    std::array<char, 40> storage; ///< left as it comes: only the first `length` characters mean anything
     std::size_t length = 0;
 
     [[nodiscard]] constexpr std::string_view view() const noexcept {
@@ -41,6 +53,8 @@ struct real_text {
         this->length += count;
     }
 };
+
+#if !SERPENT_USE_ZMIJ
 
 /**
  * The shortest digits that read back as a double, and where the decimal point falls among them.
@@ -89,12 +103,21 @@ struct shortest_digits {
     return digits;
 }
 
+#endif
+
 /**
- * ECMAScript's number-to-string rules, plus a trailing .0 on a whole number.
+ * A real as text: the shortest digits that read back as the same double, written out in full
+ * from a ten-thousandth up to 1e16 and with an exponent beyond, and always recognisably a real.
  *
- * Written out in full between a millionth and 1e21, and with an exponent beyond, as the
- * reference implementation does it. Given the digits and where the point falls, each of those is
- * a matter of copying them to the right place with zeros or a point around them.
+ * That last part is the ".0" on a whole number. JSON has one kind of number and does not say
+ * whether 40 is an integer, so whatever reads it has to guess from the text - and a real written
+ * as 40 comes back as an integer anywhere the type is inferred rather than known: a variant, a
+ * tree, a document transcribed into a binary format. An exponent already marks a number as a
+ * real, so only bare digits need the point.
+ *
+ * This is the format Żmij writes, which is Python's, with that one addition; the standard library
+ * path lays the same digits out by the same rules, so the choice between them never shows in
+ * the output.
  */
 inline real_text format_real(double value) {
     real_text out;
@@ -107,19 +130,28 @@ inline real_text format_real(double value) {
         out.append(value < 0 ? "-Infinity" : "Infinity");
         return out;
     }
+
+#if SERPENT_USE_ZMIJ
+    char *const text = out.storage.data();
+    out.length = static_cast<std::size_t>(external::zmij::write(text, out.storage.size(), value) - text);
+    // Bare digits are what a whole number written in full comes out as, and the number says
+    // whether it is one without the text being searched for a point.
+    const bool bare_digits = std::abs(value) < 1e16 && std::trunc(value) == value;
+    if (bare_digits) out.append(".0");
+#else
+    if (std::signbit(value)) out.push('-');
     if (value == 0) {
-        out.append(std::signbit(value) ? "-0.0" : "0.0");
+        out.append("0.0");
         return out;
     }
-    if (value < 0) out.push('-');
 
     const auto found = shortest_digits_of(std::abs(value));
     const std::string_view digits = found.view();
     const int point = found.point;
 
-    if (point > 21 || point <= -6) {
+    if (point > 16 || point < -3) {
         // Too large or too small to write out: one digit, the rest behind a point, and the
-        // power of ten of that first digit.
+        // power of ten of that first digit in at least two figures.
         out.append(digits.substr(0, 1));
         if (digits.size() > 1) {
             out.push('.');
@@ -127,8 +159,10 @@ inline real_text format_real(double value) {
         }
         const int power = point - 1;
         out.append(power < 0 ? "e-" : "e+");
+        const int magnitude = power < 0 ? -power : power;
+        if (magnitude < 10) out.push('0');
         char buffer[8];
-        const auto written = std::to_chars(buffer, buffer + sizeof(buffer), power < 0 ? -power : power);
+        const auto written = std::to_chars(buffer, buffer + sizeof(buffer), magnitude);
         out.append({ buffer, static_cast<std::size_t>(written.ptr - buffer) });
     } else if (point <= 0) {
         // Smaller than one: "0.", the zeros the exponent stands for, then every digit.
@@ -146,6 +180,7 @@ inline real_text format_real(double value) {
         out.push('.');
         out.append(digits.substr(static_cast<std::size_t>(point)));
     }
+#endif
 
     return out;
 }

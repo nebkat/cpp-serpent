@@ -15,6 +15,7 @@ endif()
 option(SERPENT_BUILD_TESTS "Build the host tests and examples" ${SERPENT_IS_MAIN_BUILD})
 option(SERPENT_TEST_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
 option(SERPENT_BUILD_BENCHMARKS "Build the benchmarks, which fetch another library and a test corpus" OFF)
+option(SERPENT_USE_ZMIJ "Write reals with the bundled Żmij rather than std::to_chars; builds one source file" ON)
 
 # Reading and writing unaligned values has nothing to do with serialization, so it is its own
 # library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
@@ -84,6 +85,24 @@ target_include_directories(serpent INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(serpent INTERFACE unaligned::unaligned)
+
+# Writing a real is mostly finding its shortest digits, and Żmij - a copy of which is kept under
+# include/serpent/external, see tools/vendor-zmij.sh - does the whole job in about a third of the
+# time std::to_chars and our own layout take. The text is the same either way.
+#
+# It is the one part of this library that is not a header: its source is built here, once, into
+# a library serpent links. Ported into a header instead it would cost every translation unit that
+# writes JSON about half a second, which is more than the rest of this library costs to include.
+# Turn the option off to go without it and stay header-only.
+if(SERPENT_USE_ZMIJ)
+    add_library(serpent_zmij STATIC include/serpent/external/zmij/zmij.cc)
+    add_library(serpent::zmij ALIAS serpent_zmij)
+    target_compile_features(serpent_zmij PRIVATE cxx_std_20)
+    set_target_properties(serpent_zmij PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    target_link_libraries(serpent INTERFACE serpent_zmij)
+    target_compile_definitions(serpent INTERFACE SERPENT_USE_ZMIJ=1)
+endif()
 
 # Declaring the minimum puts a -std flag on every consumer's command line, which is right for a
 # CMake-managed build and wrong for one that sets the standard itself with raw flags - ESP-IDF

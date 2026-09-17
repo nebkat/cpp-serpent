@@ -82,36 +82,37 @@ void scalars_and_escaping() {
     check_equal(json::encode(1.5), std::string { "1.5" }, "real");
     check_equal(json::encode(2.0), std::string { "2.0" }, "a whole real keeps its point");
 
-    // A real is written as the reference implementation writes it: in full between a millionth
-    // and 1e21, with an exponent beyond, and a whole number keeping its ".0". Each of these is a
-    // place the layout changes or a digit could be lost.
+    // A real is written with the shortest digits that read back as the same double: in full from
+    // a ten-thousandth up to 1e16, with an exponent beyond, and a whole number keeping its ".0" so
+    // that it still reads back as a real. Each of these is a place the layout changes or a digit
+    // could be lost.
     const std::pair<double, std::string_view> reals[] {
         { -40.0, "-40.0" },
         { 100.0, "100.0" },
+        { 0.0, "0.0" },
+        { -0.0, "-0.0" },
         { 0.1, "0.1" },
         { -39.9, "-39.9" },
         { 0.001, "0.001" },
         { 1234.5, "1234.5" },
         { 0.30000000000000004, "0.30000000000000004" },
         { 1.0 / 3.0, "0.3333333333333333" },
-        // whole numbers too large to hold every digit are padded out with zeros, not digits
+        // the last whole numbers written in full, which is past where a double holds every digit
         { 1e15, "1000000000000000.0" },
         { 9007199254740993.0, "9007199254740992.0" },
-        { 123456789012345680000.0, "123456789012345680000.0" },
-        { 123e18, "123000000000000000000.0" },
-        // the last value written in full, and the first that is not
-        { 1e20, "100000000000000000000.0" },
-        { 999999999999999900000.0, "999999999999999900000.0" },
+        { 9999999999999998.0, "9999999999999998.0" },
+        // and the first that are not
+        { 1e16, "1e+16" },
+        { 123456789012345680000.0, "1.2345678901234568e+20" },
         { 1e21, "1e+21" },
-        { 1.5e21, "1.5e+21" },
-        { -1e21, "-1e+21" },
-        // and the same at the small end
-        { 1e-6, "0.000001" },
-        { 1.5e-6, "0.0000015" },
-        { 1e-7, "1e-7" },
-        { 1.5e-7, "1.5e-7" },
-        { -1e-7, "-1e-7" },
-        // exponents of one, two and three digits carry no padding
+        { -1.5e21, "-1.5e+21" },
+        // the same at the small end
+        { 0.0001, "0.0001" },
+        { 0.00012345, "0.00012345" },
+        { 0.00001, "1e-05" },
+        { 1.5e-7, "1.5e-07" },
+        { -1e-7, "-1e-07" },
+        // an exponent has at least two figures, and as many more as it needs
         { 1e100, "1e+100" },
         { 1.25e-100, "1.25e-100" },
         { 5e-324, "5e-324" },
@@ -119,7 +120,7 @@ void scalars_and_escaping() {
         { 1.7976931348623157e308, "1.7976931348623157e+308" },
     };
     for (const auto &[value, expected] : reals)
-        check_equal(std::string_view { json::encode(value) }, expected, "a real in the reference format");
+        check_equal(std::string_view { json::encode(value) }, expected, "a real as text");
     check_equal(json::encode(std::string { "hello" }), std::string { "\"hello\"" }, "string");
 
     check_equal(json::encode(std::string { "a\"b" }), std::string { "\"a\\\"b\"" }, "quote is escaped");
