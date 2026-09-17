@@ -88,7 +88,16 @@ target_include_directories(serpent_bench PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${
 target_compile_definitions(serpent_bench PRIVATE SERPENT_CORPUS_DIR="${CORPUS_DIR}")
 target_compile_options(serpent_bench PRIVATE -O3 -DNDEBUG)
 
+# The same program against the library with its options off, so that what each option buys is
+# measured rather than remembered.
+add_executable(serpent_bench_plain main.cpp "${SINGLE_DIR}/simdjson/simdjson.cpp" "${SINGLE_DIR}/yyjson/yyjson.c")
+target_link_libraries(serpent_bench_plain PRIVATE serpent::plain glaze::glaze)
+target_include_directories(serpent_bench_plain PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${SINGLE_DIR}" "${rapidjson_SOURCE_DIR}/include")
+target_compile_definitions(serpent_bench_plain PRIVATE SERPENT_CORPUS_DIR="${CORPUS_DIR}")
+target_compile_options(serpent_bench_plain PRIVATE -O3 -DNDEBUG)
+
 add_custom_target(bench
         COMMAND serpent_bench "${CORPUS_DIR}"
-        DEPENDS serpent_bench
+        COMMAND serpent_bench_plain "${CORPUS_DIR}"
+        DEPENDS serpent_bench serpent_bench_plain
         USES_TERMINAL)

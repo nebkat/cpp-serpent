@@ -443,12 +443,25 @@ static void your_types(const std::vector<reading> &values) {
         std::vector<reading> out;
         return glz::read_json(out, text) ? 0 : out.size();
     });
+    // The same library told to optimise for size, which is its preset for embedded targets: a
+    // 400-byte integer table rather than 40KB, no power-of-ten table for reals, a real parser
+    // without fast_float's tables, and keys matched by search rather than by hash. The fairer
+    // comparison wherever flash is counted.
+    bench::measure("decode 10k records (JSON)", "glaze (size)", size, [&] {
+        std::vector<reading> out;
+        return glz::read<glz::opts_size {}>(out, text) ? 0 : out.size();
+    });
 
     bench::measure("encode 10k records (JSON)", "serpent", size, [&] { return json::encode(values).size(); });
     bench::measure("encode 10k records (JSON)", "nlohmann", size, [&] { return other(values).dump().size(); });
     bench::measure("encode 10k records (JSON)", "glaze", size, [&] {
         std::string buffer;
         (void)glz::write_json(values, buffer);
+        return buffer.size();
+    });
+    bench::measure("encode 10k records (JSON)", "glaze (size)", size, [&] {
+        std::string buffer;
+        (void)glz::write<glz::opts_size {}>(values, buffer);
         return buffer.size();
     });
 
@@ -665,6 +678,7 @@ static void full_read(const std::string &citm) {
 }
 
 int main(int argc, char **argv) {
+    std::printf("serpent built with: reals written by %s\n", SERPENT_USE_ZMIJ ? "the bundled Zmij" : "std::to_chars");
     const std::string corpus = argc > 1 ? argv[1] : ".";
     const auto canada = read_file(corpus + "/canada.json");
     const auto citm = read_file(corpus + "/citm_catalog.json");

@@ -104,6 +104,14 @@ if(SERPENT_USE_ZMIJ)
     target_compile_definitions(serpent INTERFACE SERPENT_USE_ZMIJ=1)
 endif()
 
+# The library with every option off, whatever this build chose: headers only, and the standard
+# library for anything an option would have replaced. For the benchmarks, which measure both.
+add_library(serpent_plain INTERFACE)
+add_library(serpent::plain ALIAS serpent_plain)
+target_include_directories(serpent_plain INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>)
+target_link_libraries(serpent_plain INTERFACE unaligned::unaligned)
+target_compile_definitions(serpent_plain INTERFACE SERPENT_USE_ZMIJ=0)
+
 # Declaring the minimum puts a -std flag on every consumer's command line, which is right for a
 # CMake-managed build and wrong for one that sets the standard itself with raw flags - ESP-IDF
 # passes -std=gnu++26, and whichever lands last wins. Turn this off there and set your own.
