@@ -476,6 +476,89 @@ static void your_types(const std::vector<reading> &values) {
             [&] { return other::to_bjdata(other(values)).size(); });
 }
 
+#if SERPENT_HAS_REFLECTION
+
+// ---------------- one kind of member at a time ----------------
+
+// The record above mixes four kinds of member, so a difference in it says nothing about which
+// kind it came from. These are five members of one kind each, the same count and much the same
+// key lengths, so that each kind's cost can be read off on its own.
+
+struct [[= serpent::serializable {}]] integers {
+    std::int64_t sequence = 0, latitude = 0, longitude = 0, elevation = 0, heading = 0;
+};
+
+struct [[= serpent::serializable {}]] reals {
+    double celsius = 0, humidity = 0, pressure = 0, wind_speed = 0, rainfall = 0;
+};
+
+struct [[= serpent::serializable {}]] strings {
+    std::string station, operator_name, region, firmware, comment;
+};
+
+struct [[= serpent::serializable {}]] switches {
+    bool valid = false, calibrated = false, transmitting = false, low_battery = false, maintenance = false;
+};
+
+template<typename T, typename Make>
+static std::vector<T> sample(std::size_t count, Make make) {
+    std::vector<T> values;
+    values.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) values.push_back(make(index));
+    return values;
+}
+
+template<typename T>
+static void one_kind(const std::string &kind, const std::vector<T> &values) {
+    const std::string text = json::encode(values);
+    const auto decoding = "decode 10k records of " + kind + " (JSON)";
+    const auto encoding = "encode 10k records of " + kind + " (JSON)";
+
+    bench::measure(decoding, "serpent", text.size(), [&] { return json::decode<std::vector<T>>(text)->size(); });
+    bench::measure(decoding, "glaze", text.size(), [&] {
+        std::vector<T> out;
+        return glz::read_json(out, text) ? 0 : out.size();
+    });
+    bench::measure(decoding, "glaze (size)", text.size(), [&] {
+        std::vector<T> out;
+        return glz::read<glz::opts_size {}>(out, text) ? 0 : out.size();
+    });
+
+    bench::measure(encoding, "serpent", text.size(), [&] { return json::encode(values).size(); });
+    bench::measure(encoding, "glaze", text.size(), [&] {
+        std::string buffer;
+        (void)glz::write_json(values, buffer);
+        return buffer.size();
+    });
+    bench::measure(encoding, "glaze (size)", text.size(), [&] {
+        std::string buffer;
+        (void)glz::write<glz::opts_size {}>(values, buffer);
+        return buffer.size();
+    });
+}
+
+static void each_kind_of_member() {
+    constexpr std::size_t count = 10'000;
+
+    one_kind("integers", sample<integers>(count, [](std::size_t index) {
+        const auto value = static_cast<std::int64_t>(index);
+        return integers { value, 49'000'000 + value * 37, -123'000'000 - value * 91, value % 3000, value % 360 };
+    }));
+    one_kind("reals", sample<reals>(count, [](std::size_t index) {
+        const auto value = static_cast<double>(index);
+        return reals { -40.0 + value * 0.1, value * 0.001, 1013.25 - value * 0.013, value / 7.0, value * 1e-5 };
+    }));
+    one_kind("strings", sample<strings>(count, [](std::size_t index) {
+        return strings { "station-" + std::to_string(index % 97), "operator " + std::to_string(index % 13),
+            "north-west", "v1.4." + std::to_string(index % 50), "nothing to report for this interval" };
+    }));
+    one_kind("booleans", sample<switches>(count, [](std::size_t index) {
+        return switches { index % 2 == 0, index % 3 == 0, index % 5 == 0, index % 7 == 0, index % 11 == 0 };
+    }));
+}
+
+#endif
+
 /**
  * Binary against binary.
  *
@@ -677,25 +760,37 @@ static void full_read(const std::string &citm) {
             [&] { return json::validate(citm).has_value(); });
 }
 
+/** Which of the library's switches this build has on, since that is what the numbers depend on. */
+static void print_configuration() {
+    std::printf("configuration: %s\n", bench::chosen.configuration.c_str());
+    std::printf("  SERPENT_USE_ZMIJ              %d\n", SERPENT_USE_ZMIJ);
+    std::printf("  SERPENT_BOUNDED_OBJECT_WRITE  %d\n", SERPENT_BOUNDED_OBJECT_WRITE);
+}
+
 int main(int argc, char **argv) {
-    std::printf("serpent built with: reals written by %s\n", SERPENT_USE_ZMIJ ? "the bundled Zmij" : "std::to_chars");
-    const std::string corpus = argc > 1 ? argv[1] : ".";
-    const auto canada = read_file(corpus + "/canada.json");
-    const auto citm = read_file(corpus + "/citm_catalog.json");
-    const auto twitter = read_file(corpus + "/twitter.json");
+    bench::parse_arguments(argc, argv, SERPENT_CORPUS_DIR, SERPENT_BENCH_CONFIGURATION);
+    print_configuration();
+
+    const auto canada = read_file(bench::chosen.corpus + "/canada.json");
+    const auto citm = read_file(bench::chosen.corpus + "/citm_catalog.json");
+    const auto twitter = read_file(bench::chosen.corpus + "/twitter.json");
     const auto values = sample_readings(10'000);
 
     std::printf(
             "corpus: canada %zu B, citm_catalog %zu B, twitter %zu B\n", canada.size(), citm.size(), twitter.size());
 
-    check_results(values, canada, citm, twitter);
+    if (!bench::chosen.list_only) check_results(values, canada, citm, twitter);
 
     your_types(values);
+#if SERPENT_HAS_REFLECTION
+    each_kind_of_member();
+#endif
     binary_formats(values);
     whole_document_scan(canada, twitter);
     targeted_extraction(citm);
     full_read(citm);
 
     bench::report();
-    return 0;
+    bench::write_json();
+    return failures == 0 ? 0 : 1;
 }

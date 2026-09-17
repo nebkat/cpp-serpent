@@ -1,8 +1,9 @@
-# Off by default: it pulls in another library and 4.6 MB of corpus, neither of which the
-# library itself needs.
+# Off by default: it pulls in other libraries and 4.6 MB of corpus, none of which the library
+# itself needs. tools/bench.sh configures, builds and runs all of this and prints the summary;
+# by hand it is
 #
 #   cmake -S . -B build-bench -DSERPENT_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
-#   cmake --build build-bench && ./build-bench/benchmark/serpent_bench <corpus dir>
+#   cmake --build build-bench --target bench
 
 # The single-header release rather than the repository: cloning it is hundreds of megabytes of
 # test data to get one file.
@@ -82,22 +83,60 @@ foreach(PAIR
     endif()
 endforeach()
 
-add_executable(serpent_bench main.cpp "${SINGLE_DIR}/simdjson/simdjson.cpp" "${SINGLE_DIR}/yyjson/yyjson.c")
-target_link_libraries(serpent_bench PRIVATE serpent glaze::glaze)
-target_include_directories(serpent_bench PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${SINGLE_DIR}" "${rapidjson_SOURCE_DIR}/include")
-target_compile_definitions(serpent_bench PRIVATE SERPENT_CORPUS_DIR="${CORPUS_DIR}")
-target_compile_options(serpent_bench PRIVATE -O3 -DNDEBUG)
+# Timing is nanobench's: one header, pinned, with its implementation compiled once here.
+set(NANOBENCH_DIR "${SINGLE_DIR}/nanobench")
+if(NOT EXISTS "${NANOBENCH_DIR}/nanobench.h")
+    message(STATUS "Fetching nanobench")
+    file(DOWNLOAD "https://raw.githubusercontent.com/martinus/nanobench/v4.3.11/src/include/nanobench.h"
+            "${NANOBENCH_DIR}/nanobench.h"
+            EXPECTED_HASH SHA256=7d20cc0daed3f56341ccd9b5c4b1b25b2f064d76638a5ba0304a5795a32cc1b6
+            STATUS NANOBENCH_STATUS)
+    list(GET NANOBENCH_STATUS 0 NANOBENCH_CODE)
+    if(NOT NANOBENCH_CODE EQUAL 0)
+        file(REMOVE "${NANOBENCH_DIR}/nanobench.h")
+        message(FATAL_ERROR "Could not fetch nanobench: ${NANOBENCH_STATUS}")
+    endif()
+endif()
 
-# The same program against the library with its options off, so that what each option buys is
-# measured rather than remembered.
-add_executable(serpent_bench_plain main.cpp "${SINGLE_DIR}/simdjson/simdjson.cpp" "${SINGLE_DIR}/yyjson/yyjson.c")
-target_link_libraries(serpent_bench_plain PRIVATE serpent::plain glaze::glaze)
-target_include_directories(serpent_bench_plain PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${SINGLE_DIR}" "${rapidjson_SOURCE_DIR}/include")
-target_compile_definitions(serpent_bench_plain PRIVATE SERPENT_CORPUS_DIR="${CORPUS_DIR}")
-target_compile_options(serpent_bench_plain PRIVATE -O3 -DNDEBUG)
+# Everything that is the same whichever way serpent is configured, built once.
+add_library(serpent_bench_others STATIC nanobench.cpp "${SINGLE_DIR}/simdjson/simdjson.cpp" "${SINGLE_DIR}/yyjson/yyjson.c")
+target_include_directories(serpent_bench_others PUBLIC "${NANOBENCH_DIR}" "${SINGLE_DIR}")
+target_compile_options(serpent_bench_others PRIVATE -O3 -DNDEBUG)
+target_compile_features(serpent_bench_others PUBLIC cxx_std_20)
 
-add_custom_target(bench
-        COMMAND serpent_bench "${CORPUS_DIR}"
-        COMMAND serpent_bench_plain "${CORPUS_DIR}"
-        DEPENDS serpent_bench serpent_bench_plain
-        USES_TERMINAL)
+set(RESULTS_DIR "${CMAKE_BINARY_DIR}/results")
+file(MAKE_DIRECTORY "${RESULTS_DIR}")
+set(BENCH_COMMANDS "")
+set(BENCH_TARGETS "")
+
+# The same program once per configuration of the library, so that what each switch in
+# include/serpent/config.hpp buys is measured rather than remembered.
+#
+#   serpent_add_benchmark(<configuration> <serpent target> [<definition>...])
+function(serpent_add_benchmark CONFIGURATION LIBRARY)
+    set(NAME "serpent_bench_${CONFIGURATION}")
+    add_executable(${NAME} main.cpp)
+    target_link_libraries(${NAME} PRIVATE ${LIBRARY} glaze::glaze serpent_bench_others)
+    target_include_directories(${NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${rapidjson_SOURCE_DIR}/include")
+    target_compile_definitions(${NAME} PRIVATE
+        SERPENT_CORPUS_DIR="${CORPUS_DIR}"
+        SERPENT_BENCH_CONFIGURATION="${CONFIGURATION}"
+        ${ARGN})
+    target_compile_options(${NAME} PRIVATE -O3 -DNDEBUG)
+
+    list(APPEND BENCH_COMMANDS COMMAND ${NAME} --json "${RESULTS_DIR}/${CONFIGURATION}.json")
+    list(APPEND BENCH_TARGETS ${NAME})
+    set(BENCH_COMMANDS "${BENCH_COMMANDS}" PARENT_SCOPE)
+    set(BENCH_TARGETS "${BENCH_TARGETS}" PARENT_SCOPE)
+endfunction()
+
+serpent_add_benchmark(default serpent)
+serpent_add_benchmark(plain serpent::plain)
+
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+    list(APPEND BENCH_COMMANDS COMMAND Python3::Interpreter "${PROJECT_SOURCE_DIR}/tools/bench-summary.py" "${RESULTS_DIR}")
+endif()
+
+add_custom_target(serpent_benchmarks DEPENDS ${BENCH_TARGETS})
+add_custom_target(bench ${BENCH_COMMANDS} DEPENDS ${BENCH_TARGETS} USES_TERMINAL)

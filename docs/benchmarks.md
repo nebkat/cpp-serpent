@@ -237,11 +237,29 @@ into a fixed buffer took it to 13.
 ## Reproducing
 
 ```bash
+tools/bench.sh                      # everything, in every configuration
+tools/bench.sh --filter JSON        # only what has JSON in its group or library name
+tools/bench.sh --quick              # a few samples each: that it runs, not numbers to quote
+```
+
+That configures a release build with GCC 16 if there is one (`CXX=` to choose), builds the
+benchmark once for each configuration of the library's switches - `default`, and `plain` with all
+of them off - runs each, and lays the results side by side. Timing is
+[nanobench](https://nanobench.ankerl.com)'s: each table it prints is relative to serpent, with
+the spread of the samples beside every figure, and a figure it marks unstable is one to run again
+rather than quote. Each run also writes `results/<configuration>.json` under the build directory,
+which is what `tools/bench-summary.py` reads.
+
+By hand, the same thing is
+
+```bash
 cmake -S . -B build-bench -DSERPENT_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-bench --target bench
 ```
 
-Off by default: it fetches four libraries and 4.6 MB of corpus.
+and one program on its own is `build-bench/benchmark/serpent_bench_default --help`.
+
+Off by default: it fetches five libraries and 4.6 MB of corpus.
 
 Every measured computation is run against all of the others first and must produce the same
 answer before any timing is printed — twenty-two checks, including our BJData being read back by
