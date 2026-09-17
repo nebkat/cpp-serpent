@@ -39,6 +39,22 @@ foreach(TEST_NAME IN LISTS TESTS)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME}_test)
 endforeach()
 
+# An integer's text, produced each of the ways SERPENT_INTEGER_TABLE chooses between. Not linked
+# to the library target, which would fix the setting to the one this build was configured with.
+foreach(TABLE IN ITEMS 0 1 2)
+    add_executable(integer_text_${TABLE}_test integer_text_test.cpp)
+    target_include_directories(integer_text_${TABLE}_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/include" "${CMAKE_CURRENT_LIST_DIR}")
+    target_compile_features(integer_text_${TABLE}_test PRIVATE cxx_std_23)
+    target_compile_definitions(integer_text_${TABLE}_test PRIVATE SERPENT_INTEGER_TABLE=${TABLE})
+    target_compile_options(integer_text_${TABLE}_test PRIVATE -Wall -Wextra -O2)
+    if(SERPENT_TEST_SANITIZE)
+        target_compile_options(integer_text_${TABLE}_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(integer_text_${TABLE}_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME integer_text_${TABLE} COMMAND integer_text_${TABLE}_test)
+endforeach()
+
 # The reflected path is a separate binary because it needs a newer standard and a compiler
 # flag; the rest of the suite must keep working without either.
 if(SERPENT_HAS_REFLECTION_SUPPORT)

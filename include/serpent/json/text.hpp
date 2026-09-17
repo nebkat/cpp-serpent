@@ -9,14 +9,23 @@
 //
 // Each is given room for at least widest_text<T> characters, and returns where it stopped.
 
+#include <serpent/config.hpp>
 #include <serpent/real_format.hpp>
+
+#if SERPENT_INTEGER_TABLE == 1
+#include <serpent/external/glaze/itoa.hpp>
+#elif SERPENT_INTEGER_TABLE == 2
+#include <serpent/external/glaze/itoa_40kb.hpp>
+#endif
 
 #include <charconv>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 
 namespace serpent::json {
 
@@ -46,10 +55,31 @@ inline constexpr std::size_t widest_text<T> = serpent::detail::real_text_capacit
     return to + 5;
 }
 
+/**
+ * The integer type the table-driven formatters are written for that holds every value of T.
+ *
+ * They are overloaded on the exact-width names, and `long` is none of those where `long long` is
+ * the 64-bit one, so the type is chosen by width and signedness rather than passed as it is.
+ */
+template<std::integral T>
+using formatted_as = std::conditional_t<std::is_signed_v<T>,
+        std::conditional_t<(sizeof(T) > 4), std::int64_t, std::int32_t>,
+        std::conditional_t<(sizeof(T) > 4), std::uint64_t, std::uint32_t>>;
+
+/**
+ * May write a character or two past where it stops - a pair of digits is stored whole even when
+ * only one of them is wanted - but never past widest_text<T>.
+ */
 template<std::integral T>
     requires (!std::same_as<T, bool>)
 [[nodiscard]] char *write_text(char *to, T value) noexcept {
+#if SERPENT_INTEGER_TABLE == 1
+    return serpent::external::glaze::to_chars(to, static_cast<formatted_as<T>>(value));
+#elif SERPENT_INTEGER_TABLE == 2
+    return serpent::external::glaze::to_chars_40kb(to, static_cast<formatted_as<T>>(value));
+#else
     return std::to_chars(to, to + widest_text<T>, value).ptr;
+#endif
 }
 
 /** JSON has no NaN or infinity, so a value that is not finite is written as null. */

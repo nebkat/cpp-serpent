@@ -22,6 +22,10 @@ option(SERPENT_USE_ZMIJ "Write reals with the bundled Żmij rather than std::to_
 option(SERPENT_BOUNDED_OBJECT_WRITE "Write runs of boolean and number members into room claimed once" ON)
 set(SERPENT_HEADER_SWITCHES SERPENT_BOUNDED_OBJECT_WRITE)
 
+set(SERPENT_INTEGER_TABLE 1 CACHE STRING
+    "How integers are written: 0 std::to_chars, 1 a 400-byte digit table, 2 a 40 KB one")
+set_property(CACHE SERPENT_INTEGER_TABLE PROPERTY STRINGS 0 1 2)
+
 # Reading and writing unaligned values has nothing to do with serialization, so it is its own
 # library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
 include(FetchContent)
@@ -82,18 +86,25 @@ if(SERPENT_HAS_REFLECTION_SUPPORT)
 endif()
 endif()
 
-# Header only.
-add_library(serpent INTERFACE)
-add_library(serpent::serpent ALIAS serpent)
-
-target_include_directories(serpent INTERFACE
+# The headers and what they need, with nothing said about the switches in config.hpp. What
+# `serpent` and `serpent::plain` are each built from, and what the benchmarks configure for
+# themselves one way after another.
+add_library(serpent_headers INTERFACE)
+add_library(serpent::headers ALIAS serpent_headers)
+target_include_directories(serpent_headers INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-target_link_libraries(serpent INTERFACE unaligned::unaligned)
+target_link_libraries(serpent_headers INTERFACE unaligned::unaligned)
+
+# The library as this build's options configure it.
+add_library(serpent INTERFACE)
+add_library(serpent::serpent ALIAS serpent)
+target_link_libraries(serpent INTERFACE serpent_headers)
 
 foreach(SWITCH IN LISTS SERPENT_HEADER_SWITCHES)
     target_compile_definitions(serpent INTERFACE ${SWITCH}=$<BOOL:${${SWITCH}}>)
 endforeach()
+target_compile_definitions(serpent INTERFACE SERPENT_INTEGER_TABLE=${SERPENT_INTEGER_TABLE})
 
 # Writing a real is mostly finding its shortest digits, and Żmij - a copy of which is kept under
 # include/serpent/external, see tools/vendor-zmij.sh - does the whole job in about a third of the
@@ -103,12 +114,13 @@ endforeach()
 # a library serpent links. Ported into a header instead it would cost every translation unit that
 # writes JSON about half a second, which is more than the rest of this library costs to include.
 # Turn the option off to go without it and stay header-only.
-if(SERPENT_USE_ZMIJ)
+if(SERPENT_USE_ZMIJ OR SERPENT_BUILD_BENCHMARKS)
     add_library(serpent_zmij STATIC include/serpent/external/zmij/zmij.cc)
     add_library(serpent::zmij ALIAS serpent_zmij)
     target_compile_features(serpent_zmij PRIVATE cxx_std_20)
     set_target_properties(serpent_zmij PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
+endif()
+if(SERPENT_USE_ZMIJ)
     target_link_libraries(serpent INTERFACE serpent_zmij)
     target_compile_definitions(serpent INTERFACE SERPENT_USE_ZMIJ=1)
 endif()
@@ -117,12 +129,12 @@ endif()
 # library for anything an option would have replaced. For the benchmarks, which measure both.
 add_library(serpent_plain INTERFACE)
 add_library(serpent::plain ALIAS serpent_plain)
-target_include_directories(serpent_plain INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>)
-target_link_libraries(serpent_plain INTERFACE unaligned::unaligned)
+target_link_libraries(serpent_plain INTERFACE serpent_headers)
 target_compile_definitions(serpent_plain INTERFACE SERPENT_USE_ZMIJ=0)
 foreach(SWITCH IN LISTS SERPENT_HEADER_SWITCHES)
     target_compile_definitions(serpent_plain INTERFACE ${SWITCH}=0)
 endforeach()
+target_compile_definitions(serpent_plain INTERFACE SERPENT_INTEGER_TABLE=0)
 
 # Declaring the minimum puts a -std flag on every consumer's command line, which is right for a
 # CMake-managed build and wrong for one that sets the standard itself with raw flags - ESP-IDF

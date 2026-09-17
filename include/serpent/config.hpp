@@ -26,3 +26,17 @@
 #ifndef SERPENT_BOUNDED_OBJECT_WRITE
 #define SERPENT_BOUNDED_OBJECT_WRITE 1
 #endif
+
+/**
+ * How an integer is turned into text.
+ *
+ *   0  std::to_chars
+ *   1  two digits at a time from a table of 400 bytes; about twice as fast
+ *   2  four digits at a time from a table of 40 KB; about twice as fast again, for an image that
+ *      has the room
+ *
+ * 1 and 2 are Glaze's, kept under external/glaze with its licence.
+ */
+#ifndef SERPENT_INTEGER_TABLE
+#define SERPENT_INTEGER_TABLE 1
+#endif

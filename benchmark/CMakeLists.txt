@@ -110,18 +110,34 @@ set(BENCH_COMMANDS "")
 set(BENCH_TARGETS "")
 
 # The same program once per configuration of the library, so that what each switch in
-# include/serpent/config.hpp buys is measured rather than remembered.
+# include/serpent/config.hpp buys is measured rather than remembered. Every switch is given a
+# value in every configuration, so that none depends on what this build was configured with.
 #
-#   serpent_add_benchmark(<configuration> <serpent target> [<definition>...])
-function(serpent_add_benchmark CONFIGURATION LIBRARY)
+#   serpent_add_benchmark(<configuration> [<switch>=<value>...])     the rest as in `default`
+set(BENCH_DEFAULT_SWITCHES
+    SERPENT_USE_ZMIJ=1
+    SERPENT_BOUNDED_OBJECT_WRITE=1
+    SERPENT_INTEGER_TABLE=1)
+
+function(serpent_add_benchmark CONFIGURATION)
+    set(SWITCHES ${BENCH_DEFAULT_SWITCHES})
+    foreach(OVERRIDE IN LISTS ARGN)
+        string(REGEX REPLACE "=.*" "" SWITCH_NAME "${OVERRIDE}")
+        list(FILTER SWITCHES EXCLUDE REGEX "^${SWITCH_NAME}=")
+        list(APPEND SWITCHES "${OVERRIDE}")
+    endforeach()
+
     set(NAME "serpent_bench_${CONFIGURATION}")
     add_executable(${NAME} main.cpp)
-    target_link_libraries(${NAME} PRIVATE ${LIBRARY} glaze::glaze serpent_bench_others)
+    target_link_libraries(${NAME} PRIVATE serpent::headers glaze::glaze serpent_bench_others)
+    if("SERPENT_USE_ZMIJ=1" IN_LIST SWITCHES)
+        target_link_libraries(${NAME} PRIVATE serpent::zmij)
+    endif()
     target_include_directories(${NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${rapidjson_SOURCE_DIR}/include")
     target_compile_definitions(${NAME} PRIVATE
         SERPENT_CORPUS_DIR="${CORPUS_DIR}"
         SERPENT_BENCH_CONFIGURATION="${CONFIGURATION}"
-        ${ARGN})
+        ${SWITCHES})
     target_compile_options(${NAME} PRIVATE -O3 -DNDEBUG)
 
     list(APPEND BENCH_COMMANDS COMMAND ${NAME} --json "${RESULTS_DIR}/${CONFIGURATION}.json")
@@ -130,8 +146,20 @@ function(serpent_add_benchmark CONFIGURATION LIBRARY)
     set(BENCH_TARGETS "${BENCH_TARGETS}" PARENT_SCOPE)
 endfunction()
 
-serpent_add_benchmark(default serpent)
-serpent_add_benchmark(plain serpent::plain)
+# As the library comes; with everything off; and with the one switch that costs an image real
+# space turned up.
+serpent_add_benchmark(default)
+serpent_add_benchmark(plain SERPENT_USE_ZMIJ=0 SERPENT_BOUNDED_OBJECT_WRITE=0 SERPENT_INTEGER_TABLE=0)
+serpent_add_benchmark(large SERPENT_INTEGER_TABLE=2)
+
+# `default` with one switch off at a time, which is what says what that switch is worth. Several
+# more builds of a slow translation unit, so only on request: tools/bench.sh --ablations.
+option(SERPENT_BENCH_ABLATIONS "Also build the benchmark with each switch turned off on its own" OFF)
+if(SERPENT_BENCH_ABLATIONS)
+    serpent_add_benchmark(without_zmij SERPENT_USE_ZMIJ=0)
+    serpent_add_benchmark(without_bounded_write SERPENT_BOUNDED_OBJECT_WRITE=0)
+    serpent_add_benchmark(without_integer_table SERPENT_INTEGER_TABLE=0)
+endif()
 
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)

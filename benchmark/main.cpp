@@ -765,6 +765,7 @@ static void print_configuration() {
     std::printf("configuration: %s\n", bench::chosen.configuration.c_str());
     std::printf("  SERPENT_USE_ZMIJ              %d\n", SERPENT_USE_ZMIJ);
     std::printf("  SERPENT_BOUNDED_OBJECT_WRITE  %d\n", SERPENT_BOUNDED_OBJECT_WRITE);
+    std::printf("  SERPENT_INTEGER_TABLE         %d\n", SERPENT_INTEGER_TABLE);
 }
 
 int main(int argc, char **argv) {

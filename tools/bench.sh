@@ -4,6 +4,7 @@
 #   tools/bench.sh                     everything
 #   tools/bench.sh --filter JSON       only measurements whose group or library contains JSON
 #   tools/bench.sh --quick             fewer samples: checks that it runs, not numbers to quote
+#   tools/bench.sh --ablations         also the default with each switch off on its own (slow to build)
 #
 # CXX chooses the compiler; the reflected path needs GCC 16, which is what is looked for first.
 # Both libraries are always built by the same compiler in the same process - one of them gains a
@@ -17,8 +18,14 @@ fi
 # One build directory per compiler, since CMake will not change compilers in one.
 build="${BUILD_DIR:-$root/build-bench-$(basename "$CXX")}"
 
+ablations=OFF
+for argument in "$@"; do
+    shift
+    if [ "$argument" = "--ablations" ]; then ablations=ON; else set -- "$@" "$argument"; fi
+done
+
 cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$CXX" \
-    -DSERPENT_BUILD_BENCHMARKS=ON -DSERPENT_TEST_SANITIZE=OFF > /dev/null
+    -DSERPENT_BUILD_BENCHMARKS=ON -DSERPENT_TEST_SANITIZE=OFF -DSERPENT_BENCH_ABLATIONS=$ablations > /dev/null
 cmake --build "$build" -j --target serpent_benchmarks
 
 rm -f "$build"/results/*.json
