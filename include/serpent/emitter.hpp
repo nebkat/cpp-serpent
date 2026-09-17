@@ -1,5 +1,6 @@
 #pragma once
 
+#include <serpent/config.hpp>
 #include <serpent/concepts.hpp>
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
@@ -241,7 +242,7 @@ public:
     }
 
     /** One byte, without going through a span and the stack slot that implies. */
-    void put_byte(std::byte value) noexcept {
+    SERPENT_ALWAYS_INLINE void put_byte(std::byte value) noexcept {
         if (this->failure == errc::ok && this->room_used < this->room_size) {
             this->room[this->room_used++] = value;
             return;
@@ -258,7 +259,7 @@ public:
      */
     template<typename Character, std::size_t Width>
         requires (sizeof(Character) == 1)
-    void put_constant(const std::array<Character, Width> &text) noexcept {
+    SERPENT_ALWAYS_INLINE void put_constant(const std::array<Character, Width> &text) noexcept {
         if (this->failure == errc::ok && Width <= this->room_size - this->room_used) {
             std::memcpy(this->room + this->room_used, text.data(), Width);
             this->room_used += Width;
@@ -284,14 +285,14 @@ public:
      * the batch is empty - which helps only if the batch is large enough, and that is the case
      * that answers null.
      */
-    [[nodiscard]] char *room_for(std::size_t bytes) noexcept {
+    SERPENT_ALWAYS_INLINE [[nodiscard]] char *room_for(std::size_t bytes) noexcept {
         if (this->failure == errc::ok && bytes <= this->room_size - this->room_used)
             return reinterpret_cast<char *>(this->room + this->room_used);
         return this->make_room_for(bytes);
     }
 
     /** Claims the first `bytes` of what room_for() handed out. */
-    void used(std::size_t bytes) noexcept { this->room_used += bytes; }
+    SERPENT_ALWAYS_INLINE void used(std::size_t bytes) noexcept { this->room_used += bytes; }
 
     /** The most compose() can be asked for: enough for any number as text, with room to spare. */
     static constexpr std::size_t composed_capacity = 64;

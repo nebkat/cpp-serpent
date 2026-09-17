@@ -20,108 +20,90 @@ The comparison that matters if you are here for BJData, and the one with no char
 tables in it: the struct-mapping library's tables — digit classification, escape decoding,
 integer digit pairs — all live in its JSON text path. Its binary format touches none of them.
 
-Ten thousand structs of five fields.
-
 Ten thousand structs of five fields, both libraries in one process on one compiler.
 
 | | serpent (BJData) | struct-mapping lib (CBOR) | the same (BEVE) | DOM lib (CBOR) |
 |---|---:|---:|---:|---:|
-| encode | 0.43 ms | 0.19 ms | **0.16 ms** | 4.04 ms |
-| decode | 0.45 ms | 0.18 ms | **0.17 ms** | 5.80 ms |
-| allocations, encode | 13 | **12** | **12** | 120,026 |
+| encode | 0.16 ms | 0.20 ms | **0.15 ms** | 3.57 ms |
+| decode | 0.23 ms | 0.18 ms | **0.16 ms** | 5.79 ms |
+| allocations, encode | **10** | 12 | 12 | 120,026 |
 | allocations, decode | **1** | **1** | **1** | 140,025 |
 | output size | 844,694 B | **764,692 B** | 828,964 B | 766,100 B |
 
-The second column is the comparison that settles the question, and it is the one this page used
-to lack. BEVE is the struct-mapping library's own format: it knows the schema, so a field is a
-position and a payload with no key on the wire at all. CBOR is what BJData is — every value
-tagged, every key named, the marker chosen from the value rather than fixed by the declared
-type. Holding the format constant and varying only the library is the only way to ask whether
-the format explains the gap.
+BEVE is the struct-mapping library's own format: it knows the schema, so a field is a position
+and a payload. CBOR is what BJData is — every value tagged, every key named, the marker chosen
+from the value rather than fixed by the declared type — so it is the column that holds the format
+constant and varies only the library.
 
-### It is not that the other format is cleverer
+### It was never the format
 
-It reads its own schema-driven BEVE in 0.17 ms and a fully key-tagged CBOR in 0.18 ms — a 5%
-difference. Carrying keys and per-value markers costs that library almost nothing, so the 2.6x
-it has on us is not the wire format. It is the implementation, and the rest of this section is
-what that turned out to mean.
+These rows used to read 0.43 and 0.45 ms, 2.6x behind, and this page used to explain part of that
+by the format: BJData's markers are ASCII letters with no structure, where BEVE's tag is bit
+fields that dispatch by arithmetic. That was wrong, and the way it was shown to be wrong is worth
+keeping. The plainest possible BJData writer and reader were written by hand for this one record
+— a constant for each key, a `switch` on the marker, a `memcpy` — producing and reading exactly
+the same bytes:
 
-The obvious explanation is wrong, and the byte traces say so. One record:
+| | plain code, by hand | serpent, then | struct-mapping lib (CBOR) | the same (BEVE) |
+|---|---:|---:|---:|---:|
+| encode | **0.065 ms** | 0.45 ms | 0.19 ms | 0.15 ms |
+| decode | **0.127 ms** | 0.46 ms | 0.14 ms | 0.16 ms |
 
-```
-BJData  73 B   {U·9 timestamp m ····      U·7 celsius h ··   …
-BEVE    83 B   ·· ·$ timestamp q ········    ·· celsius a ········ …
-CBOR    69 B   ·  i timestamp ·a eS·· …
-```
-
-BEVE is the **least** compact of the four and the fastest. It writes the tag its C++ type
-dictates and a full-width payload — `uint64_t` is always eight bytes. BJData chooses a marker
-from the *value*: that `uint64` became a four-byte `m`, that `double` a two-byte `h`. CBOR and
-MessagePack narrow too and come out smaller still, because their type and length share one byte
-where BJData spends a marker plus a length.
-
-And choosing those markers is free. Encoding with `compact_types` off, so every marker comes
-from the type exactly as BEVE does, measures the same to within noise. The decisions were never
-the cost.
+Plain code over BJData is faster than the fastest library over its own format. Choosing a marker
+from the value, naming every key, letters for markers: none of it costs anything that matters.
+Everything serpent lost, it lost to its own machinery.
 
 ### What the cost actually was
 
-Four things, each found by measurement and each now fixed:
-
-| | was |
+| | 10k records |
 |---|---|
-| every record in a sequence was parsed **twice** — read, then skipped again to find the next | 1030 → 540 µs |
-| a key was framed at run time: length marker, length, bytes, as separate writes | 625 → 276 µs |
-| `put()` was too large to inline, so a one-byte marker became a call, and the copy inside it a call to `memcpy` | 273 → 237 µs |
-| a string's length prefix was read once for the text and again to step over it | 540 → 442 µs |
+| **writing** | |
+| a key went through `put(span)`, which in a large translation unit is not inlined: a call, and a copy of run-time width. Now `put_constant`, its width in its type | 451 → 370 µs |
+| a marker and its payload were two writes through a `switch`. Now one piece: eight bytes stored, as many kept as the marker says | 370 → 208 µs |
+| each key and each value asked for room. Runs of number and boolean members now ask once, as JSON's do | 208 → 176 µs |
+| a string's marker and its length were two writes | 176 → 165 µs |
+| **reading** | |
+| every key was tried against every entry, each value was read through a view, and then stepped over a second time. Now the members are expected as this library writes them and read straight off the cursor, and only what that leaves is matched by name | 457 → 303 µs |
+| each typed read looked at the marker in three `switch`es: is it an integer, how wide, load it. Now one, whose arms know the type stored | 303 → 277 µs |
+| whether a marker opens a value at all was asked before every value. Now only once the typed read has refused it | 277 → 246 µs |
+| a string's length was read three calls deep | 246 → 220 µs |
 
-None of that was the format. It was a reader built from handles that did not know what the
-caller wanted, and a writer assembling constants a byte at a time.
+The first reading row hides the finding that mattered most. The new reader, as first written,
+measured 435 µs — no better than the old one. The same source with its half-dozen smallest
+functions marked always-inline measured 303. GCC inlines against a budget for the whole
+translation unit; beside another library's templates the budget runs out, functions of three
+lines become calls, and constant widths become run-time arguments. That is what
+[`SERPENT_FORCE_INLINE`](configuration.md) is for, it is why a benchmark that lives in a small
+file flatters a library, and it explains a caveat this page used to carry without understanding
+it: that serpent measured 0.23 ms on its own and 0.43 ms in the full suite. It was never the
+caches. It was the size of the file.
 
-### One measurement caveat worth knowing
+Three ideas were tried, measured, and taken back out because they bought nothing: holding the
+cursor by value inside the reader, asking binary32 before binary16 when narrowing a real, and a
+short way through the parse of a plain object's header.
 
-serpent's timings move with what the process did beforehand and the comparison library's do
-not: measured on its own, encode is 0.23 ms; measured in the full suite, after the document
-benchmarks have been through the same caches, the same call takes 0.43 ms, while the other
-library sits within a few percent of its own figure either way.
+### What is left
 
-**The table above quotes the full-suite number**, because that is what the published harness
-prints and what anyone re-running it will see. The isolated figure is the better one for a
-process that does nothing else, and the gap between the two is a property of serpent worth
-knowing: something in our working set survives other work less well than the alternatives, and
-it is not yet understood.
+Writing is level with BEVE and ahead of CBOR. Reading is 1.2x behind CBOR, against a ceiling that
+says 0.13 ms is there to be had. A profile of what remains has no single feature: half is the
+typed reads themselves, and the rest is spread over a string's length and copy, setting up each
+object, and the loop over the sequence.
 
 ### Describing a type beats converting it by hand
 
 The figures above are for an annotated type, which is what the library wants you to write. The
-same five fields behind a hand-written `json_convert` decode from BJData in 1.47 ms rather than
-0.45 ms — **3.2x** — because a described type gets a reader generated for it that walks the
-document once, where a hand-written conversion goes through the general iterators, parsing each
-entry into a key and a handle and comparing the key at run time.
+same five fields behind a hand-written `json_convert` decode from BJData in 1.19 ms rather than
+0.20 ms — **6x** — and encode in 0.26 ms rather than 0.16, because a described type gets a reader
+and a writer generated for it, where a hand-written conversion goes through the general
+iterators, parsing each entry into a key and a handle and comparing the key at run time.
 
-That gap was 4.4x until the BJData view learned to step over an element something has already
+On decode that gap was wider still until the BJData view learned to step over an element something has already
 walked, rather than scanning it a second time to find the next one. JSON has kept such a note
 for a while; the binary reader had not, so every container read through a hand-written
 conversion was scanned twice over.
 
 Hand-writing is still the right answer when the two directions genuinely differ, or on a
 toolchain with no reflection. It is not the right answer for speed.
-
-### What is left
-
-The remaining 2.6x on decode, against the same library reading the same kind of format, is two
-things — one fixable and one not.
-
-**Fixable:** the other library turns a key into a field index with a compile-time perfect hash,
-then verifies with a fixed-length compare and dispatches through a jump table. serpent compares
-against each field's name in turn. For five fields that is a few compares against one hash — worth
-something, at the cost of a good deal of machinery.
-
-**Not fixable:** BEVE packs type, width and signedness into the bits of one tag byte, so
-`width = 1 << (tag >> 5)` and dispatch is arithmetic. BJData markers are ASCII letters chosen
-per value — `'U'`, `'i'`, `'m'`, `'D'` — with no structure to exploit, so every value costs a
-lookup where BEVE costs a shift. That is the format, and it is the price of a wire encoding you
-can read in a hex dump.
 
 ## Your own types, as JSON
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <serpent/config.hpp>
 #include <serpent/emitter.hpp>
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
@@ -271,14 +272,14 @@ public:
      * marker says: in little-endian order the low bytes of a wide integer are the narrow one, so
      * there is nothing to choose between but how far to advance.
      */
-    [[nodiscard]] static char *write_marked(char *to, marked_scalar scalar) noexcept {
+    SERPENT_ALWAYS_INLINE [[nodiscard]] static char *write_marked(char *to, marked_scalar scalar) noexcept {
         const nonstd::unaligned_little<std::uint64_t> stored { scalar.payload };
         to[0] = static_cast<char>(scalar.kind);
         std::memcpy(to + 1, stored.data(), sizeof(std::uint64_t));
         return to + 1 + payload_width(scalar.kind);
     }
 
-    void marked(marked_scalar scalar) noexcept {
+    SERPENT_ALWAYS_INLINE void marked(marked_scalar scalar) noexcept {
         if (char *const to = this->room_for(widest_marked)) {
             this->used(static_cast<std::size_t>(write_marked(to, scalar) - to));
             return;
