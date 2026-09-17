@@ -57,3 +57,11 @@
 #ifndef SERPENT_USE_FAST_FLOAT
 #define SERPENT_USE_FAST_FLOAT 1
 #endif
+
+/**
+ * Looks for what a string cannot hold as itself - a quote, a backslash, a control character -
+ * eight bytes at a time rather than one, when writing a string and when reading one.
+ */
+#ifndef SERPENT_WIDE_STRING_SCAN
+#define SERPENT_WIDE_STRING_SCAN 1
+#endif

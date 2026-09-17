@@ -6,6 +6,7 @@
 // escape-aware string scan is the load-bearing part: mistake a \" for a closing quote and
 // the whole walk desynchronises, which is why it is separated out and tested on its own.
 
+#include <serpent/config.hpp>
 #include <serpent/error.hpp>
 #include <serpent/limits.hpp>
 
@@ -18,6 +19,8 @@
 #include <cstddef>
 #include <initializer_list>
 #include <cstdint>
+#include <cstring>
+#include <type_traits>
 
 namespace serpent::json::scanner {
 
@@ -75,6 +78,52 @@ inline constexpr auto character_class = [] {
         const char *position, const char *limit, std::uint8_t wanted) noexcept {
     while (position < limit && (character_class[static_cast<unsigned char>(*position)] & wanted) != 0) ++position;
     return position;
+}
+
+/**
+ * Whether any of the eight bytes in `word` is one a string cannot hold as itself: a quote, a
+ * backslash, or a control character.
+ *
+ * Each test is the usual one for "is any byte of this word zero", or "less than n": subtracting
+ * from every byte at once borrows out of exactly the bytes that were too small, and the borrow
+ * shows in the top bit of a byte whose own top bit was clear. It can spill into the byte above a
+ * byte that matched, so this says whether there is such a byte, not which - and which is found
+ * by looking at the eight one at a time, which happens once per escape rather than once per byte.
+ * A byte of 0x80 or more, which is part of a character outside ASCII, never matches.
+ */
+[[nodiscard]] constexpr bool holds_byte_to_escape(std::uint64_t word) noexcept {
+    constexpr std::uint64_t every_byte = 0x0101010101010101;
+    constexpr std::uint64_t top_bits = 0x8080808080808080;
+
+    const auto any_byte_below = [](std::uint64_t bytes, std::uint64_t bound) {
+        return (bytes - every_byte * bound) & ~bytes & top_bits;
+    };
+    const auto any_byte_equal_to = [&](std::uint64_t bytes, char wanted) {
+        return any_byte_below(bytes ^ (every_byte * static_cast<unsigned char>(wanted)), 1);
+    };
+    return (any_byte_below(word, 0x20) | any_byte_equal_to(word, '"') | any_byte_equal_to(word, '\\')) != 0;
+}
+
+/**
+ * The first byte from `position` that a string cannot hold as itself, or `limit`.
+ *
+ * The same answer advance_while gives for class_string_body. Where that looks at every byte,
+ * this steps over eight at a time for as long as none of the eight needs a second look - which
+ * suits a string, whose runs are long, and would not suit the runs advance_while is otherwise
+ * asked about. SERPENT_WIDE_STRING_SCAN=0 makes it advance_while and nothing more.
+ */
+[[nodiscard]] constexpr const char *end_of_plain_text(const char *position, const char *limit) noexcept {
+#if SERPENT_WIDE_STRING_SCAN
+    if (!std::is_constant_evaluated()) {
+        while (limit - position >= 8) {
+            std::uint64_t word;
+            std::memcpy(&word, position, sizeof word);
+            if (holds_byte_to_escape(word)) break;
+            position += 8;
+        }
+    }
+#endif
+    return advance_while(position, limit, class_string_body);
 }
 
 [[nodiscard]] constexpr int hex_value(char value) noexcept {
@@ -158,7 +207,7 @@ struct string_span {
     while (true) {
         // Everything a string holds as itself goes by without being looked at twice; what stops
         // the run is the quote, a backslash, or a control character, and those are rare.
-        scan.position = advance_while(scan.position, scan.limit, class_string_body);
+        scan.position = end_of_plain_text(scan.position, scan.limit);
 
         if (!scan.need(1)) return result;
         const char value = scan.take();

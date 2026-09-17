@@ -12,6 +12,7 @@ set(TESTS
     bjdata_writer
     json_reader
     json_real_read
+    json_string_scan
     real_text
     json_indexed
     json_walking

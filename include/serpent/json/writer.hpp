@@ -95,7 +95,7 @@ class writer : public byte_emitter {
         const char *run = text.data();
         const char *const end = run + text.size();
         while (true) {
-            const char *const stop = scanner::advance_while(run, end, scanner::class_string_body);
+            const char *const stop = scanner::end_of_plain_text(run, end);
             this->put_text(std::string_view { run, stop });
             if (stop == end) break;
             this->write_escape(*stop);
