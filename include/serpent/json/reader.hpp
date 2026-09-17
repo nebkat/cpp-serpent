@@ -168,6 +168,7 @@ public:
         auto scan = this->scan();
         scanner::scan_literal(scan, *this->first == 't' ? "true" : "false");
         if (!scan.ok()) return std::nullopt;
+        this->note_end(scan.position);
         return *this->first == 't';
     }
 
@@ -326,7 +327,9 @@ private:
     [[nodiscard]] std::string_view number_text() const noexcept {
         auto scan = this->scan();
         const auto text = scanner::scan_number(scan);
-        return scan.ok() ? text : std::string_view {};
+        if (!scan.ok()) return {};
+        this->note_end(scan.position);
+        return text;
     }
 
     /** A JSON number is an integer unless it carries a fraction or an exponent. */
@@ -341,7 +344,24 @@ private:
         auto scan = this->scan();
         const auto text = scanner::scan_string(scan);
         if (!scan.ok()) return std::nullopt;
+        this->note_end(scan.position);
         return text;
+    }
+
+    /**
+     * Records where this value ends, so that stepping to the next need not scan it again.
+     *
+     * A container says this when a walk of it reaches the end. A scalar knows it as soon as it
+     * has been read at all - the grammar scan that reads it is the same one an iterator would
+     * run to step over it - and saying so is what keeps every scalar in an object from being
+     * scanned twice, once to convert and once to find the member after it.
+     *
+     * An extent is a fact about the grammar, not about the conversion, so it is recorded
+     * whenever the scan succeeded - including where the value scanned cleanly and then failed
+     * to convert, as a real does when asked for an integer.
+     */
+    void note_end(const char *end) const noexcept {
+        if (this->memo != nullptr) this->memo->note(this->source.data(), this->first, end, 0);
     }
 
     friend class array_iterator;
