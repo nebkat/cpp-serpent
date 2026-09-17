@@ -24,18 +24,27 @@ Ten thousand structs of five fields.
 
 Ten thousand structs of five fields, both libraries in one process on one compiler.
 
-| | serpent (BJData) | struct-mapping lib (BEVE) | its CBOR | its MessagePack |
+| | serpent (BJData) | struct-mapping lib (CBOR) | the same (BEVE) | DOM lib (CBOR) |
 |---|---:|---:|---:|---:|
-| encode | 0.23 ms | **0.09 ms** | 0.20 ms | 0.09 ms |
-| decode | 0.32 ms | **0.16 ms** | 0.18 ms | 0.08 ms |
-| allocations, decode | **1** | **1** | 1 | 1 |
-| output size | 844,694 B | 828,964 B | 764,692 B | 358,964 B |
+| encode | 0.43 ms | 0.19 ms | **0.16 ms** | 4.04 ms |
+| decode | 0.45 ms | 0.18 ms | **0.17 ms** | 5.80 ms |
+| allocations, encode | 13 | **12** | **12** | 120,026 |
+| allocations, decode | **1** | **1** | **1** | 140,025 |
+| output size | 844,694 B | **764,692 B** | 828,964 B | 766,100 B |
 
-The last two columns are the same library writing *value-directed* formats — the kind BJData is,
-where a marker is chosen per value rather than fixed by the declared type. They are the fairer
-comparison, and against its CBOR we are within 1.2x on encode.
+The second column is the comparison that settles the question, and it is the one this page used
+to lack. BEVE is the struct-mapping library's own format: it knows the schema, so a field is a
+position and a payload with no key on the wire at all. CBOR is what BJData is — every value
+tagged, every key named, the marker chosen from the value rather than fixed by the declared
+type. Holding the format constant and varying only the library is the only way to ask whether
+the format explains the gap.
 
 ### It is not that the other format is cleverer
+
+It reads its own schema-driven BEVE in 0.17 ms and a fully key-tagged CBOR in 0.18 ms — a 5%
+difference. Carrying keys and per-value markers costs that library almost nothing, so the 2.6x
+it has on us is not the wire format. It is the implementation, and the rest of this section is
+what that turned out to mean.
 
 The obvious explanation is wrong, and the byte traces say so. One record:
 
@@ -72,15 +81,20 @@ caller wanted, and a writer assembling constants a byte at a time.
 ### One measurement caveat worth knowing
 
 serpent's timings move with what the process did beforehand and the comparison library's do
-not: in a run doing nothing else, encode is 0.23 ms; in one that has already worked through the
-document benchmarks above, the same call measures 0.40 ms, while the other library sits at
-0.09 ms in both. The figures here are from the quiet run. Something in our working set survives
-less well across other work, and it is not yet understood — worth knowing if your own use is
-occasional rather than in a tight loop, because the cold number is the honest one there.
+not: measured on its own, encode is 0.23 ms; measured in the full suite, after the document
+benchmarks have been through the same caches, the same call takes 0.43 ms, while the other
+library sits within a few percent of its own figure either way.
+
+**The table above quotes the full-suite number**, because that is what the published harness
+prints and what anyone re-running it will see. The isolated figure is the better one for a
+process that does nothing else, and the gap between the two is a property of serpent worth
+knowing: something in our working set survives other work less well than the alternatives, and
+it is not yet understood.
 
 ### What is left
 
-The remaining ~2.7x is two things, one fixable and one not.
+The remaining 2.6x on decode, against the same library reading the same kind of format, is two
+things — one fixable and one not.
 
 **Fixable:** the other library turns a key into a field index with a compile-time perfect hash,
 then verifies with a fixed-length compare and dispatches through a jump table. serpent compares
@@ -97,12 +111,12 @@ can read in a hex dump.
 
 | | serpent | struct-mapping lib | DOM lib |
 |---|---:|---:|---:|
-| decode | 3.78 ms | **0.63 ms** (6.0x faster) | 7.35 ms (1.9x slower) |
-| encode | 1.51 ms | **0.29 ms** (5.3x faster) | 4.88 ms (3.2x slower) |
+| decode | 2.21 ms | **0.56 ms** (4.0x faster) | 7.30 ms (3.3x slower) |
+| encode | 1.48 ms | **0.28 ms** (5.3x faster) | 4.80 ms (3.2x slower) |
 | allocations, decode | **15** | 10,015 | 70,029 |
-| allocations, encode | **13** | 12 | 70,023 |
+| allocations, encode | 17 | **12** | 70,023 |
 
-**This is serpent's own use case and it loses it by 5-6x.** That gap is implementation headroom
+**This is serpent's own use case and it loses it by 4-5x.** That gap is implementation headroom
 rather than an architectural limit: the other library builds each key's `"name":` at compile
 time and emits it as one fixed-size copy, writes into a pre-padded buffer by index instead of
 through a call, and carries its own number conversion.
@@ -114,12 +128,17 @@ text to parse and the difference is almost entirely the object graph the other o
 
 | | serpent | on-demand | fast DOM A | fast DOM B | DOM lib |
 |---|---:|---:|---:|---:|---:|
-| count every value, citm_catalog.json | 0.94 ms | **0.32 ms** | 0.42 ms | 0.92 ms | 7.48 ms |
-| sum every coordinate, canada.json | 1.64 ms | 1.63 ms | **1.27 ms** | 1.92 ms | 12.87 ms |
+| count every value, citm_catalog.json | 1.16 ms | **0.30 ms** | 0.42 ms | 0.89 ms | 7.35 ms |
+| the same, with an index built first | 0.86 ms | | | | |
+| sum every coordinate, canada.json | 4.58 ms | 1.63 ms | **1.26 ms** | 1.94 ms | 12.60 ms |
+| the same, with an index built first | 2.94 ms | | | | |
 
-A structural scan that returns no values — `json::validate` — takes 0.99 ms on citm, so
-traversal now costs slightly *less* than merely checking the same file, because validating
-inspects every scalar's grammar and counting needs only the shape.
+A structural scan that returns no values — `json::validate` — takes 0.73 ms on citm, so
+traversal costs about 1.6x merely checking the same file.
+
+An [index](reading.md#an-index-for-a-document-read-more-than-once) is the answer when a document
+is walked more than once: it costs about what validating costs to build, and takes a third off
+every traversal after that.
 
 The indexed parsers keep a lead, and part of it is vectorisation: the on-demand parser ships a
 scalar kernel too, and switching SIMD off costs it 2.1–2.5×, so the vector instructions are the
@@ -135,12 +154,12 @@ the next table.
 
 | | serpent | on-demand | fast DOM A | fast DOM B | DOM lib |
 |---|---:|---:|---:|---:|---:|
-| first key of citm_catalog.json | **0.08 µs** | 160 µs | 352 µs | 918 µs | 6436 µs |
-| last key of the same file | 721 µs | **223 µs** | 352 µs | 921 µs | 6407 µs |
-| sum ids, twitter.json | 303 µs | **91 µs** | 135 µs | 859 µs | 2626 µs |
+| first key of citm_catalog.json | **0.09 µs** | 180 µs | 367 µs | 850 µs | 7213 µs |
+| last key of the same file | 709 µs | **272 µs** | 370 µs | 856 µs | 7267 µs |
+| sum ids, twitter.json | 293 µs | **111 µs** | 145 µs | 781 µs | 3329 µs |
 
 The two citm rows are the same operation on the same file. serpent stops as soon as it finds
-the key: 0.08 µs at the front of the document, 721 µs at the back. Everything else pays for the
+the key: 0.09 µs at the front of the document, 709 µs at the back. Everything else pays for the
 whole document either way, which is why their numbers barely move between the rows.
 
 So the win is real but narrow: **reach a field early and nothing else is close; read the whole
@@ -156,21 +175,23 @@ allocate through `malloc`, which the counter replaces `operator new` to measure 
 cannot see. Their real figure is not zero — it is unmeasured. Only serpent, the struct-mapping
 library and the DOM library are counted.
 
-The struct benchmarks show 13-15 allocations, which is container growth rather than per-value:
+The struct benchmarks show 13-17 allocations, which is container growth rather than per-value:
 the sample strings are short enough for the small-string optimization, so they never reach the
-allocator. Longer strings would allocate in every library.
+allocator. Longer strings would allocate in every library. Reserve the destination and the count
+falls to one, because a sink over contiguous storage is
+[written into in place](writing.md#sizing-the-destination).
 
 Writing JSON was the exception until recently, at 25,437 allocations for the same work - two
 intermediate strings per real, in the number formatting rather than in the writer. Composing
-into a fixed buffer took it to 13, and the encode itself from 2.66 ms to 1.51 ms.
+into a fixed buffer took it to 13.
 
 ## What this means
 
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types, and want the most speed | a struct-mapping library is 6-10x quicker |
-| traverse whole documents repeatedly | an indexed parser is 5-15x quicker |
+| convert your own types, and want the most speed | a struct-mapping library is 4-5x quicker |
+| traverse whole documents repeatedly | an indexed parser is 3-4x quicker |
 | want a mutable document object | serpent has none at all |
 | need BJData and JSON from one definition | serpent |
 | cannot allocate while reading | serpent |
@@ -185,13 +206,19 @@ cmake --build build-bench --target bench
 Off by default: it fetches four libraries and 4.6 MB of corpus.
 
 Every measured computation is run against all of the others first and must produce the same
-answer before any timing is printed — nineteen checks, including our BJData being read back by
+answer before any timing is printed — twenty-two checks, including our BJData being read back by
 the DOM library. A lazy reader that quietly returned nothing would otherwise look extremely
 fast, and the whole-document benchmark caught exactly that: asking the on-demand parser for its
 root field count only touches the top level, so it had to be replaced with a real recursive
 traversal before the row meant anything.
 
-Measured on an Apple M4 Pro, macOS 26.5, `-O3 -DNDEBUG`, best of seven rounds. The binary table
-is GCC 16 with `-freflection`, which is the path serpent means you to use; the JSON and
-document tables are Apple clang 21. Every row within a table is the same compiler — comparing
-two libraries built by different ones says more about the compilers than the libraries.
+Measured on an Apple M4 Pro, macOS 26.5, `-O3 -DNDEBUG`, best of seven rounds, every table
+GCC 16 with `-freflection` — the path serpent means you to use, and one compiler throughout, since
+comparing two libraries built by different ones says more about the compilers than the libraries.
+
+The machine was not idle. Absolute figures are therefore a ceiling rather than a best case, and
+the run was repeated to make sure they mean something: two runs agreed to 0.7% at the median and
+5.7% at the worst. A third, taken under half again as much load, moved the absolute numbers by a
+third — and left every ratio in these tables unchanged but the one block it was disturbed in.
+Ratios between libraries measured in one process survive a busy machine; single absolute numbers
+quoted from one run do not.
