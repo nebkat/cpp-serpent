@@ -1,13 +1,8 @@
 # Configuration
 
-serpent is fast partly because of code that has a plainer way of doing the same thing: a table
-where the standard library has a loop, a bundled algorithm where it has a slower one. Every such
-piece is behind a switch, and the plain way is kept in the library beside it, producing the same
-bytes. So any of them can be turned off to see what it was worth, to save the space its tables
-take, or for good.
-
-The switches are macros, described where they are defined in `serpent/config.hpp`, and CMake
-options of the same names. Set them on the compiler's command line if you are not using CMake.
+Every optimisation that has a plainer way of doing the same thing is behind a switch, with the
+plain way kept beside it and producing the same bytes. They are macros, defined in
+`serpent/config.hpp`, and CMake options of the same names.
 
 | Switch | Default | On, it | Off, it | Costs |
 |---|---|---|---|---|
@@ -25,20 +20,10 @@ chose: headers only, and the standard library throughout.
 What each is worth is in [Benchmarks](benchmarks.md#what-the-switches-are-worth), and
 `tools/bench.sh --ablations` measures the default with each turned off on its own.
 
-## Every way produces the same bytes
-
-A switch changes how fast a document is produced or read, never what it is. That is tested rather
-than hoped: an integer's text is compared with `std::to_chars` for every 8- and 16-bit value and
-millions of wider ones, under each setting of the table; a real's text must read back exactly,
-with the shortest digits that do, from whichever code wrote it; the two ways of reading a real
-are compared on millions of texts, most of them malformed, in the value, where they stop, and the
-error they give; and the two ways of scanning a string from every starting point in text built
-to sit on the edges of the arithmetic.
-
-## Other people's code
+A switch changes how fast a document is produced or read, never what it is, and that is tested:
+each way of writing an integer or a real, reading a real, or scanning a string is compared with
+the plain way over millions of values.
 
 Żmij, Glaze's integer formatting and fast_float are other people's work, kept under
-`include/serpent/external/` with their licences and copied from pinned upstream versions by the
-`tools/vendor-*.sh` scripts, which rename a namespace and a macro prefix so that a copy here
-cannot collide with another in the same program, and change nothing else. The README in that
-directory says who wrote what and under which licence.
+`include/serpent/external/` with their licences and copied from pinned upstream versions by
+`tools/vendor-*.sh`; the README there says who wrote what.
