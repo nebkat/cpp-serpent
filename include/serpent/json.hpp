@@ -4,6 +4,7 @@
 
 #include <serpent/json/decode.hpp>
 #include <serpent/json/reader.hpp>
+#include <serpent/json/reflect.hpp>
 #include <serpent/json/writer.hpp>
 #include <serpent/error.hpp>
 #include <serpent/kind.hpp>
