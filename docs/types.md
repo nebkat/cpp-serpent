@@ -89,10 +89,10 @@ struct connection {
 You cannot annotate a type from someone else's header, and you cannot add a hidden friend to
 it. Three ways in, shortest first.
 
-### Opt it into reflection from outside
+### Describe it from outside
 
-The trait says yes on the type's behalf, and may carry the naming rule the annotation would
-have:
+`serpent::describe<T>` is the annotation block's counterpart for a type you did not declare.
+Specializing it is the opt-in, and it may carry the naming rule the annotation would have:
 
 ```cpp
 template<>
@@ -105,8 +105,11 @@ struct serpent::describe<foreign_reading> {
 {"sensor_id":4,"degrees_celsius":21.5}
 ```
 
-Every field is included, so this fits a type whose fields you want as they are. There is no
-way to rename or skip one from out here — for that, use a form below.
+Every field is included, so this fits a type whose fields you want as they are. When one needs
+renaming or keeping off the wire, the same description carries a `members` table that takes the
+per-member annotations — see [a type you cannot
+annotate](reflection.md#members-that-need-to-say-more). Reach for a form below only when the
+conversion itself has to be yours.
 
 ### The macro, beside the type
 

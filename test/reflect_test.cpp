@@ -97,7 +97,7 @@ void a_hand_written_conversion_is_left_alone() {
 
 void a_type_you_do_not_own() {
     check(json::encode(foreign_reading {}) == R"({"sensor_id":4,"degrees_celsius":21.5})",
-            "enable_reflection opts it in and carries the naming rule");
+            "describe opts it in and carries the naming rule");
     const auto back = json::decode<foreign_reading>(R"({"sensor_id":9,"degrees_celsius":1.5})");
     check(back && back->sensorId == 9 && back->degreesCelsius == 1.5, "and it reads back");
 }

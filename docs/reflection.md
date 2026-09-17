@@ -234,11 +234,37 @@ struct [[= serpent::serializable {}]] listener {
 Two enumerations may give the same spelling different meanings, which a rule derived from the
 identifiers could not: `rtk_float` is `"float"` in one and `"rtk_float"` in another.
 
-## A type you cannot annotate, by its members
+## A type you cannot annotate
 
-An annotation cannot go on a type declared in someone else's header. `members_of` names its
-members from outside instead, and the key comes from the declaration rather than from a string
-you restate — so only the exceptions are written down, and one list serves both directions:
+An annotation cannot go on a type declared in someone else's header. `serpent::describe<T>` is
+the same place for that type, from outside: specializing it is the opt-in, and what it carries
+is what the annotations carry, under the same names. There is one trait to learn whether you are
+describing a struct, an enumeration, or only a naming rule.
+
+### Every member, by a naming rule alone
+
+A description that says nothing about individual members puts every member on the wire, exactly
+as `serializable` alone would:
+
+```cpp
+template<>
+struct serpent::describe<foreign_reading> {
+    static constexpr serpent::naming naming { serpent::naming_style::snake_case };
+};
+```
+
+```json
+{"sensor_id":4,"degrees_celsius":21.5}
+```
+
+That is the whole opt-in — the specialization existing is what turns the type on, so a
+description with nothing in it at all is valid and means "every member, named as written".
+
+### Members that need to say more
+
+A `members` table names the type's members from outside, taking each key from the declaration
+rather than from a string you restate — so only the exceptions are written down, and one list
+serves both directions:
 
 ```cpp
 template<>
@@ -255,6 +281,26 @@ No `serializer<T>` is involved; the type now reads and writes in every format, s
 as an annotated one does. A member may carry `key`, `skip`, `required` or `defaulted` in any
 order — the annotations, spelled the same and meaning the same — and the table may carry a
 type-wide `naming` rule beside the list.
+
+!!! tip "A table is held to its type"
+
+    A table must account for every member the compiler can see. Leave one out and the build
+    stops, naming it:
+
+    ```
+    error: static assertion failed: this serpent::describe table does not name every member
+    of its type. Not named: gateway. List them, or say { member, serpent::skip {} } to keep
+    one off the wire deliberately, or say `static constexpr bool partial = true` if the table
+    is meant to be a subset
+    ```
+
+    So a member added by an SDK upgrade is caught at the build that picks it up, rather than
+    quietly disappearing from everything you write. A table that is *meant* to be a subset says
+    so once:
+
+    ```cpp
+    static constexpr bool partial = true;
+    ```
 
 ### Where the list comes from is up to you
 
@@ -291,17 +337,7 @@ the same primitive rather than two features:
 compiler's own list and runs the same walk. Narrowing is `<ranges>` and `<meta>` code you already
 know, not a filtering vocabulary this library invented.
 
-### What it does not reach
-
-Only non-static data members can be named this way. A wrapper whose values live behind a pointer,
-a member that is computed rather than stored, or a type that is one scalar rather than an object
-has no declaration for a table to point at — those want a `serializer<T>`.
-
-Unlike [`enum_values`](#an-enumeration-you-cannot-annotate), this needs reflection: addressing a
-member without naming it is a splice.
-
-## An enumeration you cannot annotate
-
+### An enumeration
 An annotation cannot go on an enumeration declared in someone else's header, so the table goes
 in a specialization instead. It carries exactly what the annotations carry — a value per
 enumerator, of any of the kinds `as` takes, and one fallback:
@@ -337,26 +373,14 @@ way to map an enumeration on a toolchain that has none.
     enumerating them. So an enumerator added by an SDK upgrade is caught at the build that
     picks it up, rather than quietly reading and writing as the fallback.
 
-## A type you cannot annotate
+### What it does not reach
 
-You cannot put an annotation on someone else's type, so the opt-in is a trait instead. It
-carries the naming rule as well, because with no conversion function of your own there is
-nowhere else for a type-level setting to live — the trait is the only surface you control:
+Only non-static data members can be named this way. A wrapper whose values live behind a pointer,
+a member that is computed rather than stored, or a type that is one scalar rather than an object
+has no declaration for a table to point at — those want a `serializer<T>`.
 
-```cpp
-template<>
-struct serpent::describe<foreign_reading> {
-    static constexpr serpent::naming_style style = serpent::naming_style::snake_case;
-};
-```
-
-```json
-{"sensor_id":4,"degrees_celsius":21.5}
-```
-
-Every field is included and none can be renamed individually, because `key` and `skip` go on
-the fields. When you need that much control over a type you do not own, write the conversion
-by hand — see [Types you do not own](types.md#types-you-do-not-own).
+Unlike [an enumeration's table](#an-enumeration), a `members` table needs reflection:
+addressing a member without naming it is a splice.
 
 ## Requirements
 
