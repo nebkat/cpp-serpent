@@ -85,8 +85,12 @@ int main() {
     } while (std::ranges::next_permutation(names).found);
     check_equal(orders, 120, "all 120 orders were tried");
 
-    // As this library writes it, which is the first of those ways and the fast one.
-    check(bjdata::decode<record>(bjdata::encode(expected)) == expected, "the shape the fast path is for");
+    // As this library writes it, preferring either thing: the shapes the fast path is for.
+    check(bjdata::decode<record>(bjdata::encode<bjdata::prefer::size>(expected)) == expected, "written for size");
+    check(bjdata::decode<record>(bjdata::encode<bjdata::prefer::speed>(expected)) == expected, "written for speed");
+    const record longer { 42, std::string(300, 'n'), 0.5, true, {} };
+    check(bjdata::decode<record>(bjdata::encode<bjdata::prefer::speed>(longer)) == longer,
+            "and a string too long for a one-byte length");
 
     // A key this type does not name: before, between and after, holding a whole subtree.
     auto extra = bytes({ '{', 'U', 5, 'e', 'x', 't', 'r', 'a', '{', 'U', 1, 'a', '[', 'U', 1, '{', '}', ']', '}' });
@@ -148,7 +152,8 @@ int main() {
 
     // Cut short at every length, a document is refused - and reading it touches nothing past its end,
     // which the sanitizers are here to see.
-    for (const auto &whole : { bjdata::encode(expected), bjdata::encode(nested), extra, spelled, counted }) {
+    for (const auto &whole : { bjdata::encode(expected), bjdata::encode<bjdata::prefer::speed>(expected),
+                 bjdata::encode<bjdata::prefer::speed>(longer), bjdata::encode(nested), extra, spelled, counted }) {
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const std::vector<std::byte> cut(whole.begin(), whole.begin() + static_cast<std::ptrdiff_t>(length));
             if (bjdata::decode<record>(cut) == expected && whole.size() - length > 1)

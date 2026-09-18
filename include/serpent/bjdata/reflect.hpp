@@ -97,20 +97,60 @@ public:
         // A counted or typed object is laid out differently, and this library writes neither.
         if (!this->scan.ok() || !this->prefix.unbounded || this->prefix.typed()) return;
 
+        std::uint64_t found = 0;
         template for (constexpr auto member : members) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                 static constexpr auto &key = detail::encoded_key<name>;
+                using field_type = std::remove_cvref_t<typename [:std::meta::type_of(member):]>;
 
                 // A member that is not here next - left out, or written later - is not an error:
                 // the next member is looked for in the same place, and read_remaining_entries
                 // finds by name whatever is never matched this way.
+                // Written for speed the marker is the type's own, so key and marker are one
+                // constant and the payload one load of a known width; a boolean is all marker,
+                // and a short string's marker and length marker are constant too. Written for
+                // size the marker is whatever held the value, and is looked at below.
+                if constexpr (fixed_width<field_type>) {
+                    if (this->at(key_then<name, detail::own_marker<field_type>()>, sizeof(field_type))) {
+                        this->scan.advance(key.size() + 1);
+                        this->value.[:member:] = detail::load<field_type>(this->scan.position);
+                        this->scan.advance(sizeof(field_type));
+                        found |= [] { return bit_of(member); }();
+                        continue;
+                    }
+                } else if constexpr (std::same_as<field_type, bool>) {
+                    if (this->at(key_then<name, marker::boolean_true>, 0)) {
+                        this->scan.advance(key.size() + 1);
+                        this->value.[:member:] = true;
+                        found |= [] { return bit_of(member); }();
+                        continue;
+                    }
+                    if (this->at(key_then<name, marker::boolean_false>, 0)) {
+                        this->scan.advance(key.size() + 1);
+                        this->value.[:member:] = false;
+                        found |= [] { return bit_of(member); }();
+                        continue;
+                    }
+                } else if constexpr (std::same_as<field_type, std::string>) {
+                    if (this->at(key_then<name, marker::string, marker::uint8>, 1)) {
+                        const auto length = static_cast<std::size_t>(this->scan.position[key.size() + 2]);
+                        if (this->scan.remaining() >= key.size() + 3 + length) {
+                            this->scan.advance(key.size() + 3);
+                            this->value.[:member:].assign(reinterpret_cast<const char *>(this->scan.position), length);
+                            this->scan.advance(length);
+                            found |= [] { return bit_of(member); }();
+                            continue;
+                        }
+                    }
+                }
                 if (this->at(key)) {
                     this->scan.advance(key.size());
-                    if (!this->template read_value<member>(this->marker_after_key())) return;
+                    if (!this->template read_value<member>(this->marker_after_key())) break;
                 }
             }
         }
+        this->seen |= found;
     }
 
     void read_remaining_entries() {
@@ -129,11 +169,27 @@ public:
     }
 
 private:
-    /** Whether this key is next, with at least the byte of a marker after it. */
+    /** Whether these bytes are next, with at least `then` more after them. */
     template<std::size_t Width>
-    SERPENT_ALWAYS_INLINE [[nodiscard]] bool at(const std::array<std::byte, Width> &key) const noexcept {
-        return this->scan.remaining() > Width && std::memcmp(this->scan.position, key.data(), Width) == 0;
+    SERPENT_ALWAYS_INLINE [[nodiscard]] bool at(const std::array<std::byte, Width> &bytes, std::size_t then = 1) const noexcept {
+        return this->scan.remaining() >= Width + then && std::memcmp(this->scan.position, bytes.data(), Width) == 0;
     }
+
+    /** A number that is not a boolean: under the marker of its own type its payload is itself. */
+    template<typename Field>
+    static constexpr bool fixed_width =
+            (std::integral<Field> && !std::same_as<Field, bool>) || std::floating_point<Field>;
+
+    /** A key as this library writes it, and the markers that follow it. */
+    template<const std::string_view &Name, marker... Markers>
+    static constexpr auto key_then = [] {
+        constexpr auto &key = detail::encoded_key<Name>;
+        std::array<std::byte, key.size() + sizeof...(Markers)> bytes {};
+        std::ranges::copy(key, bytes.begin());
+        std::size_t index = key.size();
+        ((bytes[index++] = static_cast<std::byte>(Markers)), ...);
+        return bytes;
+    }();
 
     /** The marker at() has already found room for. Whether it opens a value is read_value's to say. */
     SERPENT_ALWAYS_INLINE [[nodiscard]] marker marker_after_key() noexcept {
@@ -198,8 +254,7 @@ private:
      */
     template<std::meta::info Member>
     SERPENT_ALWAYS_INLINE [[nodiscard]] bool read_value(marker kind) {
-        static constexpr std::uint64_t bit = bit_of(Member);
-        this->seen |= bit;
+        this->seen |= [] { return bit_of(Member); }();
 
         auto &field = this->value.[:Member:];
         using field_type = std::remove_cvref_t<decltype(field)>;
