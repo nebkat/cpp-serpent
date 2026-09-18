@@ -9,6 +9,7 @@
 #include <ranges>
 #include <string>
 #include <vector>
+#include <tuple>
 
 using namespace serpent;
 using namespace serpent::bjdata;
@@ -199,17 +200,17 @@ void truncation() {
             const auto value = view::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
-                (void)element.as_int<long long>();
+                std::ignore = element.as_int<long long>();
                 if (++seen > 64) break;
             }
             for (const auto [key, element] : value.items()) {
-                (void)key;
-                (void)element.as_int<long long>();
+                std::ignore = key;
+                std::ignore = element.as_int<long long>();
                 if (++seen > 64) break;
             }
-            (void)value.size();
-            (void)value["a"];
-            (void)value[0];
+            std::ignore = value.size();
+            std::ignore = value["a"];
+            std::ignore = value[0];
         }
     }
 }
@@ -239,7 +240,7 @@ void checked_accessors() {
 
     throws([&] { return document.at("missing"); }, errc::missing_key, "at() on a missing key throws");
     try {
-        (void)document.at("missing");
+        std::ignore = document.at("missing");
     } catch (const serpent::error &failure) {
         check_equal(failure.key(), std::string_view { "missing" }, "and the error names the key");
     }
@@ -251,7 +252,7 @@ void checked_accessors() {
 
     // An error points at the offending byte.
     try {
-        (void)document.at("a").get<int>();
+        std::ignore = document.at("a").get<int>();
     } catch (const error &failure) {
         check(failure.offset() > 0 && failure.offset() < storage.size(), "the error offset is inside the document");
     }

@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <tuple>
 
 namespace json = serpent::json;
 
@@ -89,7 +90,7 @@ int main() {
     std::size_t rows_seen = 0;
     for (auto row : walking["rows"].array()) {
         for (auto value : row.array()) {
-            (void)value;
+            std::ignore = value;
             break; // abandon every inner walk after one element
         }
         ++rows_seen;
@@ -99,12 +100,12 @@ int main() {
     // Abandoning the outer walk part way, then walking it again from the start.
     std::size_t first_pass = 0;
     for (auto row : walking["rows"].array()) {
-        (void)row;
+        std::ignore = row;
         if (++first_pass == 2) break;
     }
     std::size_t second_pass = 0;
     for (auto row : walking["rows"].array()) {
-        (void)row;
+        std::ignore = row;
         ++second_pass;
     }
     check_equal(second_pass, std::size_t { 4 }, "and the whole thing walks again afterwards");
@@ -131,17 +132,17 @@ int main() {
     std::size_t first_rows = 0, second_names = 0;
     auto outer = json::reader::over(text)["rows"].array().begin();
     for (auto name : second["name"].array()) {
-        (void)name;
+        std::ignore = name;
         ++second_names;
     }
     for (auto row : json::reader::over(text)["rows"].array()) {
-        (void)row;
+        std::ignore = row;
         ++first_rows;
     }
     check_equal(second_names, std::size_t { 2 }, "the other document walks");
     check_equal(first_rows, std::size_t { 4 }, "and the first is unaffected by its notes");
     check(second["rows"].is_string(), "a key that means something else in the other document");
-    (void)outer;
+    std::ignore = outer;
 
     return report("json_walking");
 }

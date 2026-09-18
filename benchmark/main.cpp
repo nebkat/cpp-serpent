@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <tuple>
 
 namespace json = serpent::json;
 namespace bjdata = serpent::bjdata;
@@ -384,7 +385,7 @@ static void check_results(const std::vector<reading> &values, const std::string 
 
     {
         std::string beve;
-        (void)glz::write_beve(values, beve);
+        std::ignore = glz::write_beve(values, beve);
         std::vector<reading> out;
         const bool read = !glz::read_beve(out, beve);
         agree("BEVE round-trips the same records", read && out.size() == values.size() ? out.at(777).station : "",
@@ -392,7 +393,7 @@ static void check_results(const std::vector<reading> &values, const std::string 
     }
     {
         std::string encoded;
-        (void)glz::write_cbor(values, encoded);
+        std::ignore = glz::write_cbor(values, encoded);
         std::vector<reading> out;
         const bool read = !glz::read_cbor(out, encoded);
         agree("glaze CBOR round-trips the same records", read && out.size() == values.size() ? out.at(777).station : "",
@@ -463,19 +464,19 @@ static void typed_workload(const std::string &workload, const std::vector<T> &va
     const auto fast = bjdata::encode<bjdata::prefer::speed>(values);
     const auto small = bjdata::encode<bjdata::prefer::size>(values);
     std::string beve, glaze_cbor;
-    (void)glz::write_beve(values, beve);
-    (void)glz::write_cbor(values, glaze_cbor);
+    std::ignore = glz::write_beve(values, beve);
+    std::ignore = glz::write_cbor(values, glaze_cbor);
     const auto cbor = other::to_cbor(other(values));
 
     bench::measure(workload, "JSON encode", "serpent", text.size(), [&] { return json::encode(values).size(); });
     bench::measure(workload, "JSON encode", "glaze", text.size(), [&] {
         std::string buffer;
-        (void)glz::write_json(values, buffer);
+        std::ignore = glz::write_json(values, buffer);
         return buffer.size();
     });
     bench::measure(workload, "JSON encode", "glaze (size build)", text.size(), [&] {
         std::string buffer;
-        (void)glz::write<glz::opts_size {}>(values, buffer);
+        std::ignore = glz::write<glz::opts_size {}>(values, buffer);
         return buffer.size();
     });
     bench::measure(workload, "JSON encode", "nlohmann", text.size(), [&] { return other(values).dump().size(); });
@@ -499,12 +500,12 @@ static void typed_workload(const std::string &workload, const std::vector<T> &va
             [&] { return bjdata::encode<bjdata::prefer::size>(values).size(); });
     bench::measure(workload, "binary encode", "glaze", beve.size(), [&] {
         std::string buffer;
-        (void)glz::write_beve(values, buffer);
+        std::ignore = glz::write_beve(values, buffer);
         return buffer.size();
     });
     bench::measure(workload, "binary encode", "glaze (CBOR)", glaze_cbor.size(), [&] {
         std::string buffer;
-        (void)glz::write_cbor(values, buffer);
+        std::ignore = glz::write_cbor(values, buffer);
         return buffer.size();
     });
     bench::measure(workload, "binary encode", "nlohmann", cbor.size(),

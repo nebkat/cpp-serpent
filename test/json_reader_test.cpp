@@ -9,6 +9,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <tuple>
 
 using namespace serpent;
 using namespace serpent::json;
@@ -185,19 +186,19 @@ void truncation() {
             const auto value = reader::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
-                (void)element.as_int<long long>();
+                std::ignore = element.as_int<long long>();
                 if (++seen > 64) break;
             }
             for (const auto entry : value.items()) {
-                (void)entry.key_is("a");
-                (void)entry.value.as_string();
+                std::ignore = entry.key_is("a");
+                std::ignore = entry.value.as_string();
                 if (++seen > 64) break;
             }
-            (void)value.size();
-            (void)value["a"];
-            (void)value[0];
-            (void)value.as_string();
-            (void)value.extent();
+            std::ignore = value.size();
+            std::ignore = value["a"];
+            std::ignore = value[0];
+            std::ignore = value.as_string();
+            std::ignore = value.extent();
         }
     }
 }

@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <tuple>
 
 using namespace serpent;
 using namespace serpent::bjdata;
@@ -154,10 +155,10 @@ void truncation() {
             if (const auto array = as_ndarray(value)) {
                 for (std::size_t row = 0; row < 4; ++row) {
                     for (std::size_t column = 0; column < 4; ++column) {
-                        (void)array->at(row).at(column).value().as_int<int>();
+                        std::ignore = array->at(row).at(column).value().as_int<int>();
                     }
                 }
-                (void)array->flat<std::uint8_t>();
+                std::ignore = array->flat<std::uint8_t>();
             }
         }
     }

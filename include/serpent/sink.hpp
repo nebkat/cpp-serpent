@@ -7,6 +7,7 @@
 #include <type_traits>
 
 #include <cstddef>
+#include <tuple>
 
 namespace serpent {
 
@@ -53,7 +54,7 @@ template<sink S>
         // bool, std::size_t (0 bytes written is a failure), std::expected, a pointer...
         return static_cast<bool>(out.write(bytes));
     } else {
-        (void)out.write(bytes);
+        std::ignore = out.write(bytes);
         return true;
     }
 }

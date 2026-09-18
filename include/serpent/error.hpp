@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <tuple>
 
 namespace serpent {
 
@@ -117,9 +118,9 @@ public:
 #if defined(__cpp_exceptions) && __cpp_exceptions
     throw error { code, offset, key };
 #else
-    (void)code;
-    (void)offset;
-    (void)key;
+    std::ignore = code;
+    std::ignore = offset;
+    std::ignore = key;
     std::abort();
 #endif
 }

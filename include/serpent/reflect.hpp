@@ -24,6 +24,7 @@
 // __cpp_lib_reflection when it is, which makes it the gate rather than __cpp_reflection.
 #if __has_include(<meta>) && defined(__cpp_expansion_statements)
 #include <meta>
+#include <tuple>
 #endif
 
 #if defined(__cpp_lib_reflection) && defined(__cpp_expansion_statements)
@@ -930,7 +931,7 @@ void table_members(Visitor &visitor, Object &value) {
         if constexpr (table_member_is_required<T, entry>()) {
             if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
         } else {
-            (void)visitor.template member_if_present<name>(field);
+            std::ignore = visitor.template member_if_present<name>(field);
         }
         }
     }
@@ -987,7 +988,7 @@ void reflect_members(Visitor &visitor, Object &value) {
                 if constexpr (detail::member_is_required<T, member>()) {
                     if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
                 } else {
-                    (void)visitor.template member_if_present<name>(field);
+                    std::ignore = visitor.template member_if_present<name>(field);
                 }
             }
         }

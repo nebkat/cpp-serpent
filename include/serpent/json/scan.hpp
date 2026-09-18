@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+#include <tuple>
 
 namespace serpent::json::scanner {
 
@@ -501,7 +502,7 @@ inline void skip_container(cursor &scan, bool object, int depth) noexcept {
     while (scan.ok()) {
         skip_whitespace(scan);
         if (object) {
-            (void)scan_string(scan);
+            std::ignore = scan_string(scan);
             if (!scan.ok()) return;
             skip_whitespace(scan);
             if (!scan.need(1)) return;
@@ -539,13 +540,13 @@ inline void skip_value(cursor &scan, int depth) noexcept {
     switch (scan.peek()) {
     case '{': skip_container(scan, true, depth); return;
     case '[': skip_container(scan, false, depth); return;
-    case '"': (void)scan_string(scan); return;
+    case '"': std::ignore = scan_string(scan); return;
     case 't': scan_literal(scan, "true"); return;
     case 'f': scan_literal(scan, "false"); return;
     case 'n': scan_literal(scan, "null"); return;
     default:
         if (scan.peek() == '-' || is_digit(scan.peek())) {
-            (void)scan_number(scan);
+            std::ignore = scan_number(scan);
             return;
         }
         scan.fail(errc::unexpected_character);

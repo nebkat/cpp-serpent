@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <tuple>
 
 #ifndef SERPENT_FIXTURE_DIR
 #define SERPENT_FIXTURE_DIR "fixtures"
@@ -320,8 +321,8 @@ int main(int argc, char **argv) {
         for (std::size_t length = 0; length < bytes.size(); ++length) {
             const auto prefix = std::span { bytes }.first(length);
             check(!validate(prefix).has_value(), name + ": truncation is rejected");
-            (void)digest(view::over(prefix));
-            (void)block_notation(prefix);
+            std::ignore = digest(view::over(prefix));
+            std::ignore = block_notation(prefix);
         }
     }
 

@@ -30,6 +30,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <tuple>
 
 namespace serpent::json {
 
@@ -380,7 +381,7 @@ inline void close_containers(cursor &scan, int open) noexcept {
         const char here = scan.peek();
         if (here == '"') {
             // A bracket inside a string is not a bracket, so a string is consumed whole.
-            (void)scan_string(scan);
+            std::ignore = scan_string(scan);
             continue;
         }
         if (here == '[' || here == '{') {
@@ -508,7 +509,7 @@ private:
     /** Where this member's value begins, which is what the memo is kept about. */
     [[nodiscard]] const char *value_position() const noexcept {
         scanner::cursor scan { this->source, this->cursor };
-        (void)scanner::scan_string(scan);
+        std::ignore = scanner::scan_string(scan);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ':') return nullptr;
         scan.advance(1);
@@ -548,7 +549,7 @@ public:
         if (this->exhausted) return *this;
 
         scanner::cursor scan { this->source, this->cursor };
-        (void)scanner::scan_string(scan);
+        std::ignore = scanner::scan_string(scan);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ':') {
             this->exhausted = true;
