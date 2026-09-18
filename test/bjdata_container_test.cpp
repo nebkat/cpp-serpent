@@ -32,7 +32,7 @@ view parse(std::string_view hex) {
 std::vector<long long> integers(const view &value) {
     std::vector<long long> result;
     for (const auto element : value.array())
-        result.push_back(element.as_int<long long>().value_or(-999));
+        result.push_back(element.as<long long>().value_or(-999));
     return result;
 }
 
@@ -53,14 +53,14 @@ void arrays() {
     const auto mixed = parse("5b5a54465501535501615d");
     check_equal(mixed.size(), std::size_t { 5 }, "heterogeneous array size");
     check(mixed[0].is_null(), "element 0 null");
-    check_equal(mixed[1].as_bool().value_or(false), true, "element 1 true");
-    check_equal(mixed[2].as_bool().value_or(true), false, "element 2 false");
-    check_equal(mixed[3].as_int<int>().value_or(0), 1, "element 3 one");
-    check_equal(mixed[4].as_string().value_or("?"), "a", "element 4 string");
+    check_equal(mixed[1].as<bool>().value_or(false), true, "element 1 true");
+    check_equal(mixed[2].as<bool>().value_or(true), false, "element 2 false");
+    check_equal(mixed[3].as<int>().value_or(0), 1, "element 3 one");
+    check_equal(mixed[4].as<std::string_view>().value_or("?"), "a", "element 4 string");
     check(!mixed[5].is_valid(), "index past the end poisons");
 
     check(integers(parse("5b7b55016155017d5d")).size() == 1, "array of one object iterates");
-    check_equal(parse("5b7b55016155017d5d")[0]["a"].as_int<int>().value_or(0), 1, "nested object through an array");
+    check_equal(parse("5b7b55016155017d5d")[0]["a"].as<int>().value_or(0), 1, "nested object through an array");
 }
 
 void objects() {
@@ -69,16 +69,16 @@ void objects() {
 
     const auto object = parse("7b5501615501550162550255016355037d");
     check_equal(object.size(), std::size_t { 3 }, "{a,b,c} size");
-    check_equal(object["a"].as_int<int>().value_or(0), 1, "lookup a");
-    check_equal(object["b"].as_int<int>().value_or(0), 2, "lookup b");
-    check_equal(object["c"].as_int<int>().value_or(0), 3, "lookup c");
+    check_equal(object["a"].as<int>().value_or(0), 1, "lookup a");
+    check_equal(object["b"].as<int>().value_or(0), 2, "lookup b");
+    check_equal(object["c"].as<int>().value_or(0), 3, "lookup c");
     check(!object["d"].is_valid(), "missing key poisons");
 
     std::string keys;
     long long sum = 0;
     for (const auto [key, value] : object.items()) {
         keys += key;
-        sum += value.as_int<long long>().value_or(0);
+        sum += value.as<long long>().value_or(0);
     }
     check_equal(keys, std::string { "abc" }, "structured binding over items preserves order");
     check_equal(sum, 6ll, "structured binding values");
@@ -86,35 +86,35 @@ void objects() {
     // Objects skip noops whether or not they carry a strong type.
     const auto noisy = parse("7b2355034e55016155014e4e4e55016255024e5501635503");
     check_equal(noisy.size(), std::size_t { 3 }, "counted object with noops");
-    check_equal(noisy["b"].as_int<int>().value_or(0), 2, "counted object lookup through noops");
-    check_equal(noisy["c"].as_int<int>().value_or(0), 3, "counted object trailing member");
+    check_equal(noisy["b"].as<int>().value_or(0), 2, "counted object lookup through noops");
+    check_equal(noisy["c"].as<int>().value_or(0), 3, "counted object trailing member");
 
     // A typed object: keys stay variable width, values are raw.
     const auto typed = parse("7b2455235503550161015501620255016303");
     check_equal(typed.size(), std::size_t { 3 }, "{$U#U3 size");
-    check_equal(typed["a"].as_int<int>().value_or(0), 1, "{$U# lookup a");
-    check_equal(typed["c"].as_int<int>().value_or(0), 3, "{$U# lookup c");
+    check_equal(typed["a"].as<int>().value_or(0), 1, "{$U# lookup a");
+    check_equal(typed["c"].as<int>().value_or(0), 3, "{$U# lookup c");
 }
 
 void typed_arrays_and_spans() {
     const auto bytes = parse("5b2455235508ddccbbaa44332211");
     check_equal(bytes.size(), std::size_t { 8 }, "[$U#U8 size");
-    check_equal(bytes[0].as_int<int>().value_or(0), 0xdd, "[$U# index 0");
-    check_equal(bytes[7].as_int<int>().value_or(0), 0x11, "[$U# index 7");
+    check_equal(bytes[0].as<int>().value_or(0), 0xdd, "[$U# index 0");
+    check_equal(bytes[7].as<int>().value_or(0), 0x11, "[$U# index 7");
     check(!bytes[8].is_valid(), "[$U# index past the end");
 
-    const auto span = bytes.as_span<std::uint8_t>();
+    const auto span = bytes.as<nonstd::unaligned_little_span<const std::uint8_t>>();
     check(span.has_value(), "[$U# yields a uint8 span");
     check_equal(span->size(), std::size_t { 8 }, "span size");
     check_equal((*span)[0], std::uint8_t { 0xdd }, "span front");
     check_equal((*span)[7], std::uint8_t { 0x11 }, "span back");
-    check(!bytes.as_span<std::uint16_t>().has_value(), "span requires an exact marker match");
+    check(!bytes.as<nonstd::unaligned_little_span<const std::uint16_t>>().has_value(), "span requires an exact marker match");
     // The span points into the source buffer rather than copying it.
     check_equal(static_cast<const void *>(span->bytes().data()), static_cast<const void *>(storage.data() + 6),
             "span aliases the source buffer");
 
     const auto words = parse("5b2475235503010002000300");
-    const auto word_span = words.as_span<std::uint16_t>();
+    const auto word_span = words.as<nonstd::unaligned_little_span<const std::uint16_t>>();
     check(word_span.has_value(), "[$u# yields a uint16 span");
     check_equal(word_span->size(), std::size_t { 3 }, "uint16 span size");
     check(std::ranges::equal(*word_span, std::vector<std::uint16_t> { 1, 2, 3 }), "uint16 span values");
@@ -123,11 +123,11 @@ void typed_arrays_and_spans() {
 
     const auto binary = parse("5b2442235508ddccbbaa44332211");
     check(binary.is_binary(), "[$B# is binary");
-    check_equal(binary.as_binary()->size(), std::size_t { 8 }, "binary size");
-    check_equal(static_cast<int>(binary.as_binary()->front()), 0xdd, "binary front");
+    check_equal(binary.as<std::span<const std::byte>>()->size(), std::size_t { 8 }, "binary size");
+    check_equal(static_cast<int>(binary.as<std::span<const std::byte>>()->front()), 0xdd, "binary front");
     // The MAC-shaped payload every fleet definition carries.
     const auto mac = parse("5b24422355063ce90e123456");
-    check_equal(mac.as_binary()->size(), std::size_t { 6 }, "6 byte binary");
+    check_equal(mac.as<std::span<const std::byte>>()->size(), std::size_t { 6 }, "6 byte binary");
 }
 
 void strict_strong_types() {
@@ -200,12 +200,12 @@ void truncation() {
             const auto value = view::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
-                std::ignore = element.as_int<long long>();
+                std::ignore = element.as<long long>();
                 if (++seen > 64) break;
             }
             for (const auto [key, element] : value.items()) {
                 std::ignore = key;
-                std::ignore = element.as_int<long long>();
+                std::ignore = element.as<long long>();
                 if (++seen > 64) break;
             }
             std::ignore = value.size();
@@ -220,8 +220,8 @@ void checked_accessors() {
     const auto document = parse("7b55016153550568656c6c6f5501625b2455235503010203550163547d");
 
     // The happy paths agree with the total accessors.
-    check_equal(document.at("a").string(), "hello", "at().string()");
-    check_equal(document.at("b").span<std::uint8_t>().size(), std::size_t { 3 }, "at().span()");
+    check_equal(document.at("a").get<std::string_view>(), "hello", "at().get<std::string_view>()");
+    check_equal(document.at("b").get<nonstd::unaligned_little_span<const std::uint8_t>>().size(), std::size_t { 3 }, "at().span()");
     check_equal(document.at("b").at(2).get<int>(), 3, "at().at().get()");
     check_equal(document.at("c").get<bool>(), true, "get<bool>()");
     check_equal(document.at("a").get<std::string_view>(), "hello", "get<string_view>()");
@@ -245,9 +245,9 @@ void checked_accessors() {
         check_equal(failure.key(), std::string_view { "missing" }, "and the error names the key");
     }
     throws([&] { return document.at("b").at(9); }, errc::out_of_range, "at() past the end throws");
-    throws([&] { return document.at("b").string(); }, errc::type_mismatch, "string() on an array throws");
-    throws([&] { return document.at("a").span<std::uint8_t>(); }, errc::type_mismatch, "span() on a string throws");
-    throws([&] { return document.at("a").binary(); }, errc::type_mismatch, "binary() on a string throws");
+    throws([&] { return document.at("b").get<std::string_view>(); }, errc::type_mismatch, "get<std::string_view>() on an array throws");
+    throws([&] { return document.at("a").get<nonstd::unaligned_little_span<const std::uint8_t>>(); }, errc::type_mismatch, "span() on a string throws");
+    throws([&] { return document.at("a").get<std::span<const std::byte>>(); }, errc::type_mismatch, "binary() on a string throws");
     throws([&] { return document.at("a").get<int>(); }, errc::type_mismatch, "get<int>() on a string throws");
 
     // An error points at the offending byte.
@@ -257,15 +257,15 @@ void checked_accessors() {
         check(failure.offset() > 0 && failure.offset() < storage.size(), "the error offset is inside the document");
     }
 
-    // try_get never throws, whatever it is asked for.
-    check(!document["a"].try_get<int>().has_value(), "try_get<int>() on a string is empty");
-    check_equal(document["a"].try_get<std::string_view>().value_or("?"), "hello", "try_get<string_view>()");
-    check(!document["missing"].try_get<bool>().has_value(), "try_get on a poisoned view is empty");
+    // as<T>() never throws, whatever it is asked for.
+    check(!document["a"].as<int>().has_value(), "as<int>() on a string is empty");
+    check_equal(document["a"].as<std::string_view>().value_or("?"), "hello", "as<string_view>()");
+    check(!document["missing"].as<bool>().has_value(), "as<T>() on a poisoned view is empty");
 
     // A value that will not fit the requested type is refused rather than truncated.
     const auto wide = parse("750001");
     check_equal(wide.get<int>(), 256, "get<int>() of u 256");
-    check(!wide.try_get<std::uint8_t>().has_value(), "try_get<uint8_t>() of u 256 is empty");
+    check(!wide.as<std::uint8_t>().has_value(), "as<uint8_t>() of u 256 is empty");
     throws([&] { return wide.get<std::uint8_t>(); }, errc::type_mismatch, "a value that does not fit throws");
 }
 

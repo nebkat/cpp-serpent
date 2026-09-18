@@ -36,8 +36,8 @@ void built_a_piece_at_a_time() {
     info["source"] = "index";
     check(info.is_object(), "naming a member makes it an object");
     check_equal(info.size(), std::size_t { 2 }, "two members");
-    check_equal(*info["records"].as_int<int>(), 3, "the value is there");
-    check_equal(*info["source"].as_string(), std::string_view { "index" }, "and so is the string");
+    check_equal(*info["records"].as<int>(), 3, "the value is there");
+    check_equal(*info["source"].as<std::string_view>(), std::string_view { "index" }, "and so is the string");
 
     // The case the tree exists for: a branch decides whether a field is there at all.
     const bool checked = false;
@@ -47,7 +47,7 @@ void built_a_piece_at_a_time() {
     info["window"]["first"] = 10;
     info["window"]["last"] = 20;
     check(info["window"].is_object(), "a nested member is made on the way");
-    check_equal(*info["window"]["last"].as_int<int>(), 20, "and reads back");
+    check_equal(*info["window"]["last"].as<int>(), 20, "and reads back");
 
     info["ids"].push_back(1);
     info["ids"].push_back(2);
@@ -71,10 +71,10 @@ void what_it_holds() {
 
     // Widths are not kept: the writer narrows every integer to the marker that holds it, so
     // there is nothing for the tree to remember.
-    check_equal(*value { std::uint8_t { 200 } }.as_int<int>(), 200, "a narrow integer reads back");
-    check(!value { -1 }.as_int<unsigned>().has_value(), "and a value that does not fit is nothing");
-    check_equal(*value { 3 }.as_float<double>(), 3.0, "an integer reads as a real");
-    check(!value { 1.5 }.as_int<int>().has_value(), "but a real does not read as an integer");
+    check_equal(*value { std::uint8_t { 200 } }.as<int>(), 200, "a narrow integer reads back");
+    check(!value { -1 }.as<unsigned>().has_value(), "and a value that does not fit is nothing");
+    check_equal(*value { 3 }.as<double>(), 3.0, "an integer reads as a real");
+    check(!value { 1.5 }.as<int>().has_value(), "but a real does not read as an integer");
 
     const auto missing = value::of({ { "a", 1 } })["b"];
     check(missing.is_null(), "an absent member reads as null");
@@ -121,12 +121,12 @@ void a_member_of_another_type() {
     const auto back = bjdata::decode<failure_report>(bytes);
     check(back.has_value(), "a struct with a tree in it round-trips");
     check_equal(back->reason, std::string { "out_of_range" }, "the named member");
-    check_equal(*back->detail["asked"].as_int<int>(), 30, "and the one whose shape it did not know");
+    check_equal(*back->detail["asked"].as<int>(), 30, "and the one whose shape it did not know");
 
     // The tree is read through the same document as everything else, so a reader that wants
     // only part of it does not build the rest.
     const auto view = bjdata::view::over(bytes);
-    check_equal(*view["detail"]["records"].as_int<int>(), 12, "read in place without a tree at all");
+    check_equal(*view["detail"]["records"].as<int>(), 12, "read in place without a tree at all");
 }
 
 #if SERPENT_HAS_REFLECTION
@@ -161,8 +161,8 @@ void any_type_as_a_tree() {
     // A type with a hand-written json_convert, which knows nothing about trees.
     const auto tree = serpent::to_value(original);
     check(tree.is_object() && tree.size() == 2, "a hand-written conversion reaches the tree");
-    check_equal(*tree["reason"].as_string(), std::string_view { "out_of_range" }, "its members are there");
-    check_equal(*tree["detail"]["records"].as_int<int>(), 12, "nested, including a tree inside a tree");
+    check_equal(*tree["reason"].as<std::string_view>(), std::string_view { "out_of_range" }, "its members are there");
+    check_equal(*tree["detail"]["records"].as<int>(), 12, "nested, including a tree inside a tree");
 
     // Writing the tree must be the same document as writing the value.
     check(bjdata::encode(tree) == bjdata::encode(original), "the tree encodes as the value did");
@@ -173,7 +173,7 @@ void any_type_as_a_tree() {
     check(shaped.size() == 3 && shaped["at"].is_integer(), "and then it can be added to");
 
     // Scalars and containers are trees too, not only objects.
-    check(serpent::to_value(42).as_int<int>() == 42, "a scalar");
+    check(serpent::to_value(42).as<int>() == 42, "a scalar");
     check(serpent::to_value(std::vector<int> { 1, 2, 3 }).size() == 3, "a container");
     check(serpent::to_value(std::vector<std::byte> { std::byte { 9 } }).is_binary(), "and a byte range stays binary");
 }
@@ -190,12 +190,12 @@ void a_tree_is_a_source() {
     const auto recovered = serpent::from_value<failure_report>(tree);
     check(recovered.has_value(), "a type reads straight out of a tree");
     check(recovered && recovered->reason == "out_of_range", "its members are there");
-    check(recovered && *recovered->detail["records"].as_int<int>() == 12, "nested, including a tree inside it");
+    check(recovered && *recovered->detail["records"].as<int>() == 12, "nested, including a tree inside it");
 
     // The same answers a view gives, from the same document held the other way.
     const serpent::value_reader handle { tree };
     check(handle.is_object() && handle.size() == 2, "shape");
-    check_equal(*handle["reason"].as_string(), std::string_view { "out_of_range" }, "a member by key");
+    check_equal(*handle["reason"].as<std::string_view>(), std::string_view { "out_of_range" }, "a member by key");
     check(!handle["nope"].is_valid(), "and an absent member is invalid, not null");
 
     std::size_t walked = 0;
@@ -203,7 +203,7 @@ void a_tree_is_a_source() {
     check_equal(walked, std::size_t { 1 }, "items() walks it the way every reader's does");
 
     const auto numbers = serpent::to_value(std::vector<int> { 4, 5, 6 });
-    check_equal(serpent::value_reader { numbers }[1].as_int<int>().value_or(0), 5, "and an array indexes");
+    check_equal(serpent::value_reader { numbers }[1].as<int>().value_or(0), 5, "and an array indexes");
     check(serpent::from_value<std::vector<int>>(numbers) == std::vector<int> { 4, 5, 6 }, "and reads back whole");
 }
 

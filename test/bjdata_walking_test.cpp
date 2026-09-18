@@ -67,7 +67,7 @@ int main() {
     std::size_t counted = 0;
     int last_id = 0;
     for (const auto element : bjdata::view::over(bytes).array()) {
-        last_id = element["id"].as_int<int>().value_or(-1);
+        last_id = element["id"].as<int>().value_or(-1);
         ++counted;
     }
     check_equal(counted, values.size(), "a partial read of each element still reaches them all");
@@ -75,9 +75,9 @@ int main() {
 
     // Elements read out of order: the note is about one value and must not be taken for another.
     const auto document = bjdata::view::over(bytes);
-    check_equal(document[7]["name"].as_string().value_or(""), values[7].name, "an element by index");
-    check_equal(document[3]["name"].as_string().value_or(""), values[3].name, "an earlier one after it");
-    check_equal(document[39]["name"].as_string().value_or(""), values[39].name, "and the last");
+    check_equal(document[7]["name"].as<std::string_view>().value_or(""), values[7].name, "an element by index");
+    check_equal(document[3]["name"].as<std::string_view>().value_or(""), values[3].name, "an earlier one after it");
+    check_equal(document[39]["name"].as<std::string_view>().value_or(""), values[39].name, "and the last");
 
     // Two documents walked in turn through the one ambient memo must not take each other's
     // notes. Same shape, same lengths, different contents - so a note taken for one would land
@@ -103,8 +103,8 @@ int main() {
     const auto one_bytes = bjdata::encode(values.at(2));
     const auto one = bjdata::view::over(one_bytes);
     check_equal(one["tags"].array().begin() == one["tags"].array().end() ? 0 : 3, 3, "a member out of order");
-    check_equal(one["id"].as_int<int>().value_or(-1), values.at(2).id, "an earlier member after it");
-    check_equal(one["name"].as_string().value_or(""), values.at(2).name, "and the one between them");
+    check_equal(one["id"].as<int>().value_or(-1), values.at(2).id, "an earlier member after it");
+    check_equal(one["name"].as<std::string_view>().value_or(""), values.at(2).name, "and the one between them");
 
     return report("bjdata_walking");
 }

@@ -22,7 +22,7 @@ view parse(std::string_view hex) {
 }
 
 int element_at(const ndarray_view &array, std::size_t row, std::size_t column) {
-    return array.at(row).at(column).value().as_int<int>().value_or(-1);
+    return array.at(row).at(column).value().as<int>().value_or(-1);
 }
 
 void row_major() {
@@ -32,7 +32,7 @@ void row_major() {
 
     // The flat interface still sees the payload as it is written.
     check_equal(value.size(), std::size_t { 6 }, "flat size is the element product");
-    check_equal(value[4].as_int<int>().value_or(0), 5, "flat indexing");
+    check_equal(value[4].as<int>().value_or(0), 5, "flat indexing");
 
     const auto array = as_ndarray(value);
     check(array.has_value(), "typed dimension count yields an ndarray");
@@ -105,12 +105,12 @@ void dimension_forms() {
     const auto cube = parse("5b2455235b5502550255025d0102030405060708");
     const auto third = as_ndarray(cube);
     check(third.has_value() && third->rank() == 3, "rank 3");
-    check_equal(third->at(1).at(0).at(1).value().as_int<int>().value_or(0), 6, "(1,0,1)");
+    check_equal(third->at(1).at(0).at(1).value().as<int>().value_or(0), 6, "(1,0,1)");
 
     // A plain integer count is rank 1.
     const auto flat = as_ndarray(parse("5b2455235503010203"));
     check(flat.has_value() && flat->rank() == 1, "plain count is rank 1");
-    check_equal(flat->at(2).value().as_int<int>().value_or(0), 3, "rank 1 element");
+    check_equal(flat->at(2).value().as<int>().value_or(0), 3, "rank 1 element");
 }
 
 void malformed() {
@@ -139,7 +139,7 @@ void malformed() {
     // A dimension product that overruns the buffer must not produce a span over it.
     const auto lying = parse("5b2455235b55ff55ff5d0102030405");
     check(!as_ndarray(lying).has_value(), "dimensions larger than the payload are refused");
-    check(!lying.as_span<std::uint8_t>().has_value(), "oversized count yields no span");
+    check(!lying.as<nonstd::unaligned_little_span<const std::uint8_t>>().has_value(), "oversized count yields no span");
     check(!validate(storage).has_value(), "oversized count fails validation");
 }
 
@@ -155,7 +155,7 @@ void truncation() {
             if (const auto array = as_ndarray(value)) {
                 for (std::size_t row = 0; row < 4; ++row) {
                     for (std::size_t column = 0; column < 4; ++column) {
-                        std::ignore = array->at(row).at(column).value().as_int<int>();
+                        std::ignore = array->at(row).at(column).value().as<int>();
                     }
                 }
                 std::ignore = array->flat<std::uint8_t>();

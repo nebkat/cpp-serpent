@@ -50,10 +50,10 @@ struct legacy {
 
     friend bool from_json(auto source, legacy &value) {
         if (!source.is_object()) return false;
-        value.code = source["code"].template as_int<int>().value_or(0);
+        value.code = source["code"].template as<int>().value_or(0);
         value.readings.clear();
         for (const auto element : source["readings"].array()) {
-            value.readings.push_back(element.template as_int<std::uint16_t>().value_or(0));
+            value.readings.push_back(element.template as<std::uint16_t>().value_or(0));
         }
         return true;
     }

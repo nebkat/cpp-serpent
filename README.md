@@ -50,11 +50,11 @@ role.
 
 ```cpp
 auto document = json::reader::over(text);
-document["port"].as_int<int>();                // parsed on demand, nothing built
+document["port"].as<int>();                // parsed on demand, nothing built
 
 auto stored = bjdata::view::over(bytes);
-stored["name"].as_string();                    // string_view INTO bytes
-stored["samples"].as_span<std::uint16_t>();    // span INTO bytes
+stored["name"].as<std::string_view>();                    // string_view INTO bytes
+stored["samples"].as<nonstd::unaligned_little_span<const std::uint16_t>>();    // span INTO bytes
 ```
 
 BJData borrows strings outright, because the value *is* the bytes. JSON decodes them, because

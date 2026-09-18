@@ -61,9 +61,9 @@ int main() {
     // And it is a real part of the document, not an opaque blob: it reads back through the
     // envelope like anything else.
     const auto nested = bjdata::view::over(binary)["info"];
-    const auto message = nested["message"].as_string().value_or("");
+    const auto message = nested["message"].as<std::string_view>().value_or("");
     if (message != "bad argument") return 1;
-    if (nested["offending"][1].as_int<int>().value_or(0) != 7) return 1;
+    if (nested["offending"][1].as<int>().value_or(0) != 7) return 1;
 
     std::printf("\nthe payload was spliced into %zu bytes of BJData and transcribed into JSON,\n"
                 "and never became an object graph in either direction\n",

@@ -46,7 +46,7 @@ See [Annotations](reflection.md).
 ```cpp
 auto document = json::reader::over(text);
 
-document["port"].as_int<int>();                   // parsed on demand
+document["port"].as<int>();                   // parsed on demand
 for (auto host : document["hosts"].array()) { }   // walked in place
 ```
 

@@ -3,6 +3,7 @@
 #include <concepts>
 #include <variant>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -139,5 +140,17 @@ using range_element_t = std::conditional_t<std::is_reference_v<std::ranges::rang
 template<typename T>
 concept structurally_readable = optional_like<T> || variant_like<T> || byte_range<T> || back_insertable<T>
         || keyed_insertable<T> || pair_like<T> || fixed_sequence<T> || insertable<T> || std::is_enum_v<T>;
+
+/**
+ * A handle's text, borrowed where the handle can lend it and copied where it cannot: a binary
+ * view lends, a JSON reader has to decode. For code that reads a string from either kind.
+ */
+template<typename Source>
+[[nodiscard]] auto text_of(const Source &source) {
+    if constexpr (requires { source.template as<std::string_view>(); })
+        return source.template as<std::string_view>();
+    else
+        return source.template as<std::string>();
+}
 
 } // namespace serpent::detail

@@ -168,36 +168,27 @@ public:
 
     // ---------------- reading it back ----------------
 
-    [[nodiscard]] std::optional<bool> as_bool() const noexcept {
-        if (const auto *truth = std::get_if<bool>(&this->held)) return *truth;
-        return std::nullopt;
-    }
-
-    template<std::integral T>
-    [[nodiscard]] std::optional<T> as_int() const noexcept {
-        if (const auto *whole = std::get_if<std::int64_t>(&this->held))
-            return std::in_range<T>(*whole) ? std::optional<T> { static_cast<T>(*whole) } : std::nullopt;
-        if (const auto *whole = std::get_if<std::uint64_t>(&this->held))
-            return std::in_range<T>(*whole) ? std::optional<T> { static_cast<T>(*whole) } : std::nullopt;
-        return std::nullopt;
-    }
-
-    template<std::floating_point T>
-    [[nodiscard]] std::optional<T> as_float() const noexcept {
-        if (const auto *number = std::get_if<double>(&this->held)) return static_cast<T>(*number);
-        if (const auto whole = this->as_int<std::int64_t>()) return static_cast<T>(*whole);
-        if (const auto whole = this->as_int<std::uint64_t>()) return static_cast<T>(*whole);
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<std::string_view> as_string() const noexcept {
-        if (const auto *text = std::get_if<std::string>(&this->held)) return std::string_view { *text };
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<std::span<const std::byte>> as_binary() const noexcept {
-        if (const auto *bytes = std::get_if<binary>(&this->held)) return std::span<const std::byte> { *bytes };
-        return std::nullopt;
+    /**
+     * What this holds as a T, or nothing if it is not one: a boolean, an integer that fits, a
+     * real (from a real or an integer), text as std::string_view or anything made from one, or
+     * binary as std::span<const std::byte>.
+     */
+    template<typename T>
+    [[nodiscard]] std::optional<T> as() const noexcept {
+        if constexpr (std::same_as<T, bool>)
+            return this->read_bool();
+        else if constexpr (std::same_as<T, std::string_view>)
+            return this->read_text();
+        else if constexpr (std::same_as<T, std::span<const std::byte>>)
+            return this->read_binary();
+        else if constexpr (detail::string_like<T> && std::constructible_from<T, std::string_view>) {
+            const auto text = this->read_text();
+            if (!text) return std::nullopt;
+            return T { *text };
+        } else if constexpr (std::floating_point<T>)
+            return this->read_real<T>();
+        else
+            return this->read_integer<T>();
     }
 
     /** The array or object contents, or nullptr when it is neither. */
@@ -266,6 +257,39 @@ public:
     }
 
     friend bool operator==(const value &left, const value &right) = default;
+
+private:
+    [[nodiscard]] std::optional<bool> read_bool() const noexcept {
+        if (const auto *truth = std::get_if<bool>(&this->held)) return *truth;
+        return std::nullopt;
+    }
+
+    template<std::integral T>
+    [[nodiscard]] std::optional<T> read_integer() const noexcept {
+        if (const auto *whole = std::get_if<std::int64_t>(&this->held))
+            return std::in_range<T>(*whole) ? std::optional<T> { static_cast<T>(*whole) } : std::nullopt;
+        if (const auto *whole = std::get_if<std::uint64_t>(&this->held))
+            return std::in_range<T>(*whole) ? std::optional<T> { static_cast<T>(*whole) } : std::nullopt;
+        return std::nullopt;
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] std::optional<T> read_real() const noexcept {
+        if (const auto *number = std::get_if<double>(&this->held)) return static_cast<T>(*number);
+        if (const auto whole = this->read_integer<std::int64_t>()) return static_cast<T>(*whole);
+        if (const auto whole = this->read_integer<std::uint64_t>()) return static_cast<T>(*whole);
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::string_view> read_text() const noexcept {
+        if (const auto *text = std::get_if<std::string>(&this->held)) return std::string_view { *text };
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::span<const std::byte>> read_binary() const noexcept {
+        if (const auto *bytes = std::get_if<binary>(&this->held)) return std::span<const std::byte> { *bytes };
+        return std::nullopt;
+    }
 };
 
 inline const value *value::object::find(std::string_view name) const noexcept {
@@ -512,28 +536,6 @@ public:
     [[nodiscard]] bool is_object() const noexcept { return this->target != nullptr && this->target->is_object(); }
     [[nodiscard]] bool is_binary() const noexcept { return this->target != nullptr && this->target->is_binary(); }
 
-    [[nodiscard]] std::optional<bool> as_bool() const noexcept {
-        return this->target == nullptr ? std::nullopt : this->target->as_bool();
-    }
-
-    template<std::integral T>
-    [[nodiscard]] std::optional<T> as_int() const noexcept {
-        return this->target == nullptr ? std::nullopt : this->target->template as_int<T>();
-    }
-
-    template<std::floating_point T>
-    [[nodiscard]] std::optional<T> as_float() const noexcept {
-        return this->target == nullptr ? std::nullopt : this->target->template as_float<T>();
-    }
-
-    [[nodiscard]] std::optional<std::string_view> as_string() const noexcept {
-        return this->target == nullptr ? std::nullopt : this->target->as_string();
-    }
-
-    [[nodiscard]] std::optional<std::span<const std::byte>> as_binary() const noexcept {
-        return this->target == nullptr ? std::nullopt : this->target->as_binary();
-    }
-
     [[nodiscard]] std::size_t size() const noexcept { return this->target == nullptr ? 0 : this->target->size(); }
 
     /** Already known, where a scanning reader would have to count. */
@@ -655,19 +657,11 @@ public:
      * looking for a customization, and everything else is the user's own conversion.
      */
     template<typename T>
-    [[nodiscard]] std::optional<T> try_get() const {
-        if constexpr (std::same_as<T, bool>) {
-            return this->as_bool();
-        } else if constexpr (std::same_as<T, std::string_view>) {
-            return this->as_string();
-        } else if constexpr (detail::string_like<T> && std::constructible_from<T, std::string_view>) {
-            const auto text = this->as_string();
-            if (!text) return std::nullopt;
-            return T { *text };
-        } else if constexpr (std::floating_point<T>) {
-            return this->as_float<T>();
-        } else if constexpr (std::integral<T>) {
-            return this->as_int<T>();
+    [[nodiscard]] std::optional<T> as() const {
+        if constexpr (std::same_as<T, bool> || std::same_as<T, std::string_view>
+                || std::same_as<T, std::span<const std::byte>> || std::floating_point<T> || std::integral<T>
+                || (detail::string_like<T> && std::constructible_from<T, std::string_view>)) {
+            return this->target == nullptr ? std::nullopt : this->target->template as<T>();
         } else if constexpr (detail::structurally_readable<T>) {
             T item {};
             if (!read_into(*this, item)) return std::nullopt;
@@ -696,7 +690,7 @@ inline value_reader::key_value value_reader::member_iterator::operator*() const 
 /** Reads a typed value straight out of a tree, as decode() does out of bytes. */
 template<typename T>
 [[nodiscard]] std::optional<T> from_value(const value &tree) {
-    return value_reader { tree }.template try_get<T>();
+    return value_reader { tree }.template as<T>();
 }
 
 /**
@@ -733,29 +727,29 @@ struct serializer<value, void> {
         switch (source.type()) {
         case kind::invalid: return false;
         case kind::null: item = value {}; return true;
-        case kind::boolean: item = value { *source.as_bool() }; return true;
+        case kind::boolean: item = value { *source.template as<bool>() }; return true;
         case kind::integer:
-            if (const auto whole = source.template as_int<std::int64_t>()) item = value { *whole };
-            else if (const auto unsigned_whole = source.template as_int<std::uint64_t>()) item = value { *unsigned_whole };
+            if (const auto whole = source.template as<std::int64_t>()) item = value { *whole };
+            else if (const auto unsigned_whole = source.template as<std::uint64_t>()) item = value { *unsigned_whole };
             else return false;
             return true;
         case kind::real: {
-            const auto number = source.template as_float<double>();
+            const auto number = source.template as<double>();
             if (!number) return false;
             item = value { *number };
             return true;
         }
         case kind::string: {
-            const auto text = source.as_string();
+            const auto text = detail::text_of(source);
             if (!text) return false;
-            item = value { *text };
+            item = value { std::string { *text } };
             return true;
         }
         case kind::array: {
             // A format with a binary type of its own keeps it binary; one without carries it as
             // an array of numbers and reads back as exactly that, which is all it ever was.
-            if constexpr (requires { source.as_binary(); }) {
-                if (const auto bytes = source.as_binary()) {
+            if constexpr (requires { source.template as<std::span<const std::byte>>(); }) {
+                if (const auto bytes = source.template as<std::span<const std::byte>>()) {
                     item = value { *bytes };
                     return true;
                 }

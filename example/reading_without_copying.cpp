@@ -28,7 +28,7 @@ int main() {
     // Read it back. The document is never inflated into an intermediate representation.
     const auto document = bjdata::view::over(out.written());
 
-    const auto id = document["id"].as_string();
+    const auto id = document["id"].as<std::string_view>();
     if (!id) return 1;
     std::printf("id = %.*s\n", static_cast<int>(id->size()), id->data());
 
@@ -38,7 +38,7 @@ int main() {
     std::printf("that string points into the buffer: %s\n", borrowed ? "yes" : "no");
 
     // A typed array comes back as a span over those same bytes, indexable in place.
-    const auto samples = document["samples"].as_span<std::uint16_t>();
+    const auto samples = document["samples"].as<nonstd::unaligned_little_span<const std::uint16_t>>();
     if (!samples) return 1;
     std::printf("%zu samples, first %u last %u\n", samples->size(), unsigned { samples->front() },
             unsigned { samples->back() });

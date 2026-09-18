@@ -32,13 +32,13 @@ argument, so a build carries the code of the one it uses.
 
 ```cpp
 // [$u#U3 - three little-endian uint16s
-if (auto samples = document["adc"].as_span<std::uint16_t>()) {
+if (auto samples = document["adc"].as<nonstd::unaligned_little_span<const std::uint16_t>>()) {
     auto peak = std::ranges::max(*samples);                              // no copy
     auto owned = std::ranges::to<std::vector<std::uint16_t>>(*samples);  // opt in to one
 }
 ```
 
-`as_span<T>()` requires the element marker to be exactly what `T` packs as, because zero copy
+`as<nonstd::unaligned_little_span<const T>>()` requires the element marker to be exactly what `T` packs as, because zero copy
 demands an exact layout match. Decoding into a `std::vector<T>` of that type is one copy.
 
 ## N-dimensional arrays
@@ -51,7 +51,7 @@ column-major form is a different set of strides over the same bytes.
 
 if (auto grid = bjdata::as_ndarray(document["image"])) {
     grid->shape();                              // {480, 640}
-    grid->at(12).at(34).value().as_int<int>();
+    grid->at(12).at(34).value().as<int>();
     grid->at(12).flat<std::uint8_t>();          // a whole row, when contiguous
 }
 ```

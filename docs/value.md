@@ -101,8 +101,8 @@ is for when what you have is a tree.
 
 ## Reading it back
 
-The same accessors the readers have, in the same shapes: `as_bool()`, `as_int<T>()`,
-`as_float<T>()`, `as_string()`, `as_binary()`, each returning `std::optional`. `at(key)` and
+The same accessor the readers have: `as<T>()` for a boolean, an integer, a real, a
+`std::string_view` or a `std::span<const std::byte>`, returning `std::optional`. `at(key)` and
 `at(index)` throw, naming the key; `operator[]` on a missing member gives null.
 
 Integer width is not kept. A value holds `std::int64_t`, `std::uint64_t` or `double`, and the

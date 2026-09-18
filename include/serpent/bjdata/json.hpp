@@ -41,16 +41,16 @@ inline void write_ndarray(writer &out, const ndarray_view &source) {
 inline void write_value(writer &out, view source) {
     switch (source.type()) {
     case kind::null: out.null(); return;
-    case kind::boolean: out.boolean(source.as_bool() == true); return;
+    case kind::boolean: out.boolean(source.as<bool>() == true); return;
     case kind::integer:
         if (source.type_marker() == bjdata::marker::uint64)
-            out.integer(source.as_int<std::uint64_t>().value_or(0));
+            out.integer(source.as<std::uint64_t>().value_or(0));
         else
-            out.integer(source.as_int<std::int64_t>().value_or(0));
+            out.integer(source.as<std::int64_t>().value_or(0));
         return;
-    case kind::real: out.real(source.as_float<double>().value_or(0.0)); return;
+    case kind::real: out.real(source.as<double>().value_or(0.0)); return;
     case kind::string: {
-        const auto text = source.as_string().value_or("");
+        const auto text = source.as<std::string_view>().value_or("");
         if (source.type_marker() == bjdata::marker::high_precision)
             out.high_precision(text);
         else

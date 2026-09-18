@@ -71,8 +71,8 @@ struct connection {
     friend bool from_json(auto source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
-        value.host = source["host"].as_string().value_or(defaults.host);
-        value.port = source["port"].template as_int<int>();
+        value.host = source["host"].template as<std::string>().value_or(defaults.host);
+        value.port = source["port"].template as<int>();
         return true;
     }
 };
@@ -107,7 +107,7 @@ struct serpent::serializer<timestamp, void> {
 
     template<typename Source>
     static bool read(Source source, timestamp &value) {
-        const auto seconds = source.template try_get<std::int64_t>();
+        const auto seconds = source.template as<std::int64_t>();
         if (!seconds) return false;
         value = timestamp::from_unix(*seconds);
         return true;

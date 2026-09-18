@@ -56,7 +56,7 @@ template<prefer Preference = prefer::size, typename T>
 /** Decodes a value from a buffer, or nullopt when it does not parse. */
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
-    return view::over(buffer).try_get<T>();
+    return view::over(buffer).as<T>();
 }
 
 /**
@@ -72,7 +72,7 @@ template<typename T>
 template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
-    auto value = view::over(buffer).try_get<T>();
+    auto value = view::over(buffer).as<T>();
     if (!value) {
         // A member the type needed and the document left out is the one mismatch that can say
         // something specific, so it is worth the walk back over the document to name it.

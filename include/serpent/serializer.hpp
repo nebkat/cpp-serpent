@@ -281,7 +281,7 @@ bool read_named_alternative(Source source, Variant &value, std::index_sequence<I
 
     if (source.is_object()) {
         constexpr std::string_view key = detail::first_discriminant_key<Variant>();
-        if (const auto named = source[key].as_string()) {
+        if (const auto named = detail::text_of(source[key])) {
             const auto take = [&]<std::size_t Which>() {
                 using alternative = std::variant_alternative_t<Which, Variant>;
                 if constexpr (!discriminated_type<alternative>) {
@@ -323,7 +323,7 @@ bool read_tagged(Source source, Variant &value, std::index_sequence<Index...>) {
     if (!source.is_valid()) return false;
 
     if (source.is_object()) {
-        if (const auto named = source[Tag.key()].as_string()) {
+        if (const auto named = detail::text_of(source[Tag.key()])) {
             const auto take = [&]<std::size_t Which>() {
                 using alternative = std::variant_alternative_t<Which, Variant>;
                 if constexpr (!detail::object_like<alternative>) {
@@ -405,8 +405,8 @@ bool read_into(Source source, T &value) {
         return read_alternative(source, value, std::make_index_sequence<std::variant_size_v<T>> {});
     } else if constexpr (detail::byte_range<T>) {
         if constexpr (requires(T &target) { target.clear(); }) value.clear();
-        if constexpr (requires { source.as_binary(); }) {
-            const auto bytes = source.as_binary();
+        if constexpr (requires { source.template as<std::span<const std::byte>>(); }) {
+            const auto bytes = source.template as<std::span<const std::byte>>();
             if (!bytes) return false;
             if constexpr (requires(T &target) { target.assign(bytes->begin(), bytes->end()); }) {
                 value.assign(bytes->begin(), bytes->end());
@@ -420,7 +420,7 @@ bool read_into(Source source, T &value) {
             if (!source.is_array()) return false;
             std::size_t index = 0;
             for (const auto element : source.array()) {
-                const auto octet = element.template as_int<std::uint8_t>();
+                const auto octet = element.template as<std::uint8_t>();
                 if (!octet) return false;
                 if constexpr (requires(T &target) { target.push_back(std::byte {}); }) {
                     value.push_back(static_cast<std::byte>(*octet));
@@ -528,7 +528,7 @@ bool read_into(Source source, T &value) {
         }
         return true;
     } else {
-        auto found = source.template try_get<T>();
+        auto found = source.template as<T>();
         if (!found) return false;
         value = std::move(*found);
         return true;

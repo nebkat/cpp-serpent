@@ -21,11 +21,11 @@ int main() {
     check(validate(bytes).has_value(), "validates without exceptions");
 
     const auto document = view::over(bytes);
-    check_equal(document["a"].as_string().value_or("?"), "hello", "string accessor");
-    check_equal(document["b"].as_span<std::uint8_t>()->size(), std::size_t { 3 }, "span accessor");
-    check_equal(document["c"].as_bool().value_or(false), true, "bool accessor");
+    check_equal(document["a"].as<std::string_view>().value_or("?"), "hello", "string accessor");
+    check_equal(document["b"].as<nonstd::unaligned_little_span<const std::uint8_t>>()->size(), std::size_t { 3 }, "span accessor");
+    check_equal(document["c"].as<bool>().value_or(false), true, "bool accessor");
     check(!document["missing"].is_valid(), "missing key poisons rather than throwing");
-    check(!document["a"].as_int<int>().has_value(), "type mismatch yields nullopt");
+    check(!document["a"].as<int>().has_value(), "type mismatch yields nullopt");
     check_equal(as_ndarray(document["b"])->rank(), std::size_t { 1 }, "ndarray without exceptions");
     check(!block_notation(bytes).empty(), "block notation without exceptions");
 
@@ -47,9 +47,9 @@ int main() {
     // a typed [$U#U3 array, while the writer measures three small ints and correctly finds the
     // generic form one byte smaller.
     const auto reread = view::over(produced);
-    check_equal(reread["a"].as_string().value_or("?"), "hello", "round-trips the string");
+    check_equal(reread["a"].as<std::string_view>().value_or("?"), "hello", "round-trips the string");
     check_equal(reread["b"].size(), std::size_t { 3 }, "round-trips the array");
-    check_equal(reread["c"].as_bool().value_or(false), true, "round-trips the boolean");
+    check_equal(reread["c"].as<bool>().value_or(false), true, "round-trips the boolean");
 
     check_equal(measure(std::vector<int> { 1, 2, 3 }), encode(std::vector<int> { 1, 2, 3 }).size(),
             "measure without exceptions");

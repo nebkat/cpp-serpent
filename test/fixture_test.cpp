@@ -65,21 +65,21 @@ std::string repr_real(double value) {
 std::string digest(const view &value) {
     switch (value.type()) {
     case kind::null: return "Z";
-    case kind::boolean: return value.as_bool() == true ? "T" : "F";
+    case kind::boolean: return value.as<bool>() == true ? "T" : "F";
     case kind::integer: {
         if (value.type_marker() == marker::uint64) {
-            const auto unsigned_value = value.as_int<unsigned long long>();
+            const auto unsigned_value = value.as<unsigned long long>();
             return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
         }
-        const auto signed_value = value.as_int<long long>();
+        const auto signed_value = value.as<long long>();
         return signed_value ? "i:" + std::format("{}", *signed_value) : "?";
     }
     case kind::real: {
-        const auto real_value = value.as_float<double>();
+        const auto real_value = value.as<double>();
         return real_value ? "d:" + repr_real(*real_value) : "?";
     }
     case kind::string: {
-        const auto text = value.as_string();
+        const auto text = value.as<std::string_view>();
         if (!text) return "?";
         return "s" + std::to_string(text->size()) + ":" + std::string { *text };
     }
@@ -116,11 +116,11 @@ template<prefer Preference>
 void reencode(basic_writer<Preference> &out, view source) {
     switch (source.type()) {
     case kind::null: out.null(); return;
-    case kind::boolean: out.value(source.as_bool() == true); return;
-    case kind::integer: out.value(source.as_int<std::int64_t>().value_or(0)); return;
-    case kind::real: out.value(source.as_float<double>().value_or(0.0)); return;
+    case kind::boolean: out.value(source.as<bool>() == true); return;
+    case kind::integer: out.value(source.as<std::int64_t>().value_or(0)); return;
+    case kind::real: out.value(source.as<double>().value_or(0.0)); return;
     case kind::string: {
-        const auto text = source.as_string().value_or("");
+        const auto text = source.as<std::string_view>().value_or("");
         if (source.type_marker() == marker::high_precision)
             out.high_precision(text);
         else if (source.type_marker() == marker::character)
@@ -141,14 +141,14 @@ void reencode(basic_writer<Preference> &out, view source) {
         if (any && all_integer) {
             std::vector<std::int64_t> values;
             for (const auto element : source.array())
-                values.push_back(element.as_int<std::int64_t>().value_or(0));
+                values.push_back(element.as<std::int64_t>().value_or(0));
             out.value(values);
             return;
         }
         if (any && all_real) {
             std::vector<double> values;
             for (const auto element : source.array())
-                values.push_back(element.as_float<double>().value_or(0.0));
+                values.push_back(element.as<double>().value_or(0.0));
             out.value(values);
             return;
         }
@@ -173,19 +173,19 @@ void reencode(basic_writer<Preference> &out, view source) {
 std::string json_digest(const json::reader &source) {
     switch (source.type()) {
     case kind::null: return "Z";
-    case kind::boolean: return source.as_bool() == true ? "T" : "F";
+    case kind::boolean: return source.as<bool>() == true ? "T" : "F";
     case kind::integer: {
-        const auto signed_value = source.as_int<long long>();
+        const auto signed_value = source.as<long long>();
         if (signed_value) return "i:" + std::format("{}", *signed_value);
-        const auto unsigned_value = source.as_int<unsigned long long>();
+        const auto unsigned_value = source.as<unsigned long long>();
         return unsigned_value ? "i:" + std::format("{}", *unsigned_value) : "?";
     }
     case kind::real: {
-        const auto real_value = source.as_float<double>();
+        const auto real_value = source.as<double>();
         return real_value ? "d:" + repr_real(*real_value) : "?";
     }
     case kind::string: {
-        const auto text = source.as_string();
+        const auto text = source.as<std::string>();
         if (!text) return "?";
         return "s" + std::to_string(text->size()) + ":" + *text;
     }

@@ -21,7 +21,7 @@ namespace serpent::json {
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::string_view text) {
     walk_memo memo;
-    return reader::over(text, memo).template try_get<T>();
+    return reader::over(text, memo).template as<T>();
 }
 
 /**
@@ -35,7 +35,7 @@ template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::string_view text) {
     if (const auto checked = validate(text); !checked) return std::unexpected { checked.error() };
     walk_memo memo;
-    auto value = reader::over(text, memo).template try_get<T>();
+    auto value = reader::over(text, memo).template as<T>();
     if (!value) {
         if (const auto absent = first_missing_member<T>(reader::over(text)); !absent.empty()) {
             return std::unexpected { error { errc::missing_key, 0, absent } };

@@ -30,13 +30,13 @@ void compare(Scanning left, Indexed right, const std::string &path) {
     check(left.type() == right.type(), path + ": kind");
 
     if (left.is_string()) {
-        check(left.as_string() == right.as_string(), path + ": string");
+        check(left.template as<std::string>() == right.template as<std::string>(), path + ": string");
     } else if (left.is_integer()) {
-        check(left.template as_int<std::int64_t>() == right.template as_int<std::int64_t>(), path + ": integer");
+        check(left.template as<std::int64_t>() == right.template as<std::int64_t>(), path + ": integer");
     } else if (left.is_real()) {
-        check(left.template as_float<double>() == right.template as_float<double>(), path + ": real");
+        check(left.template as<double>() == right.template as<double>(), path + ": real");
     } else if (left.is_boolean()) {
-        check(left.as_bool() == right.as_bool(), path + ": boolean");
+        check(left.template as<bool>() == right.template as<bool>(), path + ": boolean");
     } else if (left.is_array()) {
         auto scanning = left.array().begin();
         std::size_t position = 0;
@@ -94,7 +94,7 @@ int main() {
     check(index.root()["counts"].size_hint() == std::optional<std::size_t> { 3 }, "an array's length is known");
 
     // A type decodes from it, the same dispatch every reader makes.
-    check(index.root()["counts"].try_get<std::vector<int>>() == std::vector<int> { 1, 2, 3 },
+    check(index.root()["counts"].as<std::vector<int>>() == std::vector<int> { 1, 2, 3 },
             "and a type reads out of it");
 
     // A document that does not parse yields an index that says so, not a partial one.

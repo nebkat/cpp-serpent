@@ -255,8 +255,6 @@ public:
         return this->valid && this->index->buffer()[this->index->at(this->position).first] == '{';
     }
 
-    [[nodiscard]] std::optional<bool> as_bool() const noexcept { return this->at_position().as_bool(); }
-
     /**
      * Converted straight from the text, with no grammar check.
      *
@@ -267,7 +265,7 @@ public:
      * once to validate and again to convert.
      */
     template<std::floating_point T>
-    [[nodiscard]] std::optional<T> as_float() const noexcept {
+    [[nodiscard]] std::optional<T> read_real() const noexcept {
         if (!this->valid) return std::nullopt;
         const auto text = this->index->buffer();
         const char *const begin = text.data() + this->index->at(this->position).first;
@@ -278,7 +276,7 @@ public:
     }
 
     template<std::integral T>
-    [[nodiscard]] std::optional<T> as_int() const noexcept {
+    [[nodiscard]] std::optional<T> read_integer() const noexcept {
         if (!this->valid) return std::nullopt;
         const auto text = this->index->buffer();
         const char *const begin = text.data() + this->index->at(this->position).first;
@@ -302,8 +300,6 @@ public:
         if (parsed.ec != std::errc {} || reject_real(parsed.ptr) || !std::in_range<T>(value)) return std::nullopt;
         return static_cast<T>(value);
     }
-
-    [[nodiscard]] std::optional<std::string> as_string() const { return this->at_position().as_string(); }
 
     /** How many values are directly inside this one: a walk along the siblings, each step a load. */
     [[nodiscard]] std::size_t size() const noexcept {
@@ -440,15 +436,16 @@ public:
      * pointless.
      */
     template<typename T>
-    [[nodiscard]] std::optional<T> try_get() const {
+        requires (!std::same_as<T, std::string_view> && !std::same_as<T, std::span<const std::byte>>)
+    [[nodiscard]] std::optional<T> as() const {
         if constexpr (std::same_as<T, bool>) {
-            return this->as_bool();
-        } else if constexpr (serpent::detail::string_like<T> && std::constructible_from<T, std::string_view>) {
-            return this->at_position().template try_get<T>();
+            return this->at_position().template as<bool>();
+        } else if constexpr (serpent::detail::string_like<T> && std::constructible_from<T, std::string>) {
+            return this->at_position().template as<T>();
         } else if constexpr (std::floating_point<T>) {
-            return this->template as_float<T>();
+            return this->template read_real<T>();
         } else if constexpr (std::integral<T>) {
-            return this->template as_int<T>();
+            return this->template read_integer<T>();
         } else if constexpr (serpent::detail::structurally_readable<T>) {
             T item {};
             if (!read_into(*this, item)) return std::nullopt;
@@ -459,6 +456,12 @@ public:
             return item;
         }
     }
+
+    /** JSON text is neither a string_view nor bytes to be lent: a string has to be decoded, and there is no binary. */
+    template<typename T>
+        requires std::same_as<T, std::string_view> || std::same_as<T, std::span<const std::byte>>
+    [[nodiscard]] std::optional<T> as() const = delete("a JSON string has to be decoded, so it cannot be borrowed "
+                                                     "as a string_view; read it as a std::string");
 };
 
 /**

@@ -184,24 +184,6 @@ public:
 
     // ---------------- scalars ----------------
 
-    [[nodiscard]] std::optional<bool> as_bool() const noexcept { return this->read_as<bool>(); }
-
-    template<std::integral T>
-    [[nodiscard]] std::optional<T> as_int() const noexcept {
-        return this->read_as<T>();
-    }
-
-    template<std::floating_point T>
-    [[nodiscard]] std::optional<T> as_float() const noexcept {
-        return this->read_as<T>();
-    }
-
-    /**
-     * Always copies. There is no borrow-when-unescaped path, deliberately - a string read out
-     * of a document owns its bytes, whatever the document does next.
-     */
-    [[nodiscard]] std::optional<std::string> as_string() const { return this->read_as<std::string>(); }
-
     bool read_string_into(std::string &destination) const {
         const auto text = this->scanned_string();
         if (!text) return false;
@@ -261,29 +243,23 @@ public:
         return result;
     }
 
-    [[nodiscard]] std::string string() const {
-        auto result = this->as_string();
-        if (!result) raise(errc::type_mismatch, this->offset());
-        return *std::move(result);
-    }
-
+    /**
+     * The value as a T, or nothing if it is not one: a boolean, an integer that fits, a real
+     * (from a real or an integer), text as std::string or anything made from one - always a
+     * copy, since a JSON string has to be decoded and one read out of a document owns its bytes
+     * whatever the document does next - a container or optional filled from the shape of the
+     * document, or a described or converted type.
+     */
     template<typename T>
-    [[nodiscard]] std::optional<T> try_get() const noexcept {
-        if constexpr (std::same_as<T, bool>)
-            return this->as_bool();
-        else if constexpr (std::same_as<T, std::string_view>) {
-            static_assert(always_false<T>,
-                    "a JSON string has to be decoded, so it cannot be borrowed as a string_view; "
-                    "read it into a std::string, or use decode_string_into");
-        } else if constexpr (detail::string_like<T> && std::constructible_from<T, std::string>) {
-            auto text = this->as_string();
+        requires (!std::same_as<T, std::string_view> && !std::same_as<T, std::span<const std::byte>>)
+    [[nodiscard]] std::optional<T> as() const noexcept {
+        if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::integral<T>)
+            return this->read_as<T>();
+        else if constexpr (detail::string_like<T> && std::constructible_from<T, std::string>) {
+            auto text = this->read_as<std::string>();
             if (!text) return std::nullopt;
             return T { *std::move(text) };
-        } else if constexpr (std::floating_point<T>)
-            return this->as_float<T>();
-        else if constexpr (std::integral<T>)
-            return this->as_int<T>();
-        else if constexpr (detail::structurally_readable<T>) {
+        } else if constexpr (detail::structurally_readable<T>) {
             // Containers and optionals are filled from the shape of the document, so they
             // need no customization and must not go looking for one.
             T value {};
@@ -296,9 +272,17 @@ public:
         }
     }
 
+    /** JSON text is neither a string_view nor bytes to be lent: a string has to be decoded, and there is no binary. */
+    template<typename T>
+        requires std::same_as<T, std::string_view> || std::same_as<T, std::span<const std::byte>>
+    [[nodiscard]] std::optional<T> as() const noexcept = delete("a JSON string has to be decoded, so it cannot be "
+                                                              "borrowed as a string_view; read it as a std::string, "
+                                                              "or use decode_string_into");
+
+    /** as<T>(), or errc::type_mismatch thrown. */
     template<typename T>
     [[nodiscard]] T get() const {
-        auto result = this->try_get<T>();
+        auto result = this->as<T>();
         if (!result) raise(errc::type_mismatch, this->offset());
         return *std::move(result);
     }

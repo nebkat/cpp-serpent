@@ -77,7 +77,7 @@ struct serpent::serializer<specialized, void> {
     }
     template<typename Source>
     static bool read(Source source, specialized &object) {
-        const auto number = source.template try_get<int>();
+        const auto number = source.template as<int>();
         if (!number) return false;
         object.value = *number;
         return true;

@@ -49,7 +49,7 @@ for (auto [key, value] : document.items()) { }
 === "Total — never throws"
 
     ```cpp
-    auto label = document["meta"]["label"].as_string().value_or("unnamed");
+    auto label = document["meta"]["label"].as<std::string_view>().value_or("unnamed");
     ```
 
     A missing key, a wrong type, or a corrupt document all yield nothing. Traversal of an
@@ -59,7 +59,7 @@ for (auto [key, value] : document.items()) { }
 
     ```cpp
     try {
-        auto label = document.at("meta").at("label").string();
+        auto label = document.at("meta").at("label").get<std::string_view>();
     } catch (const serpent::error &failure) {
         std::println("{} at byte {}", failure.what(), failure.offset());
     }
@@ -88,17 +88,17 @@ value.type();          // null, boolean, integer, real, string, array, object, i
 value.is_array();
 value.size();
 
-value.as_bool();
-value.as_int<std::uint16_t>();     // range-checked, not truncated
-value.as_float<double>();
-value.as_string();
+value.as<bool>();
+value.as<std::uint16_t>();     // range-checked, not truncated
+value.as<double>();
+value.as<std::string_view>();
 ```
 
 On `bjdata::view` only:
 
 ```cpp
-value.as_binary();                 // a [$B# array, as its raw bytes
-value.as_span<std::uint16_t>();    // a [$u# array, in place
+value.as<std::span<const std::byte>>();                 // a [$B# array, as its raw bytes
+value.as<nonstd::unaligned_little_span<const std::uint16_t>>();    // a [$u# array, in place
 ```
 
 These cannot exist on `json::reader`, and the reason is the format rather than the API. A span
@@ -109,16 +109,16 @@ The JSON equivalent is to build the container you wanted:
 
 ```cpp
 // BJData: a span over the bytes, no allocation
-auto samples = document["samples"].as_span<std::uint16_t>();
+auto samples = document["samples"].as<nonstd::unaligned_little_span<const std::uint16_t>>();
 
 // JSON: decoded into a container you own
 auto samples = json::decode<std::vector<std::uint16_t>>(text);
-for (auto element : reader["samples"].array()) element.as_int<std::uint16_t>();
+for (auto element : reader["samples"].array()) element.as<std::uint16_t>();
 ```
 
 !!! note "Not alignment-sensitive"
 
-    `as_span<T>()` returns an `unaligned_little_span<const T>`, so the bytes need no
+    `as<nonstd::unaligned_little_span<const T>>()` returns an `unaligned_little_span<const T>`, so the bytes need no
     particular alignment and elements are read through a proxy. It is still a
     `random_access_range`, so `<algorithm>` and `<ranges>` apply.
 
@@ -126,10 +126,10 @@ for (auto element : reader["samples"].array()) element.as_int<std::uint16_t>();
 
 ```cpp
 // BJData: the value IS the bytes
-std::optional<std::string_view> borrowed = document["name"].as_string();
+std::optional<std::string_view> borrowed = document["name"].as<std::string_view>();
 
 // JSON: escapes mean the value must be built
-std::optional<std::string> decoded = reader["name"].as_string();
+std::optional<std::string> decoded = reader["name"].as<std::string>();
 std::string into;
 reader["name"].read_string_into(into);
 reader["name"].decode_string_into(buffer);   // no allocation; refuses to truncate
@@ -154,7 +154,7 @@ value resumes instead of starting again:
 ```cpp
 for (auto row : document.array())          // outer
     for (auto value : row.array())         // inner, and it leaves the note
-        total += value.as_int<int>();      // so the outer step resumes
+        total += value.as<int>();      // so the outer step resumes
 ```
 
 Nothing to switch on and nothing to hold. The note is only ever about one value at a time, so a
@@ -174,7 +174,7 @@ records where every value is, once:
 const auto index = json::structural_index::over(text);
 
 for (auto row : index.root()["rows"].array())      // every step is a hop, not a scan
-    total += row["value"].as_float<double>().value_or(0);
+    total += row["value"].as<double>().value_or(0);
 ```
 
 It answers everything an ordinary reader answers, so anything that takes a reader takes this.

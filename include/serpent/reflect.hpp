@@ -298,17 +298,17 @@ template<typename Source>
 bool source_is(Source source, const as &form) {
     switch (form.held) {
     case as::kind::null: return source.is_null();
-    case as::kind::boolean: return source.as_bool() == form.truth;
+    case as::kind::boolean: return source.template as<bool>() == form.truth;
     case as::kind::integer: {
-        const auto held = source.template as_int<std::int64_t>();
+        const auto held = source.template as<std::int64_t>();
         return held && *held == form.whole;
     }
     case as::kind::real: {
-        const auto held = source.template as_float<double>();
+        const auto held = source.template as<double>();
         return held && *held == form.number;
     }
     case as::kind::text: {
-        const auto held = source.as_string();
+        const auto held = detail::text_of(source);
         return held && std::string_view { *held } == form.text();
     }
     }

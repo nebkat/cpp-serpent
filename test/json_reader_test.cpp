@@ -25,45 +25,45 @@ reader parse(std::string_view text) { return reader::over(text); }
 
 void scalars() {
     check(parse("null").is_null(), "null");
-    check_equal(parse("true").as_bool().value_or(false), true, "true");
-    check_equal(parse("false").as_bool().value_or(true), false, "false");
+    check_equal(parse("true").as<bool>().value_or(false), true, "true");
+    check_equal(parse("false").as<bool>().value_or(true), false, "false");
 
-    check_equal(parse("0").as_int<int>().value_or(-1), 0, "zero");
-    check_equal(parse("255").as_int<int>().value_or(0), 255, "255");
-    check_equal(parse("-129").as_int<int>().value_or(0), -129, "negative");
-    check_equal(parse("4294967296").as_int<std::int64_t>().value_or(0), 4294967296ll, "wide integer");
-    check_equal(parse("-9223372036854775808").as_int<std::int64_t>().value_or(0),
+    check_equal(parse("0").as<int>().value_or(-1), 0, "zero");
+    check_equal(parse("255").as<int>().value_or(0), 255, "255");
+    check_equal(parse("-129").as<int>().value_or(0), -129, "negative");
+    check_equal(parse("4294967296").as<std::int64_t>().value_or(0), 4294967296ll, "wide integer");
+    check_equal(parse("-9223372036854775808").as<std::int64_t>().value_or(0),
             std::numeric_limits<std::int64_t>::min(), "int64 minimum");
-    check_equal(parse("18446744073709551615").as_int<std::uint64_t>().value_or(0),
+    check_equal(parse("18446744073709551615").as<std::uint64_t>().value_or(0),
             std::numeric_limits<std::uint64_t>::max(), "uint64 maximum");
 
     check(parse("1").is_integer(), "1 is an integer");
     check(parse("1.0").is_real(), "1.0 is a real");
     check(parse("1e3").is_real(), "an exponent makes it a real");
-    check(std::abs(parse("3.141592653589793").as_float<double>().value_or(0) - 3.141592653589793) < 1e-15, "pi");
-    check(std::abs(parse("-0.25").as_float<double>().value_or(0) + 0.25) < 1e-15, "negative real");
-    check(std::abs(parse("1e-20").as_float<double>().value_or(0) - 1e-20) < 1e-30, "small exponent");
+    check(std::abs(parse("3.141592653589793").as<double>().value_or(0) - 3.141592653589793) < 1e-15, "pi");
+    check(std::abs(parse("-0.25").as<double>().value_or(0) + 0.25) < 1e-15, "negative real");
+    check(std::abs(parse("1e-20").as<double>().value_or(0) - 1e-20) < 1e-30, "small exponent");
     // An integer reads as a float, but not the other way round.
-    check_equal(parse("2").as_float<double>().value_or(0), 2.0, "an integer reads as a float");
-    check(!parse("2.5").as_int<int>().has_value(), "a real does not read as an integer");
-    check(!parse("256").as_int<std::uint8_t>().has_value(), "narrowing is range checked");
-    check(!parse("-1").as_int<unsigned>().has_value(), "a negative does not read as unsigned");
+    check_equal(parse("2").as<double>().value_or(0), 2.0, "an integer reads as a float");
+    check(!parse("2.5").as<int>().has_value(), "a real does not read as an integer");
+    check(!parse("256").as<std::uint8_t>().has_value(), "narrowing is range checked");
+    check(!parse("-1").as<unsigned>().has_value(), "a negative does not read as unsigned");
 
     // An integer is converted in the same walk that finds its end, so each place the standard
     // conversion and JSON disagree about what an integer is has to be settled afterwards. These
     // are those places.
-    check(!parse("1e3").as_int<int>().has_value(), "an exponent makes a real, even with no point");
-    check(!parse("1E3").as_int<int>().has_value(), "in either case");
-    check(!parse("7.0").as_int<int>().has_value(), "a real that happens to be whole is still a real");
-    check_equal(parse("-0").as_int<int>().value_or(9), 0, "negative zero is an integer");
-    check_equal(parse("-0").as_int<unsigned>().value_or(9u), 0u, "and fits an unsigned type");
-    check(!parse("9223372036854775808").as_int<std::int64_t>().has_value(), "one past the widest signed");
-    check(!parse("18446744073709551616").as_int<std::uint64_t>().has_value(), "one past the widest unsigned");
-    check(!parse("-9223372036854775809").as_int<std::int64_t>().has_value(), "one below the narrowest");
-    check_equal(parse("[10,20]")[0].as_int<int>().value_or(0), 10, "an integer ends at a comma");
-    check_equal(parse("[10]")[0].as_int<int>().value_or(0), 10, "or a bracket");
-    check_equal(parse("{\"a\":10}")["a"].as_int<int>().value_or(0), 10, "or a brace");
-    check_equal(parse("10").as_int<int>().value_or(0), 10, "or the end of the text");
+    check(!parse("1e3").as<int>().has_value(), "an exponent makes a real, even with no point");
+    check(!parse("1E3").as<int>().has_value(), "in either case");
+    check(!parse("7.0").as<int>().has_value(), "a real that happens to be whole is still a real");
+    check_equal(parse("-0").as<int>().value_or(9), 0, "negative zero is an integer");
+    check_equal(parse("-0").as<unsigned>().value_or(9u), 0u, "and fits an unsigned type");
+    check(!parse("9223372036854775808").as<std::int64_t>().has_value(), "one past the widest signed");
+    check(!parse("18446744073709551616").as<std::uint64_t>().has_value(), "one past the widest unsigned");
+    check(!parse("-9223372036854775809").as<std::int64_t>().has_value(), "one below the narrowest");
+    check_equal(parse("[10,20]")[0].as<int>().value_or(0), 10, "an integer ends at a comma");
+    check_equal(parse("[10]")[0].as<int>().value_or(0), 10, "or a bracket");
+    check_equal(parse("{\"a\":10}")["a"].as<int>().value_or(0), 10, "or a brace");
+    check_equal(parse("10").as<int>().value_or(0), 10, "or the end of the text");
     // Leading zeros are not JSON, whatever a conversion would make of them.
     check(!json::validate("01"), "a leading zero is not a number");
     check(!json::decode<int>("01").has_value(), "and does not decode as one");
@@ -72,20 +72,20 @@ void scalars() {
 
     // Grammatically valid but not representable.
     check(parse("1e400").is_real(), "1e400 parses");
-    check(!parse("1e400").as_float<double>().has_value(), "1e400 does not fit a double");
+    check(!parse("1e400").as<double>().has_value(), "1e400 does not fit a double");
 }
 
 void strings() {
-    check_equal(parse(R"("hello")").as_string().value_or("?"), std::string { "hello" }, "plain");
-    check_equal(parse(R"("")").as_string().value_or("?"), std::string { "" }, "empty");
-    check_equal(parse(R"("a\"b\\c\/d")").as_string().value_or("?"), std::string { "a\"b\\c/d" }, "escapes");
+    check_equal(parse(R"("hello")").as<std::string>().value_or("?"), std::string { "hello" }, "plain");
+    check_equal(parse(R"("")").as<std::string>().value_or("?"), std::string { "" }, "empty");
+    check_equal(parse(R"("a\"b\\c\/d")").as<std::string>().value_or("?"), std::string { "a\"b\\c/d" }, "escapes");
     check_equal(
-            parse(R"("a\nb\tc\r\b\f")").as_string().value_or("?"), std::string { "a\nb\tc\r\b\f" }, "control escapes");
-    check_equal(parse(R"("\u00e9\u2713")").as_string().value_or("?"), std::string { "\xc3\xa9\xe2\x9c\x93" },
+            parse(R"("a\nb\tc\r\b\f")").as<std::string>().value_or("?"), std::string { "a\nb\tc\r\b\f" }, "control escapes");
+    check_equal(parse(R"("\u00e9\u2713")").as<std::string>().value_or("?"), std::string { "\xc3\xa9\xe2\x9c\x93" },
             "bmp escapes become utf-8");
-    check_equal(parse(R"("\ud83d\ude00")").as_string().value_or("?"), std::string { "\xf0\x9f\x98\x80" },
+    check_equal(parse(R"("\ud83d\ude00")").as<std::string>().value_or("?"), std::string { "\xf0\x9f\x98\x80" },
             "a surrogate pair becomes one code point");
-    check_equal(parse("\"h\xc3\xa9llo\"").as_string().value_or("?"), std::string { "h\xc3\xa9llo" },
+    check_equal(parse("\"h\xc3\xa9llo\"").as<std::string>().value_or("?"), std::string { "h\xc3\xa9llo" },
             "raw utf-8 passes through");
 
     // Comparison never materialises the string.
@@ -105,15 +105,15 @@ void containers() {
     check_equal(parse("[]").size(), std::size_t { 0 }, "empty array");
     check_equal(parse("{}").size(), std::size_t { 0 }, "empty object");
     check_equal(parse("[1,2,3]").size(), std::size_t { 3 }, "array size");
-    check_equal(parse("[1,2,3]")[1].as_int<int>().value_or(0), 2, "array index");
+    check_equal(parse("[1,2,3]")[1].as<int>().value_or(0), 2, "array index");
     check(!parse("[1,2,3]")[3].is_valid(), "index past the end poisons");
 
     // Whitespace anywhere it is allowed.
     const auto spaced = parse("  {\n  \"a\" : [ 1 , 2 ] ,\n  \"b\" : \"x\"\n}  ");
     check_equal(spaced.size(), std::size_t { 2 }, "object with whitespace");
     check_equal(spaced["a"].size(), std::size_t { 2 }, "nested array with whitespace");
-    check_equal(spaced["a"][1].as_int<int>().value_or(0), 2, "nested value");
-    check_equal(spaced["b"].as_string().value_or("?"), std::string { "x" }, "string member");
+    check_equal(spaced["a"][1].as<int>().value_or(0), 2, "nested value");
+    check_equal(spaced["b"].as<std::string>().value_or("?"), std::string { "x" }, "string member");
     check(!spaced["missing"].is_valid(), "missing key poisons");
 
     std::string keys;
@@ -122,10 +122,10 @@ void containers() {
     check_equal(keys, std::string { "ab" }, "items preserves order");
 
     // A key containing an escape still matches.
-    check_equal(parse(R"({"a\nb":7})")["a\nb"].as_int<int>().value_or(0), 7, "escaped key lookup");
+    check_equal(parse(R"({"a\nb":7})")["a\nb"].as<int>().value_or(0), 7, "escaped key lookup");
 
-    check_equal(parse(R"([[1,[2,[3]]]])")[0][1][1][0].as_int<int>().value_or(0), 3, "deep nesting");
-    check_equal(parse(R"([{"a":1},{"a":2}])")[1]["a"].as_int<int>().value_or(0), 2, "array of objects");
+    check_equal(parse(R"([[1,[2,[3]]]])")[0][1][1][0].as<int>().value_or(0), 3, "deep nesting");
+    check_equal(parse(R"([{"a":1},{"a":2}])")[1]["a"].as<int>().value_or(0), 2, "array of objects");
 }
 
 void malformed() {
@@ -186,18 +186,18 @@ void truncation() {
             const auto value = reader::over(prefix);
             std::size_t seen = 0;
             for (const auto element : value.array()) {
-                std::ignore = element.as_int<long long>();
+                std::ignore = element.as<long long>();
                 if (++seen > 64) break;
             }
             for (const auto entry : value.items()) {
                 std::ignore = entry.key_is("a");
-                std::ignore = entry.value.as_string();
+                std::ignore = entry.value.as<std::string>();
                 if (++seen > 64) break;
             }
             std::ignore = value.size();
             std::ignore = value["a"];
             std::ignore = value[0];
-            std::ignore = value.as_string();
+            std::ignore = value.as<std::string>();
             std::ignore = value.extent();
         }
     }

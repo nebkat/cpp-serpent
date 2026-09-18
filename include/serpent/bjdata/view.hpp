@@ -25,6 +25,17 @@
 
 namespace serpent::bjdata {
 
+namespace detail {
+
+/** nonstd::unaligned_little_span<const U>, the type a typed array is viewed in place as. */
+template<typename T>
+concept unaligned_span = requires {
+    typename T::value_type;
+    requires std::same_as<T, nonstd::unaligned_little_span<const std::remove_const_t<typename T::value_type>>>;
+};
+
+} // namespace detail
+
 class array_iterator;
 class array_range;
 class member_iterator;
@@ -150,70 +161,8 @@ public:
     [[nodiscard]] constexpr bool is_string() const noexcept { return this->type() == kind::string; }
     [[nodiscard]] constexpr bool is_array() const noexcept { return this->type() == kind::array; }
     [[nodiscard]] constexpr bool is_object() const noexcept { return this->type() == kind::object; }
-    [[nodiscard]] bool is_binary() const noexcept { return this->as_binary().has_value(); }
+    [[nodiscard]] bool is_binary() const noexcept { return this->read_binary().has_value(); }
 
-    // ---------------- scalars ----------------
-
-    [[nodiscard]] constexpr std::optional<bool> as_bool() const noexcept {
-        return direct::boolean_under(this->element);
-    }
-
-    template<std::integral T>
-    [[nodiscard]] std::optional<T> as_int() const noexcept {
-        T value {};
-        if (!direct::load_integer(this->element, this->payload, this->available(), value)) return std::nullopt;
-        return value;
-    }
-
-    template<std::floating_point T>
-    [[nodiscard]] std::optional<T> as_float() const noexcept {
-        T value {};
-        if (!direct::load_real(this->element, this->payload, this->available(), value)) return std::nullopt;
-        return value;
-    }
-
-    /** S and H yield their raw bytes; C yields a one-character view. Never copies. */
-    [[nodiscard]] std::optional<std::string_view> as_string() const noexcept {
-        if (this->element == marker::character) {
-            if (this->available() < 1) return std::nullopt;
-            return std::string_view { reinterpret_cast<const char *>(this->payload), 1 };
-        }
-        if (this->element != marker::string && this->element != marker::high_precision) return std::nullopt;
-
-        auto scanner = this->scan();
-        const auto text = detail::read_key(scanner);
-        if (!scanner.ok()) return std::nullopt;
-        return text;
-    }
-
-    /** A [$B# or [$U# array, viewed as its raw bytes. */
-    [[nodiscard]] std::optional<std::span<const std::byte>> as_binary() const noexcept {
-        const auto info = this->container_header();
-        if (this->element != marker::array_begin || !info.typed()) return std::nullopt;
-        if (info.element != marker::byte && info.element != marker::uint8) return std::nullopt;
-        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body))
-            return std::nullopt;
-        return std::span<const std::byte> { info.body, static_cast<std::size_t>(info.count) };
-    }
-
-    /**
-     * A typed array whose element marker is exactly the one T packs as, viewed in place.
-     * Zero copy demands an exact layout match, so a widening read goes through the ordinary
-     * element iterator instead.
-     */
-    template<typename T>
-    [[nodiscard]] std::optional<nonstd::unaligned_little_span<const T>> as_span() const noexcept {
-        static_assert(strong_type_for<T>() != marker::invalid, "T does not correspond to a BJData strong type");
-
-        const auto info = this->container_header();
-        if (this->element != marker::array_begin || !info.typed()) return std::nullopt;
-        if (info.element != strong_type_for<T>()) return std::nullopt;
-
-        const auto width = payload_width(info.element);
-        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body) / width)
-            return std::nullopt;
-        return nonstd::unaligned_little_span<const T> { info.body, static_cast<std::size_t>(info.count) };
-    }
 
     // ---------------- containers ----------------
 
@@ -271,39 +220,32 @@ public:
         return result;
     }
 
-    [[nodiscard]] std::string_view string() const {
-        const auto result = this->as_string();
-        if (!result) raise(errc::type_mismatch, this->offset());
-        return *result;
-    }
-
-    [[nodiscard]] std::span<const std::byte> binary() const {
-        const auto result = this->as_binary();
-        if (!result) raise(errc::type_mismatch, this->offset());
-        return *result;
-    }
-
+    /**
+     * The value as a T, or nothing if it is not one: a boolean, an integer that fits, a real
+     * (from a real or an integer), text as std::string_view (S and H yield their bytes, C one
+     * character; never a copy) or as anything made from one, a [$B or [$U array as
+     * std::span<const std::byte>, a typed array as nonstd::unaligned_little_span<const U> when
+     * its marker is exactly the one U packs as, a container or optional filled from the shape of
+     * the document, or a described or converted type.
+     */
     template<typename T>
-    [[nodiscard]] nonstd::unaligned_little_span<const T> span() const {
-        const auto result = this->as_span<T>();
-        if (!result) raise(errc::type_mismatch, this->offset());
-        return *result;
-    }
-
-    template<typename T>
-    [[nodiscard]] std::optional<T> try_get() const noexcept {
+    [[nodiscard]] std::optional<T> as() const noexcept {
         if constexpr (std::same_as<T, bool>)
-            return this->as_bool();
+            return this->read_bool();
         else if constexpr (std::same_as<T, std::string_view>)
-            return this->as_string();
+            return this->read_text();
+        else if constexpr (std::same_as<T, std::span<const std::byte>>)
+            return this->read_binary();
+        else if constexpr (detail::unaligned_span<T>)
+            return this->read_span<std::remove_const_t<typename T::value_type>>();
         else if constexpr (serpent::detail::string_like<T> && std::constructible_from<T, std::string_view>) {
-            const auto text = this->as_string();
+            const auto text = this->read_text();
             if (!text) return std::nullopt;
             return T { *text };
         } else if constexpr (std::floating_point<T>)
-            return this->as_float<T>();
+            return this->read_real<T>();
         else if constexpr (std::integral<T>)
-            return this->as_int<T>();
+            return this->read_integer<T>();
         else if constexpr (serpent::detail::structurally_readable<T>) {
             // Containers and optionals are filled from the shape of the document, so they
             // need no customization and must not go looking for one.
@@ -317,9 +259,10 @@ public:
         }
     }
 
+    /** as<T>(), or errc::type_mismatch thrown. */
     template<typename T>
     [[nodiscard]] T get() const {
-        auto result = this->try_get<T>();
+        auto result = this->as<T>();
         if (!result) raise(errc::type_mismatch, this->offset());
         return *std::move(result);
     }
@@ -328,6 +271,68 @@ private:
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
         return this->source.data() + this->source.size();
     }
+
+    [[nodiscard]] constexpr std::optional<bool> read_bool() const noexcept {
+        return direct::boolean_under(this->element);
+    }
+
+    template<std::integral T>
+    [[nodiscard]] std::optional<T> read_integer() const noexcept {
+        T value {};
+        if (!direct::load_integer(this->element, this->payload, this->available(), value)) return std::nullopt;
+        return value;
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] std::optional<T> read_real() const noexcept {
+        T value {};
+        if (!direct::load_real(this->element, this->payload, this->available(), value)) return std::nullopt;
+        return value;
+    }
+
+    /** S and H yield their raw bytes; C yields a one-character view. Never copies. */
+    [[nodiscard]] std::optional<std::string_view> read_text() const noexcept {
+        if (this->element == marker::character) {
+            if (this->available() < 1) return std::nullopt;
+            return std::string_view { reinterpret_cast<const char *>(this->payload), 1 };
+        }
+        if (this->element != marker::string && this->element != marker::high_precision) return std::nullopt;
+
+        auto scanner = this->scan();
+        const auto text = detail::read_key(scanner);
+        if (!scanner.ok()) return std::nullopt;
+        return text;
+    }
+
+    /** A [$B# or [$U# array, viewed as its raw bytes. */
+    [[nodiscard]] std::optional<std::span<const std::byte>> read_binary() const noexcept {
+        const auto info = this->container_header();
+        if (this->element != marker::array_begin || !info.typed()) return std::nullopt;
+        if (info.element != marker::byte && info.element != marker::uint8) return std::nullopt;
+        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body))
+            return std::nullopt;
+        return std::span<const std::byte> { info.body, static_cast<std::size_t>(info.count) };
+    }
+
+    /**
+     * A typed array whose element marker is exactly the one T packs as, viewed in place.
+     * Zero copy demands an exact layout match, so a widening read goes through the ordinary
+     * element iterator instead.
+     */
+    template<typename T>
+    [[nodiscard]] std::optional<nonstd::unaligned_little_span<const T>> read_span() const noexcept {
+        static_assert(strong_type_for<T>() != marker::invalid, "T does not correspond to a BJData strong type");
+
+        const auto info = this->container_header();
+        if (this->element != marker::array_begin || !info.typed()) return std::nullopt;
+        if (info.element != strong_type_for<T>()) return std::nullopt;
+
+        const auto width = payload_width(info.element);
+        if (info.body == nullptr || info.count > static_cast<std::uint64_t>(this->limit() - info.body) / width)
+            return std::nullopt;
+        return nonstd::unaligned_little_span<const T> { info.body, static_cast<std::size_t>(info.count) };
+    }
+
 
     [[nodiscard]] constexpr std::size_t available() const noexcept {
         return this->payload != nullptr && this->payload < this->limit()
@@ -735,7 +740,7 @@ inline view view::operator[](std::string_view key) const noexcept {
 template<std::ranges::contiguous_range C, typename T = std::ranges::range_value_t<C>>
     requires (strong_type_for<T>() != marker::invalid) && std::is_arithmetic_v<T> && requires(C &out) { out.resize(std::size_t {}); }
 std::optional<bool> read_sequence(const view &source, C &out) {
-    const auto values = source.as_span<T>();
+    const auto values = source.template as<nonstd::unaligned_little_span<const T>>();
     if (!values) return std::nullopt;
 
     out.resize(values->size());

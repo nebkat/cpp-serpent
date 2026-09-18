@@ -87,8 +87,8 @@ struct connection {
     friend bool from_json(auto source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
-        value.host = source["host"].as_string().value_or(defaults.host);
-        value.port = source["port"].template as_int<int>();
+        value.host = source["host"].template as<std::string>().value_or(defaults.host);
+        value.port = source["port"].template as<int>();
         return true;
     }
 };
@@ -112,7 +112,7 @@ struct serpent::serializer<timestamp, void> {
     }
     template<typename Source>
     static bool read(Source source, timestamp &value) {
-        const auto seconds = source.template try_get<std::int64_t>();
+        const auto seconds = source.template as<std::int64_t>();
         if (!seconds) return false;
         value.seconds = *seconds;
         return true;
@@ -257,7 +257,7 @@ void containers_that_hand_out_proxies() {
     // becoming a packed one.
     const auto document = bjdata::view::over(bytes);
     check(document.is_array() && document.size() == 4, "an array of four");
-    check(document[0].as_bool().value_or(false) && !document[1].as_bool().value_or(true),
+    check(document[0].as<bool>().value_or(false) && !document[1].as<bool>().value_or(true),
             "whose elements are booleans, not numbers");
 
     // The element of an ordinary container is still taken by reference, not copied through its

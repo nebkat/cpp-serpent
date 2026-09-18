@@ -34,9 +34,9 @@ void compare(Plain left, Walking right, const std::string &path) {
     check(left.type() == right.type(), path + ": kind");
 
     if (left.is_string()) {
-        check(left.as_string() == right.as_string(), path + ": string");
+        check(left.template as<std::string>() == right.template as<std::string>(), path + ": string");
     } else if (left.is_integer()) {
-        check(left.template as_int<std::int64_t>() == right.template as_int<std::int64_t>(), path + ": integer");
+        check(left.template as<std::int64_t>() == right.template as<std::int64_t>(), path + ": integer");
     } else if (left.is_array()) {
         auto plain = left.array().begin();
         std::size_t index = 0;
@@ -73,18 +73,18 @@ int main() {
     compare(plain, walking, "");
 
     // Read the same value twice. A consuming cursor could not; a memo must.
-    check_equal(walking["rows"][0][1].as_int<int>().value_or(-1), 2, "a value read once");
-    check_equal(walking["rows"][0][1].as_int<int>().value_or(-1), 2, "and read again");
+    check_equal(walking["rows"][0][1].as<int>().value_or(-1), 2, "a value read once");
+    check_equal(walking["rows"][0][1].as<int>().value_or(-1), 2, "and read again");
 
     // Two handles held at once, used in the other order.
     const auto rows = walking["rows"];
     const auto after = walking["after"];
-    check_equal(after.as_string().value_or("?"), std::string { "still here" }, "the second handle");
+    check_equal(after.as<std::string>().value_or("?"), std::string { "still here" }, "the second handle");
     check_equal(rows.size(), std::size_t { 4 }, "and the first is still good");
 
     // Members out of document order.
-    check_equal(walking["after"].as_string().value_or("?"), std::string { "still here" }, "a later member first");
-    check_equal(walking["name"].as_string().value_or("?"), std::string { "sunrise" }, "then an earlier one");
+    check_equal(walking["after"].as<std::string>().value_or("?"), std::string { "still here" }, "a later member first");
+    check_equal(walking["name"].as<std::string>().value_or("?"), std::string { "sunrise" }, "then an earlier one");
 
     // A traversal abandoned part way must leave the outer one correct.
     std::size_t rows_seen = 0;
@@ -117,11 +117,11 @@ int main() {
             for (auto element : member.value.array())
                 for (auto inner : element.array())
                     for (auto deeper : inner.array())
-                        for (auto leaf : deeper.array()) deepest = leaf.as_int<std::int64_t>().value_or(0);
+                        for (auto leaf : deeper.array()) deepest = leaf.as<std::int64_t>().value_or(0);
     check_equal(deepest, std::int64_t { 4 }, "the deepest value, reached through six levels");
 
     // And a type decodes from it, because it answers what a source answers.
-    const auto rows_out = walking["rows"].try_get<std::vector<std::vector<int>>>();
+    const auto rows_out = walking["rows"].as<std::vector<std::vector<int>>>();
     check(rows_out && rows_out->size() == 4 && (*rows_out)[0][2] == 3, "a type reads out of it");
 
     // A memo says which document it is about, not only which value. Two documents walked in

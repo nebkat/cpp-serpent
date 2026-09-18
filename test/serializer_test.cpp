@@ -129,10 +129,10 @@ struct connection {
     friend bool from_json(auto source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
-        value.host = source["host"].as_string().value_or(defaults.host);
-        value.port = source["port"].template as_int<int>();
+        value.host = source["host"].template as<std::string>().value_or(defaults.host);
+        value.port = source["port"].template as<int>();
         value.fallback = static_cast<mode>(
-                source["fallback"].template as_int<std::uint8_t>().value_or(std::to_underlying(defaults.fallback)));
+                source["fallback"].template as<std::uint8_t>().value_or(std::to_underlying(defaults.fallback)));
         return true;
     }
 };
@@ -360,8 +360,8 @@ void members_into_an_open_object() {
 
     const auto document = view::over(bytes);
     check_equal(document.size(), std::size_t { 3 }, "the type's members and the caller's, side by side");
-    check_equal(document["x"].as_int<int>().value_or(0), 3, "a member of the type");
-    check_equal(document["label"].as_string().value_or("?"), "corner", "and one only the caller knew");
+    check_equal(document["x"].as<int>().value_or(0), 3, "a member of the type");
+    check_equal(document["label"].as<std::string_view>().value_or("?"), "corner", "and one only the caller knew");
 
     // The inverse: the type reads its own members and ignores the rest.
     point recovered {};
