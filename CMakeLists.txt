@@ -31,8 +31,7 @@ set(SERPENT_INTEGER_TABLE 1 CACHE STRING
 set_property(CACHE SERPENT_INTEGER_TABLE PROPERTY STRINGS 0 1 2)
 
 # Reading and writing unaligned values has nothing to do with serialization, so it is its own
-# library. Fetched before BUILD_TESTING is set, so it does not build its tests here.
-include(FetchContent)
+# library.
 # Consumed as a dependency, so its own tests are none of this build's business - it has its own
 # CI for those. Set directly rather than through BUILD_TESTING, which it may set for itself.
 set(UNALIGNED_BUILD_TESTS OFF CACHE INTERNAL "")
@@ -41,11 +40,21 @@ set(UNALIGNED_BUILD_TESTS OFF CACHE INTERNAL "")
 # otherwise turning ours off still leaves a -std flag on the consumer's command line.
 option(SERPENT_SET_CXX_STANDARD "Declare the C++23 minimum on consumers" ON)
 set(UNALIGNED_SET_CXX_STANDARD ${SERPENT_SET_CXX_STANDARD} CACHE INTERNAL "")
-FetchContent_Declare(unaligned
-        GIT_REPOSITORY git@github.com:nebkat/cpp-unaligned.git
-        GIT_TAG v0.1.1
-        GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(unaligned)
+
+# A build that vendors both of us has already made the target, and fetching a second copy
+# would put two unaligned::unaligned in one build. Take what is there, then an installed
+# package, and only clone when the build has offered neither.
+if(NOT TARGET unaligned::unaligned)
+    find_package(unaligned QUIET)
+endif()
+if(NOT TARGET unaligned::unaligned)
+    include(FetchContent)
+    FetchContent_Declare(unaligned
+            GIT_REPOSITORY https://github.com/nebkat/cpp-unaligned.git
+            GIT_TAG v0.1.1
+            GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(unaligned)
+endif()
 
 if(SERPENT_BUILD_TESTS)
     enable_testing()
