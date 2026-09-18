@@ -375,15 +375,20 @@ inline void value::object::coalesce_duplicates() {
         far.assign(slots, 0);
         table = far.data();
     }
-    // Enough hash to spread names that differ in length or at either end, which is nearly all
-    // of them; a collision only costs the comparison that decides anyway.
+    // Enough hash to spread names that differ in length or anywhere in their first or last
+    // eight bytes, which is nearly all of them - mixed so that every byte reaches the low bits
+    // the table is indexed by. A collision only costs the comparison that decides anyway.
     const auto hash_of = [](std::string_view name) noexcept {
         std::uint64_t head = 0;
         std::uint64_t tail = 0;
         const std::size_t take = std::min(name.size(), sizeof(head));
         std::memcpy(&head, name.data(), take);
         std::memcpy(&tail, name.data() + name.size() - take, take);
-        return (name.size() * 0x9E3779B97F4A7C15ull) ^ (head * 0xC2B2AE3D27D4EB4Full) ^ (tail >> 7);
+        std::uint64_t mixed = (head ^ (tail * 0x9E3779B97F4A7C15ull)) + name.size();
+        mixed ^= mixed >> 32;
+        mixed *= 0xD6E8FEB86659FD93ull;
+        mixed ^= mixed >> 32;
+        return mixed;
     };
     std::size_t kept = 0;
     for (std::size_t index = 0; index < this->entries.size(); ++index) {

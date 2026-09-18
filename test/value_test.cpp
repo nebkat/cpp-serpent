@@ -6,6 +6,7 @@
 #include <serpent/json.hpp>
 #include <serpent/value.hpp>
 
+#include <format>
 #include <limits>
 #include <string>
 #include <vector>
@@ -263,6 +264,17 @@ int main() {
             if (name == "k7") check_equal(position, std::size_t { 7 }, "which stays where its first occurrence was");
             ++position;
         }
+    }
+
+    // Thousands of names alike in all but a few characters, as a font's glyphs or a log's
+    // records are: the duplicate among them is still found, and each name keeps one member.
+    {
+        std::string alike = "{";
+        for (int index = 0; index < 5000; ++index) alike += std::format("\"glyph{:05}\":{},", index, index);
+        alike += "\"glyph02500\":-1}";
+        const auto tree = json::decode<serpent::value>(alike);
+        check(tree.has_value() && tree->size() == 5000, "alike names are all kept apart");
+        check(tree && tree->at("glyph02500").as<int>() == -1, "and a repeated one takes the last value");
     }
 
     // A tree built from JSON text takes its own one-pass reader, which has to refuse exactly
