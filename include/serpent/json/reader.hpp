@@ -326,18 +326,20 @@ inline void close_containers(cursor &scan, int open) noexcept {
             scan.fail(errc::unexpected_end);
             return;
         }
-        const char here = scan.peek();
-        if (here == '"') {
-            // A bracket inside a string is not a bracket, so a string is consumed whole.
-            std::ignore = scan_string(scan);
-            continue;
-        }
-        if (here == '[' || here == '{') {
-            ++open;
-        } else if (here == ']' || here == '}') {
+        // What stands here is a closing bracket, a separator, or a whole value - and a value is
+        // stepped over as one, at the speed the scanner steps over anything.
+        switch (scan.peek()) {
+        case ']':
+        case '}':
             --open;
+            scan.advance(1);
+            break;
+        case ',':
+        case ':': scan.advance(1); break;
+        default:
+            skip_value(scan, 1);
+            if (!scan.ok()) return;
         }
-        scan.advance(1);
     }
 }
 
@@ -400,7 +402,7 @@ public:
 
     [[nodiscard]] const reader &operator*() const noexcept { return this->current; }
 
-    SERPENT_ALWAYS_INLINE array_iterator &operator++() noexcept {
+    array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
         scanner::cursor scan { this->container->source, this->current.first };
