@@ -6,6 +6,7 @@
 #include <serpent/json.hpp>
 #include <serpent/value.hpp>
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -262,6 +263,41 @@ int main() {
             if (name == "k7") check_equal(position, std::size_t { 7 }, "which stays where its first occurrence was");
             ++position;
         }
+    }
+
+    // A tree built from JSON text takes its own one-pass reader, which has to refuse exactly
+    // what the reader handle refuses, and stop exactly where a value ends.
+    {
+        for (const auto *bad : { "[1,2", "{\"a\":1,}", "[01]", "[1e]", "{\"a\" 1}", "[1 2]", "{1:2}", "\"unterminated",
+                     "[\"\\x\"]", "nul", "-", "[-]", "{\"a\":}" })
+            check(!json::decode<serpent::value>(bad).has_value(), "a malformed document is refused");
+        std::string deep;
+        for (int i = 0; i < 40; ++i) deep += '[';
+        for (int i = 0; i < 40; ++i) deep += ']';
+        check(!json::decode<serpent::value>(deep).has_value(), "and one nested past the depth limit");
+
+        const auto numbers = json::decode<serpent::value>("[0,-1,18446744073709551615,-9223372036854775808,1.5,-2e3,1E2,7.0]");
+        check(numbers.has_value() && numbers->size() == 8, "every spelling of a number");
+        check(numbers && numbers->at(0).is_integer() && numbers->at(1).as<int>() == -1, "an integer stays one");
+        check(numbers && numbers->at(2).as<std::uint64_t>() == 18446744073709551615ull, "as wide as it needs");
+        check(numbers && numbers->at(3).as<std::int64_t>() == std::numeric_limits<std::int64_t>::min(), "either way");
+        check(numbers && numbers->at(4).is_real() && numbers->at(5).as<double>() == -2000.0 && numbers->at(6).as<double>() == 100.0,
+                "a point or an exponent makes a real");
+        check(numbers && numbers->at(7).is_real() && numbers->at(7).as<double>() == 7.0, "even of a whole value");
+
+        // A tree as a member of a type: read where it stands, and the member after it still
+        // found - a required one, so that the reader not being told where the tree ended would
+        // show as a missing member rather than pass.
+        const auto report = json::decode<failure_report>(
+                R"({"detail":{"a":[1,{"b":"c\u0041"}],"d":null},"reason":"x"})");
+        check(report.has_value() && report->reason == "x", "a tree member inside a type, and the member after it");
+        check(report && report->detail.at("a").at(1).at("b").as<std::string_view>() == "cA", "holds what the text held, decoded");
+
+        // Read into a tree that already holds something, everything it held is gone.
+        serpent::value reused = serpent::value::of({ { "old", 1 } });
+        check(json::decode_into("[1,2,3]", reused) && reused.is_array() && reused.size() == 3, "a tree read again is replaced");
+        check(json::decode_into("{\"x\": [ ] , \"y\" : { } }", reused) && reused["x"].is_array() && reused["y"].is_object(),
+                "whitespace everywhere it may be");
     }
 
     return report("value");

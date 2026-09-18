@@ -17,6 +17,7 @@
 #include <serpent/serializer.hpp>
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -26,7 +27,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <unordered_map>
+#include <cstring>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -53,7 +54,11 @@ public:
      * format ascribes meaning to key order, so nothing downstream depends on the choice.
      */
     class object {
-        std::vector<std::pair<std::string, value>> entries;
+    public:
+        using entry = std::pair<std::string, value>;
+
+    private:
+        std::vector<entry> entries;
 
     public:
         object() = default;
@@ -82,6 +87,17 @@ public:
          * addition costs an object of N members N-squared comparisons.
          */
         void append(std::string name, value item) { this->entries.emplace_back(std::move(name), std::move(item)); }
+
+        /**
+         * Takes the members gathered in `from`, sized exactly to them, and leaves `from` empty
+         * with its capacity - for a builder that gathers into the one vector object after
+         * object, so that no object's members are grown into place.
+         */
+        void take(std::vector<entry> &from) {
+            this->entries.reserve(from.size());
+            for (auto &member : from) this->entries.push_back(std::move(member));
+            from.clear();
+        }
 
         /** Leaves one member per name - the last one added under it, where the first was. */
         void coalesce_duplicates();
@@ -140,6 +156,16 @@ public:
     value(binary bytes) noexcept : held(std::move(bytes)) {}
     value(array items) noexcept : held(std::move(items)) {}
     value(object members) noexcept : held(std::move(members)) {}
+
+    /**
+     * Makes this value hold a T built from the arguments, in place - for a builder that fills
+     * a tree where it stands rather than assigning a value made elsewhere.
+     */
+    template<typename T, typename... Arguments>
+        requires std::constructible_from<T, Arguments &&...> && requires(storage held) { held.template emplace<T>(); }
+    T &emplace(Arguments &&...arguments) {
+        return this->held.template emplace<T>(std::forward<Arguments>(arguments)...);
+    }
 
     /** An object written out at its call site: the braces a nested document is built with. */
     static value of(std::initializer_list<std::pair<const std::string_view, value>> members) {
@@ -338,16 +364,44 @@ inline void value::object::coalesce_duplicates() {
         return;
     }
 
-    std::unordered_map<std::string_view, std::size_t> first_at;
-    first_at.reserve(this->entries.size());
+    // A flat table of entry indices, open-addressed, at least twice the size it needs: on the
+    // stack for any object of ordinary size, so that checking costs no allocation at all.
+    std::size_t slots = 32;
+    while (slots < this->entries.size() * 2) slots *= 2;
+    std::array<std::uint32_t, 256> near {};
+    std::vector<std::uint32_t> far;
+    std::uint32_t *table = near.data();
+    if (slots > near.size()) {
+        far.assign(slots, 0);
+        table = far.data();
+    }
+    // Enough hash to spread names that differ in length or at either end, which is nearly all
+    // of them; a collision only costs the comparison that decides anyway.
+    const auto hash_of = [](std::string_view name) noexcept {
+        std::uint64_t head = 0;
+        std::uint64_t tail = 0;
+        const std::size_t take = std::min(name.size(), sizeof(head));
+        std::memcpy(&head, name.data(), take);
+        std::memcpy(&tail, name.data() + name.size() - take, take);
+        return (name.size() * 0x9E3779B97F4A7C15ull) ^ (head * 0xC2B2AE3D27D4EB4Full) ^ (tail >> 7);
+    };
     std::size_t kept = 0;
     for (std::size_t index = 0; index < this->entries.size(); ++index) {
-        const auto [found, added] = first_at.try_emplace(this->entries[index].first, kept);
-        if (added) {
-            if (kept != index) this->entries[kept] = std::move(this->entries[index]);
-            ++kept;
-        } else {
-            this->entries[found->second].second = std::move(this->entries[index].second);
+        const std::string_view name = this->entries[index].first;
+        std::size_t slot = hash_of(name) & (slots - 1);
+        while (true) {
+            if (table[slot] == 0) {
+                table[slot] = static_cast<std::uint32_t>(kept + 1);
+                if (kept != index) this->entries[kept] = std::move(this->entries[index]);
+                ++kept;
+                break;
+            }
+            auto &earlier = this->entries[table[slot] - 1];
+            if (earlier.first == name) {
+                earlier.second = std::move(this->entries[index].second);
+                break;
+            }
+            slot = (slot + 1) & (slots - 1);
         }
     }
     this->entries.resize(kept);
@@ -767,6 +821,11 @@ struct serializer<value, void> {
 
     template<typename Source>
     static bool read(const Source &source, value &item) {
+        // A format may build the tree in one pass over its own text. Found by lookup on the
+        // source, as read_reflected is; one that offers nothing takes the walk below.
+        if constexpr (requires { read_tree(source, item); }) {
+            return read_tree(source, item);
+        }
         switch (source.type()) {
         case kind::invalid: return false;
         case kind::null: item = value {}; return true;
@@ -825,3 +884,5 @@ struct serializer<value, void> {
 };
 
 } // namespace serpent
+
+#include <serpent/json/tree.hpp>
