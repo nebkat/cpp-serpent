@@ -9,7 +9,10 @@
 //
 // What "longest possible" is differs by format, so the format says: `Widest<T, Member>::value`
 // is the most a member can take, key included, or zero if it has no limit or is not written at
-// all. Everything here is settled when the program is compiled.
+// all. A string has no limit the compiler can know, but its width is known the moment it is looked
+// at, so a format may mark a member `text`: its `value` is then everything around the text, and
+// the text's own length is added when the run is written. Everything else here is settled when
+// the program is compiled.
 
 #include <serpent/reflect.hpp>
 
@@ -33,6 +36,15 @@ struct member_runs {
     static constexpr auto widest = [] {
         std::array<std::size_t, members.size()> each {};
         template for (constexpr auto member : members) each[position_of(member)] = Widest<T, member>::value;
+        return each;
+    }();
+
+    /** Whether each member is text, whose own length is only known when it is written. */
+    static constexpr auto text = [] {
+        std::array<bool, members.size()> each {};
+        template for (constexpr auto member : members) {
+            if constexpr (requires { Widest<T, member>::text; }) each[position_of(member)] = Widest<T, member>::text;
+        }
         return each;
     }();
 

@@ -56,6 +56,16 @@ struct [[= serpent::serializable {}]] interrupted {
     int last = -1;
 };
 
+struct [[= serpent::serializable {}]] with_text {
+    int before = 1;
+    std::string plain = "nothing to escape here";
+    std::string_view borrowed = "nor here";
+    std::string empty;
+    double after = 2.5;
+    std::string awkward = "a \"quote\" and a\ttab";
+    bool last = true;
+};
+
 struct [[= serpent::serializable {}]] leading_text {
     std::string name = "first";
     int value = 1;
@@ -125,6 +135,7 @@ int main() {
     same_either_way(all_bounded {}, "one run is the same text as its members one at a time");
     same_either_way(interrupted {}, "and so are runs with other members between them");
     same_either_way(leading_text {}, "a run that is not first in its object begins with a comma");
+    same_either_way(with_text {}, "strings join a run, and one with an escape in it leaves it");
     same_either_way(only_skipped {}, "an object with nothing to write is still an object");
     same_either_way(inner {}, "a nested type");
 
@@ -137,6 +148,7 @@ int main() {
     // five small numbers. A buffer of the size they do take has to be enough.
     fits_exactly(all_bounded {}, 32);
     fits_exactly(interrupted {}, 32);
+    fits_exactly(with_text {}, 32);
     fits_exactly(std::vector<inner>(40), 8);
 
     return report("json_bounded_write");

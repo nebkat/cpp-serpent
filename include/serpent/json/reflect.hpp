@@ -299,35 +299,28 @@ std::optional<bool> read_sequence(const reader &source, C &out) {
 
 #if SERPENT_BOUNDED_OBJECT_WRITE
 
-/** The most text one member can take - comma, key and value - or zero if it has no limit. */
+/**
+ * The most text one member can take - comma, key and value - or zero if it has no limit. For a
+ * string it is everything but the string itself, which is `text`: added when the run is written.
+ */
 template<typename T, std::meta::info Member>
 struct widest_member {
+    using field = std::remove_cvref_t<typename [:std::meta::type_of(Member):]>;
+    static constexpr bool text = std::same_as<field, std::string> || std::same_as<field, std::string_view>;
+
     static constexpr std::size_t value = [] () -> std::size_t {
         if (serpent::detail::has_annotation<skip>(Member)) return 0;
         if (serpent::detail::annotation_of<tagged>(Member).has_value()) return 0;
 
-        using field = std::remove_cvref_t<typename [:std::meta::type_of(Member):]>;
         constexpr std::string_view name = serpent::detail::field_key<T, Member>();
-        if (widest_text<field> == 0 || !scanner::is_plain_text(name)) return 0;
+        if (!scanner::is_plain_text(name)) return 0;
         constexpr std::size_t comma_quotes_and_colon = 4;
+        if (text) return comma_quotes_and_colon + name.size() + 2;
+        if (widest_text<field> == 0) return 0;
         return comma_quotes_and_colon + name.size() + widest_text<field>;
     }();
 };
 
-/**
- * Writes one object of a described type.
- *
- * A member whose text has a longest possible length - a boolean, an integer, a real - does not
- * need to ask whether there is room for it if room for the longest it could be has already been
- * found. So consecutive members of that kind are written as a run: room for the whole run is
- * claimed once, and keys, values and commas go into it as one piece of text, where each key and
- * each value would otherwise ask for its own. Any other member - a string, a container, another
- * described type - is written the usual way, and the run simply ends before it and another may
- * begin after.
- *
- * Which members are in which run is settled when this is compiled - see member_runs.hpp;
- * nothing about it is decided as it runs but whether the room could be had.
- */
 template<typename T>
 class object_writer {
     using runs = serpent::detail::member_runs<T, widest_member>;
@@ -347,9 +340,11 @@ public:
         if constexpr (!whole_object_bounded) {
             return false;
         } else {
-            return this->out.compose_object(2 + runs::widest_run(0, runs::members.size()), [this](char *const to) {
+            constexpr std::size_t all = runs::members.size();
+            if (!this->text_is_plain<0, all>()) return false;
+            return this->out.compose_object(2 + runs::widest_run(0, all) + this->text_bytes<0, all>(), [this](char *const to) {
                 to[0] = '{';
-                char *const end = this->write_run_into<0, runs::members.size()>(to + 1, false);
+                char *const end = this->write_run_into<0, all>(to + 1, false);
                 *end = '}';
                 return static_cast<std::size_t>(end + 1 - to);
             });
@@ -397,9 +392,35 @@ private:
      */
     template<std::size_t First, std::size_t Last>
     [[nodiscard]] bool write_run() {
-        return this->out.compose_members(runs::widest_run(First, Last), [this](char *const to) {
+        if (!this->text_is_plain<First, Last>()) return false;
+        return this->out.compose_members(runs::widest_run(First, Last) + this->text_bytes<First, Last>(), [this](char *const to) {
             return static_cast<std::size_t>(this->write_run_into<First, Last>(to, this->out.has_members()) - to);
         });
+    }
+
+    /** The length of the strings among the members from `First` up to `Last`, which the bound cannot know. */
+    template<std::size_t First, std::size_t Last>
+    [[nodiscard]] std::size_t text_bytes() const noexcept {
+        std::size_t total = 0;
+        template for (constexpr auto member : runs::members) {
+            if constexpr (runs::within(member, First, Last) && runs::text[runs::position_of(member)])
+                total += std::string_view { this->value.[:member:] }.size();
+        }
+        return total;
+    }
+
+    /** Whether every string among those members can stand between quotes as it is. One that cannot is
+     *  written the usual way, escapes and all, and takes its run with it. */
+    template<std::size_t First, std::size_t Last>
+    [[nodiscard]] bool text_is_plain() const noexcept {
+        bool plain = true;
+        template for (constexpr auto member : runs::members) {
+            if constexpr (runs::within(member, First, Last) && runs::text[runs::position_of(member)]) {
+                const std::string_view text { this->value.[:member:] };
+                plain = plain && scanner::end_of_plain_text(text.data(), text.data() + text.size()) == text.data() + text.size();
+            }
+        }
+        return plain;
     }
 
     /** The members from `First` up to `Last` stored at `to`, the first with a comma before it if `after_another`. */
@@ -409,7 +430,15 @@ private:
             if constexpr (runs::within(member, First, Last)) {
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                 to = after_another ? copy_constant(to, written_next_key<name>) : copy_constant(to, written_key<name>);
-                to = write_text(to, this->value.[:member:]);
+                if constexpr (runs::text[runs::position_of(member)]) {
+                    const std::string_view text { this->value.[:member:] };
+                    *to++ = '"';
+                    std::memcpy(to, text.data(), text.size());
+                    to += text.size();
+                    *to++ = '"';
+                } else {
+                    to = write_text(to, this->value.[:member:]);
+                }
                 after_another = true;
             }
         }
