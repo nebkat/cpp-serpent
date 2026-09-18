@@ -156,8 +156,8 @@ template<std::floating_point T>
  * A string, which always owns its bytes once read.
  *
  * The scan that finds the closing quote also finds out whether anything between the quotes needs
- * decoding. Most strings need nothing and are taken whole; only one that carries an escape is
- * walked a character at a time to resolve it.
+ * decoding. Most strings need nothing and are taken whole; one that carries an escape is decoded
+ * straight into the string's own storage.
  */
 [[nodiscard]] inline bool read(scanner::cursor &scan, std::string &into) {
     if (!scan.available(1) || scan.peek() != '"') return false;
@@ -165,13 +165,7 @@ template<std::floating_point T>
     const auto text = scanner::scan_string(scan);
     if (!scan.ok()) return false;
 
-    if (!text.escaped) {
-        into.assign(text.contents);
-        return true;
-    }
-    into.clear();
-    into.reserve(scanner::decoded_length(text));
-    scanner::decode_string(text, [&](char value) { into.push_back(value); });
+    scanner::decode_string(text, into);
     return true;
 }
 

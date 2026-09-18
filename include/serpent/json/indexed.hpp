@@ -478,8 +478,7 @@ struct indexed_reader::key_value {
 
     [[nodiscard]] std::string key_string() const {
         std::string decoded;
-        decoded.reserve(scanner::decoded_length(this->key));
-        scanner::decode_string(this->key, [&](char value) { decoded.push_back(value); });
+        scanner::decode_string(this->key, decoded);
         return decoded;
     }
 };

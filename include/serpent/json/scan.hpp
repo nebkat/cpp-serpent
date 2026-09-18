@@ -14,10 +14,12 @@
 #include <span>
 #include <array>
 #include <bit>
+#include <string>
 #include <string_view>
 
 #include <cstddef>
 #include <initializer_list>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -408,10 +410,18 @@ constexpr void append_utf8(std::uint32_t code, Append &append) noexcept {
  * unescaping, measuring and comparing all run through here.
  */
 template<typename Append>
-constexpr void decode_string(string_span text, Append append) noexcept {
+constexpr void decode_string(string_span text, Append &&append) noexcept {
+    // The text between escapes is handed over as one run where the receiver takes runs, and a
+    // character at a time where it takes only those.
+    const auto run = [&](std::size_t from, std::size_t to) {
+        if constexpr (requires { append(std::string_view {}); }) {
+            append(text.contents.substr(from, to - from));
+        } else {
+            for (std::size_t index = from; index < to; ++index) append(text.contents[index]);
+        }
+    };
     if (!text.escaped) {
-        for (const char value : text.contents)
-            append(value);
+        run(0, text.contents.size());
         return;
     }
 
@@ -423,14 +433,21 @@ constexpr void decode_string(string_span text, Append append) noexcept {
         return code;
     };
 
-    for (std::size_t index = 0; index < text.contents.size(); ++index) {
-        const char value = text.contents[index];
-        if (value != '\\') {
-            append(value);
-            continue;
+    // Between escapes the text holds nothing a string cannot hold as itself - scan_string has
+    // seen to that - so the first byte end_of_plain_text stops on is the next backslash.
+    const char *const first = text.contents.data();
+    const char *const limit = first + text.contents.size();
+    std::size_t index = 0;
+    while (index < text.contents.size()) {
+        const std::size_t escape = static_cast<std::size_t>(end_of_plain_text(first + index, limit) - first);
+        if (escape == text.contents.size()) {
+            run(index, escape);
+            return;
         }
+        run(index, escape);
+        index = escape + 1;
 
-        const char kind = text.contents[++index];
+        const char kind = text.contents[index++];
         switch (kind) {
         case '"': append('"'); break;
         case '\\': append('\\'); break;
@@ -441,10 +458,10 @@ constexpr void decode_string(string_span text, Append append) noexcept {
         case 'r': append('\r'); break;
         case 't': append('\t'); break;
         case 'u': {
-            std::uint32_t code = read_hex(index + 1);
+            std::uint32_t code = read_hex(index);
             index += 4;
             if (code >= 0xD800 && code <= 0xDBFF) {
-                const std::uint32_t low = read_hex(index + 3);
+                const std::uint32_t low = read_hex(index + 2);
                 index += 6;
                 code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
             }
@@ -456,11 +473,46 @@ constexpr void decode_string(string_span text, Append append) noexcept {
     }
 }
 
+/** Receives a decoded string into memory the caller has already sized. */
+struct writing_to {
+    char *position;
+    constexpr void operator()(char value) noexcept { *this->position++ = value; }
+    void operator()(std::string_view run) noexcept {
+        // A run between dense escapes is a byte or two, not worth a call to copy.
+        if (run.size() < 16) {
+            for (const char value : run) *this->position++ = value;
+            return;
+        }
+        std::memcpy(this->position, run.data(), run.size());
+        this->position += run.size();
+    }
+};
+
+/**
+ * The decoded string, in a std::string's own storage. A string that carries no escape is taken
+ * whole; one that does is decoded into room the size of the text as it stands, since every
+ * escape is longer than what it stands for.
+ */
+inline void decode_string(string_span text, std::string &into) {
+    if (!text.escaped) {
+        into.assign(text.contents);
+        return;
+    }
+    into.resize_and_overwrite(text.contents.size(), [&](char *buffer, std::size_t) {
+        writing_to at { buffer };
+        decode_string(text, at);
+        return static_cast<std::size_t>(at.position - buffer);
+    });
+}
+
 /** How many bytes the decoded string occupies. */
 [[nodiscard]] constexpr std::size_t decoded_length(string_span text) noexcept {
     if (!text.escaped) return text.contents.size();
     std::size_t length = 0;
-    decode_string(text, [&](char) { ++length; });
+    decode_string(text, [&]<typename Piece>(Piece piece) {
+        if constexpr (std::same_as<Piece, std::string_view>) length += piece.size();
+        else ++length;
+    });
     return length;
 }
 
@@ -470,9 +522,14 @@ constexpr void decode_string(string_span text, Append append) noexcept {
 
     std::size_t index = 0;
     bool matched = true;
-    decode_string(text, [&](char value) {
-        if (index >= plain.size() || plain[index] != value) matched = false;
-        ++index;
+    decode_string(text, [&]<typename Piece>(Piece piece) {
+        if constexpr (std::same_as<Piece, std::string_view>) {
+            if (index > plain.size() || plain.substr(index, piece.size()) != piece) matched = false;
+            index += piece.size();
+        } else {
+            if (index >= plain.size() || plain[index] != piece) matched = false;
+            ++index;
+        }
     });
     return matched && index == plain.size();
 }

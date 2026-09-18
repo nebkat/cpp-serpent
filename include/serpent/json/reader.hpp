@@ -148,9 +148,7 @@ public:
     bool read_string_into(std::string &destination) const {
         const auto text = this->scanned_string();
         if (!text) return false;
-        destination.clear();
-        destination.reserve(scanner::decoded_length(*text));
-        scanner::decode_string(*text, [&](char value) { destination.push_back(value); });
+        scanner::decode_string(*text, destination);
         return true;
     }
 
@@ -308,8 +306,7 @@ struct key_value {
 
     [[nodiscard]] std::string key_string() const {
         std::string decoded;
-        decoded.reserve(scanner::decoded_length(this->key));
-        scanner::decode_string(this->key, [&](char value) { decoded.push_back(value); });
+        scanner::decode_string(this->key, decoded);
         return decoded;
     }
 
