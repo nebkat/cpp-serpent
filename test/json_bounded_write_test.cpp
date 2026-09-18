@@ -127,7 +127,7 @@ void fits_exactly(const T &value, std::size_t longest_token) {
 int main() {
     check_equal(std::string_view { json::encode(all_bounded {}) },
             std::string_view { R"({"flag":true,"tiny":-128,"small":65535,"least":-9223372036854775808,)"
-                               R"("most":18446744073709551615,"single":0.10000000149011612,"whole":3.0,)"
+                               R"("most":18446744073709551615,"single":0.1,"whole":3.0,)"
                                R"("smallest":5e-324,"largest":-1.7976931348623157e+308,"missing":null,)"
                                R"("letter":97})" },
             "every kind of bounded member, at its extremes");

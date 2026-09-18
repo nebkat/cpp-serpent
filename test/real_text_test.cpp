@@ -11,11 +11,13 @@
 #include <bit>
 #include <charconv>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <string_view>
 
 namespace {
@@ -32,7 +34,8 @@ std::string significant_digits(std::string_view text) {
 
 int written = 0;
 
-void written_rightly(double value) {
+template<std::floating_point T>
+void written_rightly(T value) {
     char room[serpent::detail::real_text_capacity + 1];
     const std::size_t length = serpent::detail::write_real(room, value);
     room[length] = '\0';
@@ -41,8 +44,9 @@ void written_rightly(double value) {
 
     if (length > serpent::detail::real_text_capacity) check(false, "a real fits the room it is given");
 
-    const double back = std::strtod(room, nullptr);
-    if (std::bit_cast<std::uint64_t>(back) != std::bit_cast<std::uint64_t>(value))
+    const T back = std::same_as<T, float> ? T(std::strtof(room, nullptr)) : T(std::strtod(room, nullptr));
+    if (std::bit_cast<std::conditional_t<std::same_as<T, float>, std::uint32_t, std::uint64_t>>(back)
+            != std::bit_cast<std::conditional_t<std::same_as<T, float>, std::uint32_t, std::uint64_t>>(value))
         check_equal(text, std::string_view { "(text that reads back as the same value)" }, "a real reads back exactly");
 
     char shortest[64];
@@ -96,6 +100,16 @@ int main() {
         written_rightly(std::nextafter(power, 0.0));
         written_rightly(std::nextafter(power, std::numeric_limits<double>::infinity()));
     }
+
+    // Floats: their own shortest digits, which are fewer, and their own limit on writing in full.
+    for (const float value : { 0.1f, 1e7f, 9999999.0f, 16777216.0f, 1e-4f, 1e-5f, 3.4028235e38f, 1.4e-45f, 0.0f, 100.0f })
+        written_rightly(value);
+    for (int index = 0; index < 2'000'000; ++index) {
+        const float value = std::bit_cast<float>(static_cast<std::uint32_t>(random()));
+        if (std::isfinite(value)) written_rightly(value);
+    }
+    for (int index = 0; index < 1'000'000; ++index)
+        written_rightly(static_cast<float>(random() % 10'000'000) / 100.0f);
 
     std::printf("%d reals written\n", written);
     return report("real_text");

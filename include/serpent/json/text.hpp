@@ -89,7 +89,7 @@ template<std::floating_point T>
         std::memcpy(to, "null", 4);
         return to + 4;
     }
-    return to + serpent::detail::write_real(to, static_cast<double>(value));
+    return to + serpent::detail::write_real(to, value);
 }
 
 } // namespace serpent::json

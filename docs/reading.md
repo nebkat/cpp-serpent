@@ -25,6 +25,17 @@ matching.
 It costs a second pass, because validating and decoding are separate walks. Reach for `decode`
 when the answer is all you want.
 
+`decode_into` reads into a value that already exists, which keeps whatever capacity its
+containers had - for reading many documents into the one object:
+
+```cpp
+link_config config;
+for (const auto &text : documents)
+    if (json::decode_into(text, config)) use(config);
+```
+
+A member the document leaves out keeps its value. The same three exist for `bjdata`.
+
 ## Two readers, one shape
 
 `bjdata::reader` and `json::reader` are the same kind of thing - a handle to one value inside a

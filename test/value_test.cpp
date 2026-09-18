@@ -243,5 +243,26 @@ int main() {
     any_type_as_a_tree();
     a_tree_is_a_source();
     refusals();
+    // A document with the same key twice keeps the last value, wherever the object's size puts
+    // it - the few-members way or the many-members way - and no duplicate survives.
+    {
+        const auto small = json::decode<value>(R"({"a":1,"b":2,"a":3})");
+        check(small && small->size() == 2 && small->at("a").as<int>() == 3, "a repeated key keeps the last value");
+        check_equal(json::encode(*small), std::string { R"({"a":3,"b":2})" }, "in the place of the first");
+
+        std::string text = "{";
+        for (int index = 0; index < 40; ++index) text += (index ? "," : "") + std::string { "\"k" } + std::to_string(index) + "\":" + std::to_string(index);
+        text += R"(,"k7":700,"k39":3900,"k0":0})";
+        const auto large = json::decode<value>(text);
+        check(large && large->size() == 40 && large->at("k7").as<int>() == 700 && large->at("k39").as<int>() == 3900
+                        && large->at("k0").as<int>() == 0,
+                "and so does an object with many members");
+        std::size_t position = 0;
+        for (const auto &[name, held] : *large->as_object()) {
+            if (name == "k7") check_equal(position, std::size_t { 7 }, "which stays where its first occurrence was");
+            ++position;
+        }
+    }
+
     return report("value");
 }

@@ -39,6 +39,11 @@ struct [[= serpent::serializable {}]] prefixes {
     friend bool operator==(const prefixes &, const prefixes &) = default;
 };
 
+struct [[= serpent::serializable {}]] holder {
+    std::string name;
+    record inner;
+};
+
 struct [[= serpent::serializable {}]] nothing_required {
     [[= serpent::defaulted {}]] int value = 9;
 };
@@ -117,6 +122,26 @@ int main() {
             "a string where an integer belongs fails");
     check(!json::decode<record>(R"({"id":1.5,"name":"north","ratio":0.5,"active":true,"tags":[]})").has_value(),
             "and so does a real");
+
+    // Read into an object that already holds one, a nested member is filled where it stands: its
+    // containers keep the capacity they have rather than being built afresh and moved in.
+    holder reused;
+    check(json::decode_into(R"({"name":"a","inner":{"id":1,"name":"north","ratio":0.5,"active":true,"tags":[1,2,3,4,5,6,7,8]}})", reused),
+            "a nested described member reads in place");
+    const auto *const tags_before = reused.inner.tags.data();
+    const auto *const name_before = reused.inner.name.data();
+    check(json::decode_into(R"({"name":"b","inner":{"id":2,"name":"south","ratio":0.25,"active":false,"tags":[9,8,7]}})", reused),
+            "and again");
+
+    // And written into a string that already exists, the same way round.
+    std::string out = "junk";
+    out.reserve(256);
+    const auto *const storage = out.data();
+    check(json::write(reused, out).has_value() && out == json::encode(reused) && out.data() == storage,
+            "written into a string it keeps");
+    check(reused.inner.tags.data() == tags_before && reused.inner.tags == std::vector<int> { 9, 8, 7 },
+            "keeping the vector's storage");
+    check(reused.inner.name.data() == name_before && reused.inner.name == "south", "and the string's");
 
     return report("json_shapes");
 }

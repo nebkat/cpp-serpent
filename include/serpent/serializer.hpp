@@ -527,11 +527,15 @@ bool read_into(const Source &source, T &value) {
             }
         }
         return true;
-    } else {
+    } else if constexpr (std::is_arithmetic_v<T> || detail::string_like<T>) {
         auto found = source.template as<T>();
         if (!found) return false;
         value = std::move(*found);
         return true;
+    } else {
+        // A described or converted type is filled where it stands, as the top level is, so
+        // that a member read again keeps the capacity its containers already have.
+        return serializer<T>::read(source, value);
     }
 }
 

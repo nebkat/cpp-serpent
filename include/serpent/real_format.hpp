@@ -6,6 +6,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <string_view>
 
@@ -78,7 +79,8 @@ struct shortest_digits {
  * the power of ten of the first one. The point is all that stands between the first digit and
  * the rest, so writing the first digit over it leaves the digits as one run, a character later.
  */
-[[nodiscard]] inline shortest_digits shortest_digits_of(double magnitude) {
+template<std::floating_point T>
+[[nodiscard]] shortest_digits shortest_digits_of(T magnitude) {
     shortest_digits digits;
     char *const text = digits.storage.data();
     const auto converted = std::to_chars(text, text + digits.storage.size(), magnitude, std::chars_format::scientific);
@@ -103,8 +105,22 @@ struct shortest_digits {
 #endif
 
 /**
- * A real as text: the shortest digits that read back as the same double, written out in full
- * from a ten-thousandth up to 1e16 and with an exponent beyond, and always recognisably a real.
+ * How large a value is still written out in full rather than with an exponent: sixteen digits
+ * before the point for a double, seven for a float, which is how many either can be trusted
+ * to. Below a ten-thousandth both take an exponent. Żmij's rule, matched here so that the
+ * choice of writer never shows in the text.
+ */
+template<std::floating_point T>
+inline constexpr int plain_digits_before_point = std::same_as<T, float> ? 7 : 16;
+
+template<std::floating_point T>
+inline constexpr T plain_digits_up_to = std::same_as<T, float> ? T(1e7) : T(1e16);
+
+/**
+ * A real as text: the shortest digits that read back as the same value - the same float, for a
+ * float, which is fewer than a double's - written out in full
+ * from a ten-thousandth up to 1e16 (1e7 for a float) and with an exponent beyond, and always
+ * recognisably a real.
  *
  * That last part is the ".0" on a whole number. JSON has one kind of number and does not say
  * whether 40 is an integer, so whatever reads it has to guess from the text - and a real written
@@ -116,7 +132,8 @@ struct shortest_digits {
  * path lays the same digits out by the same rules, so the choice between them never shows in
  * the output.
  */
-inline real_text format_real(double value) {
+template<std::floating_point T>
+real_text format_real(T value) {
     real_text out;
 
     if (std::isnan(value)) {
@@ -133,7 +150,7 @@ inline real_text format_real(double value) {
     out.length = static_cast<std::size_t>(external::zmij::write(text, out.storage.size(), value) - text);
     // Bare digits are what a whole number written in full comes out as, and the number says
     // whether it is one without the text being searched for a point.
-    const bool bare_digits = std::abs(value) < 1e16 && std::trunc(value) == value;
+    const bool bare_digits = std::abs(value) < plain_digits_up_to<T> && std::trunc(value) == value;
     if (bare_digits) out.append(".0");
 #else
     if (std::signbit(value)) out.push('-');
@@ -146,7 +163,7 @@ inline real_text format_real(double value) {
     const std::string_view digits = found.view();
     const int point = found.point;
 
-    if (point > 16 || point < -3) {
+    if (point > plain_digits_before_point<T> || point < -3) {
         // Too large or too small to write out: one digit, the rest behind a point, and the
         // power of ten of that first digit in at least two figures.
         out.append(digits.substr(0, 1));
@@ -190,11 +207,12 @@ inline constexpr std::size_t real_text_capacity = 40;
  * and returning how many were used. For a writer that wants the text in its destination rather
  * than in a value it then has to copy from.
  */
-inline std::size_t write_real(char *to, double value) {
+template<std::floating_point T>
+std::size_t write_real(char *to, T value) {
 #if SERPENT_USE_ZMIJ
     if (std::isfinite(value)) {
         char *end = external::zmij::write(to, real_text_capacity, value);
-        const bool bare_digits = std::abs(value) < 1e16 && std::trunc(value) == value;
+        const bool bare_digits = std::abs(value) < plain_digits_up_to<T> && std::trunc(value) == value;
         if (bare_digits) {
             *end++ = '.';
             *end++ = '0';

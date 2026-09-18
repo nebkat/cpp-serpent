@@ -180,6 +180,14 @@ void containers() {
     check_equal(json::encode(bytes), std::string { "[222,173,1]" }, "binary is an array of integers");
 }
 
+void floats_at_their_own_precision() {
+    check_equal(json::encode(0.1f), std::string { "0.1" }, "a float has fewer digits than the double it widens to");
+    check_equal(json::encode(1e7f), std::string { "1e+07" }, "and takes an exponent from ten million");
+    check_equal(json::encode(9999999.0f), std::string { "9999999.0" }, "just below, written in full");
+    check_equal(json::encode(std::vector<float> { 0.1f, 0.2f }), std::string { "[0.1,0.2]" }, "in a range");
+    check(json::decode<float>("0.1") == 0.1f, "and reads back as the float it was");
+}
+
 void indentation() {
     check_equal(json::encode(point { 3, 4 }, { .indent = 2 }), std::string { "{\n  \"x\": 3,\n  \"y\": 4\n}" },
             "indented object");
@@ -250,6 +258,7 @@ void sinks_and_failures() {
 int main() {
     scalars_and_escaping();
     containers();
+    floats_at_their_own_precision();
     indentation();
     from_documents();
     sinks_and_failures();

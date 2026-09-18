@@ -17,6 +17,17 @@ template<typename T>
 }
 
 /**
+ * Decodes into a value that already exists, which then keeps whatever capacity its containers
+ * had - for reading many documents into the one object. A member the document leaves out keeps
+ * its value, as it does for any read into an existing object; whether the document fits the type
+ * is the answer.
+ */
+template<typename T>
+bool decode_into(std::string_view text, T &value) {
+    return read_into(reader::over(text), value);
+}
+
+/**
  * Decodes, saying why when it cannot.
  *
  * A document that does not parse is reported with the kind and the byte offset validate() found;

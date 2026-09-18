@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -74,6 +75,16 @@ public:
 
         /** The member, adding it as null if it was not there. */
         value &operator[](std::string_view name);
+
+        /**
+         * Adds a member without looking for one of that name first, for a builder that adds
+         * members one after another and calls coalesce_duplicates() once: looking on every
+         * addition costs an object of N members N-squared comparisons.
+         */
+        void append(std::string name, value item) { this->entries.emplace_back(std::move(name), std::move(item)); }
+
+        /** Leaves one member per name - the last one added under it, where the first was. */
+        void coalesce_duplicates();
 
         /** Removes a member, saying whether there was one. */
         bool erase(std::string_view name);
@@ -311,6 +322,37 @@ inline value &value::object::operator[](std::string_view name) {
     return this->entries.emplace_back(std::string { name }, value {}).second;
 }
 
+inline void value::object::coalesce_duplicates() {
+    // Few enough members that a hash table would cost more than it saves, or none at all.
+    if (this->entries.size() < 16) {
+        for (std::size_t index = 0; index < this->entries.size(); ++index) {
+            for (std::size_t later = index + 1; later < this->entries.size();) {
+                if (this->entries[later].first == this->entries[index].first) {
+                    this->entries[index].second = std::move(this->entries[later].second);
+                    this->entries.erase(this->entries.begin() + static_cast<std::ptrdiff_t>(later));
+                } else {
+                    ++later;
+                }
+            }
+        }
+        return;
+    }
+
+    std::unordered_map<std::string_view, std::size_t> first_at;
+    first_at.reserve(this->entries.size());
+    std::size_t kept = 0;
+    for (std::size_t index = 0; index < this->entries.size(); ++index) {
+        const auto [found, added] = first_at.try_emplace(this->entries[index].first, kept);
+        if (added) {
+            if (kept != index) this->entries[kept] = std::move(this->entries[index]);
+            ++kept;
+        } else {
+            this->entries[found->second].second = std::move(this->entries[index].second);
+        }
+    }
+    this->entries.resize(kept);
+}
+
 inline bool operator==(const value::object &left, const value::object &right) noexcept {
     if (left.size() != right.size()) return false;
     return std::ranges::all_of(left, [&right](const auto &entry) {
@@ -357,7 +399,7 @@ class value_writer {
         }
         auto &top = this->open.back();
         if (top.is_object) {
-            top.held[top.pending_key] = std::move(item);
+            top.held.as_object()->append(std::move(top.pending_key), std::move(item));
             top.pending_key.clear();
         } else {
             top.held.push_back(std::move(item));
@@ -420,6 +462,7 @@ public:
 
     void end_container() {
         auto closing = std::move(this->open.back().held);
+        if (this->open.back().is_object) closing.as_object()->coalesce_duplicates();
         this->open.pop_back();
         this->place(std::move(closing));
     }
@@ -768,8 +811,11 @@ struct serializer<value, void> {
             value::object members;
             for (const auto &entry : source.items()) {
                 // key_string() rather than the key itself, which a text format leaves encoded.
-                if (!read(entry.value, members[entry.key_string()])) return false;
+                value held;
+                if (!read(entry.value, held)) return false;
+                members.append(entry.key_string(), std::move(held));
             }
+            members.coalesce_duplicates();
             item = value { std::move(members) };
             return true;
         }

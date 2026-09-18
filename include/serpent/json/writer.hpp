@@ -311,8 +311,9 @@ public:
     template<typename T>
     void emit_custom(const T &item) noexcept;
 
-private:
+    /** A number as the type it has: a float gets a float's digits, not the double's it widens to. */
     template<typename T>
+        requires (std::integral<T> && !std::same_as<T, bool>) || std::floating_point<T>
     void number(T value) noexcept {
         this->begin_value();
         this->scalar(value);
@@ -428,6 +429,21 @@ std::expected<std::size_t, error> write(S &out, const T &value, writer_options o
     writer target { out, options };
     target.value(value);
     return target.finish();
+}
+
+/**
+ * Writes a C++ value as JSON into a string, replacing what it held and keeping its capacity -
+ * for writing many documents into the one buffer. What the string held is gone either way;
+ * on failure it is left empty.
+ */
+template<typename T>
+    requires (!sink<T>)
+std::expected<std::size_t, error> write(const T &value, std::string &into, writer_options options = {}) {
+    into.clear();
+    container_sink out { into };
+    auto written = write(out, value, options);
+    if (!written) into.clear();
+    return written;
 }
 
 /** The allocating convenience over write(). */

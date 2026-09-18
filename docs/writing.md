@@ -1,5 +1,18 @@
 # Writing
 
+`encode` gives a fresh string; `write` puts the document into a string you already have,
+replacing what it held and keeping its capacity, so many documents can go through one buffer:
+
+```cpp
+std::string buffer;
+for (const auto &record : records) {
+    json::write(record, buffer);
+    send(buffer);
+}
+```
+
+Anything else the bytes should go to is a sink.
+
 ## Sinks
 
 A sink is anything with a member `write(std::span<const std::byte>)`. The return type is
