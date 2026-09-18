@@ -38,18 +38,22 @@ A bare lambda works too: `serpent::bjdata::writer w { callback };`
 ### Sizing the destination
 
 A sink over contiguous storage is written into in place: the document is composed in the
-buffer that will hold it, rather than gathered elsewhere and copied in. A buffer that already
-has room for its document is therefore never grown, and never reallocates —
+buffer that will hold it, rather than gathered elsewhere and copied in. To do that the writer
+asks the container for the most a value could take before it writes it, so a container grows
+somewhat past its document the first time — and a buffer that has held a document of that size
+is not grown again:
 
 ```cpp
-std::vector<std::byte> buffer;
-buffer.reserve(serpent::bjdata::measure(value));   // one allocation, and no more
-serpent::container_sink out { buffer };
+std::string buffer;
+for (const auto &value : values) {
+    serpent::json::write(value, buffer);   // allocates the first time round, then never
+    send(buffer);
+}
 ```
 
-— which costs a second pass to measure, so it is worth it where peak memory matters rather than
-everywhere. A `span_sink` needs no such care: a fixed buffer already knows its extent, hands the
-writer whatever is left of it, and latches `overflowed()` only when a value will not fit at all.
+Where nothing may allocate at all, a `span_sink` over a fixed buffer is the sink to use: it
+hands the writer whatever is left of it, and latches `overflowed()` only when a value will not
+fit at all.
 
 ## Writing
 

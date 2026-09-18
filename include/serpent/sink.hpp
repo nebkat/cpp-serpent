@@ -81,14 +81,17 @@ public:
         this->target->insert(this->target->end(), first, first + bytes.size());
     }
 
-    /** Grows the container and lends out the new room, so the writer fills it in place. */
+    /**
+     * Grows the container and lends out the new room, so the writer fills it in place.
+     *
+     * What is preferred is given in full: the writer asks for the most a value could take so as
+     * to compose it in place, and a container can always find that much. Lending only what it
+     * has spare would send the writer the long way round exactly when the container holds a
+     * document of this size already - the buffer being reused - which is the case to be fast in.
+     */
     [[nodiscard]] std::span<std::byte> lend(std::size_t at_least, std::size_t preferred) {
         this->lent = this->target->size();
-        // Room the container already holds costs nothing to hand over, so one reserved to the
-        // size of its document is filled without ever growing past what its caller asked for.
-        const auto spare = this->target->capacity() - this->lent;
-        auto bytes = std::max(at_least, std::min(preferred, spare));
-        if (bytes == 0) bytes = std::max(preferred, std::size_t { 1 });
+        const auto bytes = std::max({ at_least, preferred, std::size_t { 1 } });
         this->grow_to(this->lent + bytes);
         return { reinterpret_cast<std::byte *>(this->target->data()) + this->lent, bytes };
     }

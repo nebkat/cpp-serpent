@@ -224,21 +224,26 @@ void sinks() {
     static_assert(lending_sink<span_sink>, "a fixed buffer is written into in place");
     static_assert(lending_sink<container_sink<std::vector<std::byte>>>, "so is a container");
 
-    // A container holding room for its document must not grow: what it was given is enough,
-    // whatever size the writer would have preferred to ask for.
+    // A container is grown to what the writer prefers, so that it composes in place right to
+    // the end; what that leaves it with is enough for the next document of the same size, which
+    // is then written without reallocating.
     {
-        std::vector<std::byte> sized;
-        sized.reserve(reference.size());
-        const auto *const storage = sized.data();
-        const auto capacity = sized.capacity();
-        container_sink into { sized };
-        basic_writer<prefer::size> filling { into };
-        filling.value(std::vector<int> { 1, 2, 3 });
-        check(filling.finish().has_value(), "an exactly reserved container accepts the document");
-        check_equal(std::string_view { hex(sized) }, std::string_view { hex(reference) },
-                "an exactly reserved container holds the same bytes");
-        check(sized.capacity() == capacity && sized.data() == storage,
-                "and never reallocated to get them");
+        std::vector<std::byte> reused;
+        const auto write_into = [&] {
+            reused.clear();
+            container_sink into { reused };
+            basic_writer<prefer::size> filling { into };
+            filling.value(std::vector<int> { 1, 2, 3 });
+            return filling.finish().has_value();
+        };
+        check(write_into(), "a container accepts the document");
+        const auto *const storage = reused.data();
+        const auto capacity = reused.capacity();
+        check(write_into(), "and the same document again");
+        check_equal(std::string_view { hex(reused) }, std::string_view { hex(reference) },
+                "holding the same bytes");
+        check(reused.capacity() == capacity && reused.data() == storage,
+                "without reallocating for the second");
     }
 
     // A fixed buffer must latch overflow at every length short of the whole document - and must

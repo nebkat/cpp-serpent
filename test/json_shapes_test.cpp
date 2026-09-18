@@ -133,12 +133,13 @@ int main() {
     check(json::decode_into(R"({"name":"b","inner":{"id":2,"name":"south","ratio":0.25,"active":false,"tags":[9,8,7]}})", reused),
             "and again");
 
-    // And written into a string that already exists, the same way round.
+    // And written into a string that already exists, the same way round: the first write leaves
+    // the string with the room a document of this size takes, and the next one keeps it.
     std::string out = "junk";
-    out.reserve(256);
+    check(json::write(reused, out).has_value() && out == json::encode(reused), "written into a string");
     const auto *const storage = out.data();
     check(json::write(reused, out).has_value() && out == json::encode(reused) && out.data() == storage,
-            "written into a string it keeps");
+            "and again, into the storage it has");
     check(reused.inner.tags.data() == tags_before && reused.inner.tags == std::vector<int> { 9, 8, 7 },
             "keeping the vector's storage");
     check(reused.inner.name.data() == name_before && reused.inner.name == "south", "and the string's");
