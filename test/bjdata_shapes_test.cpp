@@ -138,7 +138,7 @@ int main() {
 
     // Where a value belongs, a marker that does not open one is refused - whether the key before it
     // was one the type names, read the fast way, or one it does not.
-    for (const int not_a_value : { 'N', '}', ']', '#', '$', 0x00, 0xff }) {
+    for (const int not_a_value : std::initializer_list<int> { 'N', '}', ']', '#', '$', 0x00, 0xff }) {
         check(!bjdata::decode<record>(bytes({ '{', 'U', 2, 'i', 'd', not_a_value, '}' })),
                 "a marker that opens no value, after a key the type names");
         check(!bjdata::decode<with_defaults>(bytes({ '{', 'U', 6, 'a', 'l', 'w', 'a', 'y', 's', 'U', 5, 'U', 1, 'x',

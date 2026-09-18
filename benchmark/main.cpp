@@ -438,7 +438,7 @@ static void check_results(const std::vector<reading> &values, const std::string 
         agree("citm value count vs rapidjson", total, query::count_values_rapidjson(document));
     }
 
-    const auto first_key = json::reader::over(citm)["areaNames"]["205705994"].as<std::string_view>().value_or("<none>");
+    const auto first_key = json::reader::over(citm)["areaNames"]["205705994"].as<std::string>().value_or("<none>");
     agree("citm first-key lookup", first_key, other::parse(citm)["areaNames"]["205705994"].get<std::string>());
     agree("citm last-key lookup", json::reader::over(citm)["subjectNames"].is_object(), true);
     agree("citm validates", json::validate(citm).has_value(), true);
@@ -581,9 +581,9 @@ static void documents(const std::string &canada, const std::string &twitter, con
     // document, or most of one.
     const char *const workload = "JSON documents";
     bench::measure(workload, "citm first key", "serpent", citm.size(),
-            [&] { return json::reader::over(citm)["areaNames"]["205705994"].as<std::string_view>().value_or("").size(); });
+            [&] { return json::reader::over(citm)["areaNames"]["205705994"].as<std::string>().value_or("").size(); });
     bench::measure(workload, "citm first key", "serpent (indexed)", citm.size(), [&] {
-        return json::structural_index::over(citm).root()["areaNames"]["205705994"].as<std::string_view>().value_or("").size();
+        return json::structural_index::over(citm).root()["areaNames"]["205705994"].as<std::string>().value_or("").size();
     });
     bench::measure(workload, "citm first key", "simdjson", citm.size(), [&] {
         auto document = parser.iterate(citm_padded);
