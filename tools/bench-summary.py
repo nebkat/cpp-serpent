@@ -3,15 +3,18 @@
 
     tools/bench-summary.py <results dir> [--markdown]
 
-Each file in the directory is what one `serpent_bench_<configuration> --json` wrote. Every
-library that is not serpent is the same code in every build, so it is shown once, from the
-first configuration; serpent is shown once per configuration. Times are microseconds, and the
-figure in brackets is how many times the fastest row of the group each one took.
+Each file in the directory is what one `serpent_bench_<configuration> --json` wrote. One table per
+workload: a row per library, a column per operation. Every library that is not serpent is the same
+code in every build, so it is shown once; serpent is shown once per configuration. Times are
+microseconds; the figure beside each is how many times the first row's it is.
 """
 
 import json
 import pathlib
 import sys
+
+ROW_ORDER = ["serpent", "serpent (for size)", "serpent (indexed)", "glaze", "glaze (CBOR)", "glaze (size build)",
+             "simdjson", "yyjson", "rapidjson", "nlohmann"]
 
 
 def load(directory: pathlib.Path) -> dict[str, list[dict]]:
@@ -19,23 +22,38 @@ def load(directory: pathlib.Path) -> dict[str, list[dict]]:
     for path in sorted(directory.glob("*.json")):
         document = json.loads(path.read_text())
         runs[document["configuration"]] = document["results"]
-    # "default" first, since it is the one the others are read against.
     return dict(sorted(runs.items(), key=lambda item: (item[0] != "default", item[0])))
 
 
-def rows(runs: dict[str, list[dict]]) -> dict[str, dict[str, float]]:
-    """group -> row label -> nanoseconds: serpent in each configuration, then everyone else."""
-    ours: dict[str, dict[str, float]] = {}
-    theirs: dict[str, dict[str, float]] = {}
+def tables(runs: dict[str, list[dict]]):
+    """workload -> (columns, {row label: {operation: ns}})"""
+    out: dict[str, tuple[list[str], dict[str, dict[str, float]]]] = {}
     first = next(iter(runs))
     for configuration, results in runs.items():
         for entry in results:
-            if entry["library"].startswith("serpent"):
-                label = f"{entry['library']} [{configuration}]" if len(runs) > 1 else entry["library"]
-                ours.setdefault(entry["group"], {})[label] = entry["ns"]
-            elif configuration == first:
-                theirs.setdefault(entry["group"], {})[entry["library"]] = entry["ns"]
-    return {group: entries | theirs.get(group, {}) for group, entries in ours.items()}
+            ours = entry["library"].startswith("serpent")
+            if not ours and configuration != first:
+                continue
+            label = f"{entry['library']} [{configuration}]" if ours and len(runs) > 1 else entry["library"]
+            columns, rows = out.setdefault(entry["workload"], ([], {}))
+            if entry["operation"] not in columns:
+                columns.append(entry["operation"])
+            rows.setdefault(label, {})[entry["operation"]] = entry["ns"]
+    return out
+
+
+def base_name(label: str) -> str:
+    return label.split(" [")[0]
+
+
+def row_key(label: str):
+    base = base_name(label)
+    return (ROW_ORDER.index(base) if base in ROW_ORDER else len(ROW_ORDER), label)
+
+
+def cell(ns: float) -> str:
+    us = ns / 1000
+    return f"{us:.2f}" if us < 10 else f"{us:,.0f}"
 
 
 def main() -> int:
@@ -50,16 +68,31 @@ def main() -> int:
         print("no results there; run the benchmarks with --json first", file=sys.stderr)
         return 1
 
-    for group, entries in rows(runs).items():
-        fastest = min(entries.values())
+    for workload, (columns, rows) in tables(runs).items():
+        labels = sorted(rows, key=row_key)
+        first = rows[labels[0]]
         if markdown:
-            print(f"\n**{group}**\n\n| | µs | × fastest |\n|---|---:|---:|")
-            for label, ns in entries.items():
-                print(f"| {label} | {ns / 1000:,.1f} | {ns / fastest:.2f} |")
+            print(f"\n**{workload}** (µs, and times the first row)\n")
+            print("| | " + " | ".join(columns) + " |")
+            print("|---|" + "---:|" * len(columns))
         else:
-            print(f"\n{group}")
-            for label, ns in entries.items():
-                print(f"  {label:<32} {ns / 1000:>12,.1f} us   {ns / fastest:>6.2f}x")
+            print(f"\n{workload}  (us, and times the first row)")
+            print("  " + " " * 30 + "".join(f" {column:>19}" for column in columns))
+        for label in labels:
+            cells = []
+            for column in columns:
+                ns = rows[label].get(column)
+                if ns is None:
+                    cells.append("-")
+                elif label == labels[0] or first.get(column) is None:
+                    cells.append(cell(ns))
+                else:
+                    ratio = ns / first[column]
+                    cells.append(f"{cell(ns)} ({'>999' if ratio >= 1000 else f'{ratio:.2f}'}x)")
+            if markdown:
+                print(f"| {label} | " + " | ".join(cells) + " |")
+            else:
+                print(f"  {label:<30}" + "".join(f" {text:>19}" for text in cells))
     return 0
 
 

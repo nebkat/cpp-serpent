@@ -17,27 +17,32 @@ Every measured computation is first checked to produce the same answer in every 
 
 ## Your own types
 
-| | serpent | struct-mapping lib | the same, for size | DOM lib |
+Ten thousand records of five members: an integer, a string, two reals and a boolean. Binary is
+each library's own format - BJData [written for speed](bjdata.md#size-or-speed) for serpent,
+BEVE for the struct-mapping library, CBOR for the DOM library - and CBOR through the
+struct-mapping library too, which holds the format still.
+
+| | JSON encode | JSON decode | binary encode | binary decode |
 |---|---:|---:|---:|---:|
-| JSON decode | **511** | 561 | 861 | 7,581 |
-| JSON encode | 426 | **283** | 342 | 4,312 |
-| binary decode | 235 | 175 (CBOR), **160** (its own) | | 5,761 |
-| binary encode | **117** | 193 (CBOR), 153 (its own) | | 3,595 |
+| serpent | 419 | **543** | **117** | **145** |
+| serpent, BJData for size | | | 190 | 230 |
+| struct-mapping lib | **281** | 555 | 152 | 163 |
+| the same, CBOR | | | 210 | 214 |
+| the same, built for size | 342 | 860 | | |
+| DOM lib | 4,335 | 7,468 | 3,581 | 6,011 |
 
-Binary is BJData [written for speed](bjdata.md#size-or-speed); written for size it is 161 to
-encode and 297 to decode. Decoding allocates once per string and once for the container; the DOM
-library allocates 70,000 times.
+Decoding, serpent allocates once per string and once for the container; the struct-mapping
+library 10,015 times and the DOM library 70,029.
 
-By kind of member, JSON, against the struct-mapping library's normal build — below 1.0 is serpent
-ahead:
+The same, one kind of member at a time and a record of numbers in bulk, as a ratio to the
+struct-mapping library's normal build - below 1.0 is serpent ahead:
 
-| | strings | booleans | integers | reals |
-|---|---:|---:|---:|---:|
-| decode | **0.89** | **0.75** | 1.11 | 1.13 |
-| encode | 1.14 | 2.14 | **0.59** | 1.18 |
-
-A hundred records of two thousand numbers each, which both libraries write as one typed
-payload: 62 to encode against 46, and 48 to decode against 40.
+| | strings | booleans | integers | reals | 100 × 2000 numbers |
+|---|---:|---:|---:|---:|---:|
+| JSON encode | 1.13 | 2.31 | **0.63** | 1.32 | 1.44 |
+| JSON decode | **0.87** | **0.74** | 1.15 | 1.18 | 1.86 |
+| binary encode | 1.04 | 1.28 | 1.22 | 1.24 | 1.38 |
+| binary decode | **0.78** | 1.43 | **0.98** | **1.00** | 1.21 |
 
 A described type is what all of this is for. The same record behind a hand-written
 `json_convert` takes 261 to encode to BJData and 1,186 to decode.
@@ -54,7 +59,7 @@ switch off:
 | JSON encode | 426 | 1,173 |
 | JSON encode, five reals | 415 | 2,203 |
 | JSON encode, five integers | 141 | 377 |
-| binary decode | 235 | 290 |
+| binary decode | 145 | 290 |
 | binary encode | 117 | 153 |
 
 ## It was never the format
@@ -72,25 +77,24 @@ small file flatters a library.
 
 ## Reading a document without a type
 
-| | serpent | on-demand | fast DOM A | fast DOM B | DOM lib |
+| | first key of citm | last key of citm | sum ids, twitter | count every value, citm | sum coordinates, canada |
 |---|---:|---:|---:|---:|---:|
-| first key of citm_catalog.json | **0.07** | 178 | 366 | 864 | 7,333 |
-| last key of the same | 695 | **272** | 366 | 861 | 7,306 |
-| sum ids, twitter.json | 247 | **111** | 145 | 758 | 3,408 |
-| count every value, citm_catalog.json | 1,186 | **311** | 414 | 909 | 7,472 |
-| the same, with an index built first | 842 | | | | |
-| sum every coordinate, canada.json | 2,882 | 1,619 | **1,253** | 1,950 | 13,301 |
+| serpent | **0.07** | 688 | 248 | 1,187 | 3,084 |
+| serpent, over an index built first | 766 | 763 | 281 | 845 | 3,244 |
+| on-demand parser | 178 | **271** | **109** | **310** | 1,608 |
+| fast DOM A | 377 | 372 | 143 | 419 | **1,246** |
+| fast DOM B | 936 | 861 | 755 | 902 | 1,940 |
+| DOM lib | 8,194 | 7,213 | 3,363 | 7,339 | 12,717 |
 
-serpent reads in place and builds nothing, so what it does not look at costs nothing and it
-never allocates; walking a whole document it is 2-4x behind parsers that index or build one
-first. `json::validate` alone takes 694 on citm.
+serpent reads in place and builds nothing, so what it does not look at costs nothing and it never
+allocates; walking a whole document it is 2-4x behind parsers that index or build one first.
 
 ## What this means
 
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types | level on JSON decode, ahead on binary encode, 1.5x behind on JSON encode and binary decode |
+| convert your own types | level on JSON decode, ahead on binary in both directions, 1.5x behind on JSON encode |
 | traverse whole documents repeatedly | an indexing parser is 2-4x quicker |
 | want a mutable document object | serpent has none |
 | need BJData and JSON from one definition, or cannot allocate while reading | serpent |
