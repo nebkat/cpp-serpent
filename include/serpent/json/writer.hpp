@@ -196,6 +196,32 @@ public:
         return true;
     }
 
+    /**
+     * Writes a whole object as one piece - the comma that separates it from the element before,
+     * its braces and everything between - into room claimed once, where opening it, each member
+     * and closing it would otherwise ask for their own.
+     *
+     * `write` is handed room for `at_most` characters after the comma, if any, and returns how
+     * many it used; what it writes has to be exactly what object() and the members would have.
+     * False, with nothing written, where this writer is indenting, where a value is not due here,
+     * or where the room cannot be had in one piece: the object is then written the usual way.
+     */
+    template<typename Write>
+    [[nodiscard]] bool compose_object(std::size_t at_most, Write write) noexcept {
+        if (this->options.indent != 0) return false;
+        if (this->inside_object() && !this->pending_value) return false;
+        const bool comma = !this->inside_object() && this->has_members();
+
+        char *const to = this->room_for(at_most + 1);
+        if (to == nullptr) return false;
+        if (comma) to[0] = ',';
+        this->used((comma ? 1 : 0) + write(to + (comma ? 1 : 0)));
+
+        if (this->inside_object()) this->pending_value = false;
+        if (this->depth > 0) this->written_mask |= 1u << (this->depth - 1);
+        return true;
+    }
+
     /** Whether the object that is open has had a member written yet, and so whether the next needs a comma. */
     [[nodiscard]] bool has_members() const noexcept {
         return this->depth > 0 && (this->written_mask & (1u << (this->depth - 1))) != 0;

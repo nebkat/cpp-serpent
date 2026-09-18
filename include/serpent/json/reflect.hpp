@@ -335,8 +335,26 @@ class object_writer {
     writer &out;
     const T &value;
 
+    /** Whether every member the type writes is in one run, so the whole object has a longest length. */
+    static constexpr bool whole_object_bounded = runs::members.size() > 0 && runs::begins_run(0)
+            && runs::run_end(0) == runs::members.size();
+
 public:
     object_writer(writer &out, const T &value) noexcept : out(out), value(value) {}
+
+    /** The object with its braces as one piece, where it can be; false where it was not written. */
+    [[nodiscard]] bool write_whole_object() {
+        if constexpr (!whole_object_bounded) {
+            return false;
+        } else {
+            return this->out.compose_object(2 + runs::widest_run(0, runs::members.size()), [this](char *const to) {
+                to[0] = '{';
+                char *const end = this->write_run_into<0, runs::members.size()>(to + 1, false);
+                *end = '}';
+                return static_cast<std::size_t>(end + 1 - to);
+            });
+        }
+    }
 
     void write_members() {
         template for (constexpr auto member : runs::members) {
@@ -380,20 +398,22 @@ private:
     template<std::size_t First, std::size_t Last>
     [[nodiscard]] bool write_run() {
         return this->out.compose_members(runs::widest_run(First, Last), [this](char *const to) {
-            char *at = to;
-            bool first_in_object = !this->out.has_members();
-
-            template for (constexpr auto member : runs::members) {
-                if constexpr (runs::within(member, First, Last)) {
-                    static constexpr std::string_view name = serpent::detail::field_key<T, member>();
-                    at = first_in_object ? copy_constant(at, written_key<name>)
-                                         : copy_constant(at, written_next_key<name>);
-                    at = write_text(at, this->value.[:member:]);
-                    first_in_object = false;
-                }
-            }
-            return static_cast<std::size_t>(at - to);
+            return static_cast<std::size_t>(this->write_run_into<First, Last>(to, this->out.has_members()) - to);
         });
+    }
+
+    /** The members from `First` up to `Last` stored at `to`, the first with a comma before it if `after_another`. */
+    template<std::size_t First, std::size_t Last>
+    [[nodiscard]] char *write_run_into(char *to, bool after_another) {
+        template for (constexpr auto member : runs::members) {
+            if constexpr (runs::within(member, First, Last)) {
+                static constexpr std::string_view name = serpent::detail::field_key<T, member>();
+                to = after_another ? copy_constant(to, written_next_key<name>) : copy_constant(to, written_key<name>);
+                to = write_text(to, this->value.[:member:]);
+                after_another = true;
+            }
+        }
+        return to;
     }
 
     /** The same members when that room could not be had: each the usual way. */
@@ -422,8 +442,10 @@ template<reflected_type T>
 void write_reflected(writer &out, const T &value) {
     static_assert(serpent::detail::keys_are_distinct<T>(), serpent::detail::duplicate_key_message<T>());
     static_assert(serpent::detail::annotations_make_sense<T>(), serpent::detail::annotation_complaint<T>());
+    object_writer<T> composer { out, value };
+    if (composer.write_whole_object()) return;
     const auto scope = out.object();
-    object_writer<T> { out, value }.write_members();
+    composer.write_members();
 }
 
 #endif // SERPENT_BOUNDED_OBJECT_WRITE
