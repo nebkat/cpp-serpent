@@ -88,12 +88,25 @@ public:
         const auto spare = this->target->capacity() - this->lent;
         auto bytes = std::max(at_least, std::min(preferred, spare));
         if (bytes == 0) bytes = std::max(preferred, std::size_t { 1 });
-        this->target->resize(this->lent + bytes);
+        this->grow_to(this->lent + bytes);
         return { reinterpret_cast<std::byte *>(this->target->data()) + this->lent, bytes };
     }
 
     /** Keeps that much of what was lent, and gives the rest back. */
     void keep(std::size_t bytes) { this->target->resize(this->lent + bytes); }
+
+private:
+    /**
+     * Room that is about to be written into does not need to be zeroed first, and resize() zeroes
+     * it: every byte of a document written twice. A string can be told not to; a vector cannot.
+     */
+    void grow_to(std::size_t size) {
+        if constexpr (requires { this->target->resize_and_overwrite(size, [](char *, std::size_t count) { return count; }); }) {
+            this->target->resize_and_overwrite(size, [](char *, std::size_t count) { return count; });
+        } else {
+            this->target->resize(size);
+        }
+    }
 
     [[nodiscard]] const Container &container() const noexcept { return *this->target; }
 };
