@@ -12,7 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <tuple>
+#include <variant>
 #include <vector>
 
 using namespace serpent;
@@ -184,9 +184,11 @@ void ranges_of_numbers() {
             "a list is written as a vector is");
 
     // An array that is mixed anyway has no type to be of, and each value in it narrows on its own.
-    check_equal(std::string_view { hex(encode(std::tuple { 1, 1000000, 1.0 })) }, "5b55016d40420f0068003c5d",
-            "a tuple's numbers narrow where size is preferred");
-    check_equal(std::string_view { hex(encode<prefer::speed>(std::tuple { 1, 1.0f })) }, "5b6c01000000640000803f5d",
+    check_equal(std::string_view { hex(encode(std::vector<std::variant<int, double>> { 1, 1000000, 1.0 })) },
+            "5b55016d40420f0068003c5d",
+            "a mixed array's numbers narrow where size is preferred");
+    check_equal(std::string_view { hex(encode<prefer::speed>(std::vector<std::variant<int, float>> { 1, 1.0f })) },
+            "5b2355026c01000000640000803f",
             "and keep their types where speed is");
 }
 
@@ -262,7 +264,7 @@ void sinks() {
             check(capacity - out.size() <= longest_token, "and it kept everything that fitted");
         }
     };
-    sweep(std::vector<int> { 1, 2, 3 }, 6);
+    sweep(std::vector<int> { 1, 2, 3 }, 12); // a typed array's payload is one token
     sweep(words, 8);
 
     std::vector<std::byte> exact(reference.size());

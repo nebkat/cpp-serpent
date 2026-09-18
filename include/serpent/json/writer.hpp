@@ -382,7 +382,34 @@ void writer::bytes(const R &items) noexcept {
 
 template<std::ranges::input_range R>
 void writer::range(const R &items) noexcept {
+    using element = std::remove_cvref_t<std::ranges::range_value_t<R>>;
     const auto scope = this->array();
+
+    // Numbers and booleans have a longest text, so a batch of them is written into room claimed
+    // once, comma and all, where each would otherwise ask for its own and then for its comma's.
+    // What a batch cannot have - indentation, room, an element that is not so simple - each
+    // element is written the usual way.
+    if constexpr (widest_text<element> != 0) {
+        if (this->options.indent == 0) {
+            auto at = std::ranges::begin(items);
+            const auto end = std::ranges::end(items);
+            while (at != end) {
+                constexpr std::size_t batch = 16;
+                char *const to = this->room_for(batch * (widest_text<element> + 1));
+                if (to == nullptr) break;
+                char *cursor = to;
+                for (std::size_t written = 0; written < batch && at != end; ++written, ++at) {
+                    if (this->has_members()) *cursor++ = ',';
+                    cursor = write_text(cursor, static_cast<element>(*at));
+                    this->written_mask |= 1u << (this->depth - 1);
+                }
+                this->used(static_cast<std::size_t>(cursor - to));
+            }
+            for (; at != end; ++at) emit_value(*this, static_cast<element>(*at));
+            return;
+        }
+    }
+
     for (detail::range_element_t<decltype(items)> item : items)
         emit_value(*this, item);
 }

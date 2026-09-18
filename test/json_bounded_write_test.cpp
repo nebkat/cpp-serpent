@@ -150,6 +150,12 @@ int main() {
     fits_exactly(interrupted {}, 32);
     fits_exactly(with_text {}, 32);
     fits_exactly(std::vector<inner>(40), 8);
+    // Elements of a range are written in batches into room claimed once, when it can be had.
+    fits_exactly(std::vector<double>(50, 0.1), 32);
+    fits_exactly(std::vector<int>(100, -7), 32);
+    fits_exactly(std::vector<bool> { true, false, true, true, false }, 32);
+    check_equal(std::string_view { json::encode(std::vector<int> { 1, 2, 3 }, { .indent = 1 }) },
+            std::string_view { "[\n 1,\n 2,\n 3\n]" }, "and one at a time when indenting");
 
     return report("json_bounded_write");
 }
