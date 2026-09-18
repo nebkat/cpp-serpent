@@ -13,6 +13,7 @@ set(TESTS
     json_reader
     json_real_read
     json_string_scan
+    traversals_apart
     real_text
     json_indexed
     json_walking

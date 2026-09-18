@@ -100,7 +100,7 @@ struct serializer {
 
     /** Reads the members from an object the caller has already identified. */
     template<typename Source>
-    static bool read_members(Source source, T &value) {
+    static bool read_members(const Source &source, T &value) {
         if (!source.is_object()) return false;
         read_visitor<Source> visitor { source };
         if constexpr (convertible_type<T>) {
@@ -117,7 +117,7 @@ struct serializer {
 
     /** Reads from any source offering the reader interface. Resolved as to_json is. */
     template<typename Source>
-    static bool read(Source source, T &value) {
+    static bool read(const Source &source, T &value) {
         static_assert(!(detail::tabulated_type<T> && (convertible_type<T> || requires { from_json(source, value); })),
                 "this type has a serpent::describe table and also a hand-written conversion. The "
                 "table would be used and one of them would do nothing; remove whichever you did not "
@@ -169,7 +169,7 @@ struct serializer {
  * the read failed for some other reason, or when the type cannot be walked this way.
  */
 template<typename T, typename Source>
-std::string_view first_missing_member(Source source) {
+std::string_view first_missing_member(const Source &source) {
     if constexpr ((convertible_type<T> || reflected_type<T> || detail::tabulated_type<T>)
             && std::default_initializable<T>) {
         if (!source.is_object()) return {};
@@ -215,7 +215,7 @@ void write_members(Writer &out, const T &value) {
  * can be read separately from the same object.
  */
 template<typename Source, typename T>
-bool read_members(Source source, T &value) {
+bool read_members(const Source &source, T &value) {
     return serializer<std::remove_cvref_t<T>>::read_members(source, value);
 }
 
@@ -227,7 +227,7 @@ bool read_members(Source source, T &value) {
  * alternatives on its own; two alternatives of the same shape are decided by their order.
  */
 template<typename Source, typename T>
-bool read_discriminating(Source source, T &value) {
+bool read_discriminating(const Source &source, T &value) {
     // Outside a sum type an object with none of the expected keys decodes to defaults, which is
     // what "a missing key keeps its value" means. That answer is useless for telling
     // alternatives apart, so here an object has to name at least one member to be believed.
@@ -276,7 +276,7 @@ consteval bool all_discriminated(std::index_sequence<Index...>) {
  * only a name distinguishes them. Alternatives that are not objects keep the untagged path.
  */
 template<typename Source, typename Variant, std::size_t... Index>
-bool read_named_alternative(Source source, Variant &value, std::index_sequence<Index...>) {
+bool read_named_alternative(const Source &source, Variant &value, std::index_sequence<Index...>) {
     if (!source.is_valid()) return false;
 
     if (source.is_object()) {
@@ -319,7 +319,7 @@ bool read_named_alternative(Source source, Variant &value, std::index_sequence<I
  * an array - already says what it is, so it is recovered the way an untagged variant is.
  */
 template<tagged Tag, typename Source, typename Variant, std::size_t... Index>
-bool read_tagged(Source source, Variant &value, std::index_sequence<Index...>) {
+bool read_tagged(const Source &source, Variant &value, std::index_sequence<Index...>) {
     if (!source.is_valid()) return false;
 
     if (source.is_object()) {
@@ -357,12 +357,12 @@ bool read_tagged(Source source, Variant &value, std::index_sequence<Index...>) {
 }
 
 template<tagged Tag, typename Source, typename Variant>
-bool read_into(Source source, tagged_variant<Tag, Variant> wrapper) {
+bool read_into(const Source &source, tagged_variant<Tag, Variant> wrapper) {
     return read_tagged<Tag>(source, wrapper.target, std::make_index_sequence<std::variant_size_v<Variant>> {});
 }
 
 template<typename Source, typename Variant, std::size_t... Index>
-bool read_alternative(Source source, Variant &value, std::index_sequence<Index...>) {
+bool read_alternative(const Source &source, Variant &value, std::index_sequence<Index...>) {
     if constexpr (all_discriminated<Variant>(std::index_sequence<Index...> {})) {
         return read_named_alternative(source, value, std::index_sequence<Index...> {});
     }
@@ -378,7 +378,7 @@ bool read_alternative(Source source, Variant &value, std::index_sequence<Index..
 
 /** Reads one value into a destination, handling optionals and containers along the way. */
 template<typename Source, typename T>
-bool read_into(Source source, T &value) {
+bool read_into(const Source &source, T &value) {
     if constexpr (std::is_enum_v<T>) {
         // The counterpart of the write side: named values are matched, and anything else is
         // read as the underlying number, which is what was written for it.
@@ -419,7 +419,7 @@ bool read_into(Source source, T &value) {
             // A source with no binary type of its own carries it as an array of integers.
             if (!source.is_array()) return false;
             std::size_t index = 0;
-            for (const auto element : source.array()) {
+            for (const auto &element : source.array()) {
                 const auto octet = element.template as<std::uint8_t>();
                 if (!octet) return false;
                 if constexpr (requires(T &target) { target.push_back(std::byte {}); }) {
@@ -452,7 +452,7 @@ bool read_into(Source source, T &value) {
         if constexpr (requires { source.size_hint(); } && requires(T &target) { target.reserve(std::size_t {}); }) {
             if (const auto hint = source.size_hint()) value.reserve(*hint);
         }
-        for (const auto element : source.array()) {
+        for (const auto &element : source.array()) {
             // A container that hands back a proxy rather than a reference - std::vector<bool> -
             // has nothing to read into, so the element is read beside it and then pushed.
             if constexpr (std::is_lvalue_reference_v<decltype(value.emplace_back())>) {
@@ -470,7 +470,7 @@ bool read_into(Source source, T &value) {
         // otherwise be a type that writes and cannot be read.
         if (!source.is_array()) return false;
         value.clear();
-        for (const auto element : source.array()) {
+        for (const auto &element : source.array()) {
             std::ranges::range_value_t<T> item {};
             if (!read_into(element, item)) return false;
             value.insert(std::move(item));
@@ -483,7 +483,7 @@ bool read_into(Source source, T &value) {
         if (!source.is_array()) return false;
         auto slot = std::ranges::begin(value);
         const auto limit = std::ranges::end(value);
-        for (const auto element : source.array()) {
+        for (const auto &element : source.array()) {
             if (slot == limit) return false;
             if (!read_into(element, *slot)) return false;
             ++slot;
@@ -503,7 +503,7 @@ bool read_into(Source source, T &value) {
         // the same way rather than as an object it could never have been.
         if (!source.is_array()) return false;
         value.clear();
-        for (const auto element : source.array()) {
+        for (const auto &element : source.array()) {
             std::pair<typename T::key_type, typename T::mapped_type> entry {};
             if (!read_into(element, entry)) return false;
             value.emplace(std::move(entry.first), std::move(entry.second));
@@ -515,7 +515,7 @@ bool read_into(Source source, T &value) {
                          }) {
         if (!source.is_object()) return false;
         value.clear();
-        for (const auto entry : source.items()) {
+        for (const auto &entry : source.items()) {
             typename T::mapped_type slot {};
             if (!read_into(entry.value, slot)) return false;
             // A key that is already a view of the source is used as-is; one that has to be

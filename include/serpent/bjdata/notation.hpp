@@ -3,7 +3,7 @@
 #include <serpent/bjdata/detail.hpp>
 #include <serpent/bjdata/marker.hpp>
 #include <serpent/real_format.hpp>
-#include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/reader.hpp>
 
 #include <charconv>
 #include <cmath>
@@ -297,6 +297,6 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
     return out;
 }
 
-[[nodiscard]] inline std::string block_notation(const view &value) { return block_notation(value.buffer()); }
+[[nodiscard]] inline std::string block_notation(const reader &value) { return block_notation(value.buffer()); }
 
 } // namespace serpent::bjdata

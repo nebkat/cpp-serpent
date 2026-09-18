@@ -1,10 +1,10 @@
 #pragma once
 
 // The document-level BJData API: encode a value, decode a value, measure one, or splice one
-// document into another. These name the BJData writer and view, so they live here rather
+// document into another. These name the BJData writer and reader, so they live here rather
 // than in serial/, which knows about neither.
 
-#include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/reader.hpp>
 #include <serpent/bjdata/writer.hpp>
 #include <serpent/serializer.hpp>
 #include <serpent/sink.hpp>
@@ -20,7 +20,7 @@ namespace serpent::bjdata {
 
 /** Copies a value into a writer with no re-encoding: its marker, then its bytes. */
 template<prefer Preference>
-void write_value(basic_writer<Preference> &out, view source) noexcept {
+void write_value(basic_writer<Preference> &out, const reader &source) noexcept {
     const auto payload = source.payload_bytes();
     if (!payload) {
         out.fail(errc::type_mismatch);
@@ -56,7 +56,7 @@ template<prefer Preference = prefer::size, typename T>
 /** Decodes a value from a buffer, or nullopt when it does not parse. */
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
-    return view::over(buffer).as<T>();
+    return reader::over(buffer).as<T>();
 }
 
 /**
@@ -72,11 +72,11 @@ template<typename T>
 template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
-    auto value = view::over(buffer).as<T>();
+    auto value = reader::over(buffer).as<T>();
     if (!value) {
         // A member the type needed and the document left out is the one mismatch that can say
         // something specific, so it is worth the walk back over the document to name it.
-        if (const auto absent = first_missing_member<T>(view::over(buffer)); !absent.empty()) {
+        if (const auto absent = first_missing_member<T>(reader::over(buffer)); !absent.empty()) {
             return std::unexpected { error { errc::missing_key, 0, absent } };
         }
         return std::unexpected { error { errc::type_mismatch, 0 } };

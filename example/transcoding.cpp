@@ -25,7 +25,7 @@ int main() {
         return 1;
     }
 
-    const auto document = bjdata::view::over(stored);
+    const auto document = bjdata::reader::over(stored);
 
     // Straight to JSON, without decoding into anything in between.
     std::printf("%s\n\n", json::encode(document, { .indent = 2 }).c_str());
@@ -41,6 +41,6 @@ int main() {
     bjdata::write_value(writer, document["beta"]);
     if (!writer.finish()) return 1;
 
-    std::printf("lifted \"beta\" as %zu bytes: %s\n", lifted.size(), json::encode(bjdata::view::over(lifted)).c_str());
+    std::printf("lifted \"beta\" as %zu bytes: %s\n", lifted.size(), json::encode(bjdata::reader::over(lifted)).c_str());
     return 0;
 }

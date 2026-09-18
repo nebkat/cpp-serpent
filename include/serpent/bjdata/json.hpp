@@ -5,11 +5,11 @@
 // The bridge between the two formats, so neither json/ nor bjdata/ has to know about the
 // other, and it is how an already-encoded document is rendered:
 //
-//     json::encode(bjdata::view::over(bjdata::encode(value)))
+//     json::encode(bjdata::reader::over(bjdata::encode(value)))
 
 #include <serpent/bjdata/document.hpp>
 #include <serpent/bjdata/ndarray.hpp>
-#include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/reader.hpp>
 #include <serpent/json/writer.hpp>
 #include <serpent/sink.hpp>
 
@@ -22,9 +22,8 @@ namespace serpent::json {
 
 using bjdata::as_ndarray;
 using bjdata::ndarray_view;
-using bjdata::view;
 
-void write_value(writer &out, view source);
+void write_value(writer &out, const bjdata::reader &source);
 
 /** An N-D array is nested rather than flattened, which is what a JSON consumer expects. */
 inline void write_ndarray(writer &out, const ndarray_view &source) {
@@ -38,7 +37,7 @@ inline void write_ndarray(writer &out, const ndarray_view &source) {
 }
 
 /** Transcribes one BJData value, and everything under it, as JSON. */
-inline void write_value(writer &out, view source) {
+inline void write_value(writer &out, const bjdata::reader &source) {
     switch (source.type()) {
     case kind::null: out.null(); return;
     case kind::boolean: out.boolean(source.as<bool>() == true); return;
@@ -63,13 +62,13 @@ inline void write_value(writer &out, view source) {
             return;
         }
         const auto scope = out.array();
-        for (const auto element : source.array())
+        for (const auto &element : source.array())
             write_value(out, element);
         return;
     }
     case kind::object: {
         const auto scope = out.object();
-        for (const auto [name, element] : source.items()) {
+        for (const auto &[name, element] : source.items()) {
             out.key(name);
             write_value(out, element);
         }
@@ -87,7 +86,7 @@ inline void write_value(writer &out, view source) {
  * call it a success. payload_bytes() costs a single pass over the value.
  */
 template<sink S>
-std::expected<std::size_t, error> write(S &out, view source, writer_options options = {}) {
+std::expected<std::size_t, error> write(S &out, const bjdata::reader &source, writer_options options = {}) {
     writer target { out, options };
     if (!source.payload_bytes()) {
         target.fail(errc::unexpected_end);
@@ -98,7 +97,7 @@ std::expected<std::size_t, error> write(S &out, view source, writer_options opti
 }
 
 /** The allocating convenience over write_TMP. Empty when the document does not parse. */
-[[nodiscard]] inline std::string encode(view source, writer_options options = {}) {
+[[nodiscard]] inline std::string encode(const bjdata::reader &source, writer_options options = {}) {
     std::string text;
     container_sink out { text };
     if (!write(out, source, options)) text.clear();

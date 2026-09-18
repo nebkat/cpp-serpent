@@ -1,7 +1,7 @@
 #pragma once
 
 #include <serpent/bjdata/detail.hpp>
-#include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/reader.hpp>
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <optional>
@@ -13,14 +13,14 @@
 namespace serpent::bjdata {
 
 /**
- * @brief A multi-dimensional view over a typed array counted by a dimension array.
+ * @brief A multi-dimensional reader over a typed array counted by a dimension array.
  *
  * Extents and strides are materialised on construction, so peeling a dimension is pure
  * arithmetic on a pointer. That also makes the column-major form free: it is a different
  * set of strides over the same bytes rather than a permuted copy of them.
  *
  * Requires a fixed-width strong type, which is what makes the arithmetic possible; an
- * untyped container counted by dimensions is still traversable through view::array().
+ * untyped container counted by dimensions is still traversable through reader::array().
  */
 class ndarray_view {
     marker element = marker::invalid;
@@ -86,9 +86,9 @@ public:
     }
 
     /** The scalar this slice has been narrowed down to, once every dimension is peeled. */
-    [[nodiscard]] view value() const noexcept {
+    [[nodiscard]] reader value() const noexcept {
         if (this->order != 0 || !this->is_valid()) return {};
-        return view { this->element, this->source, this->base };
+        return reader { this->element, this->source, this->base };
     }
 
     /** The whole payload in place, when the slice is contiguous and T matches exactly. */
@@ -103,14 +103,14 @@ public:
         return nonstd::unaligned_little_span<const T> { this->base, count };
     }
 
-    friend std::optional<ndarray_view> as_ndarray(const view &value) noexcept;
+    friend std::optional<ndarray_view> as_ndarray(const reader &value) noexcept;
 };
 
 /**
  * Views a typed array as an N-D array. A plain integer count gives rank 1, a dimension
  * array gives its declared rank. Returns nullopt for an untyped or malformed container.
  */
-[[nodiscard]] inline std::optional<ndarray_view> as_ndarray(const view &value) noexcept {
+[[nodiscard]] inline std::optional<ndarray_view> as_ndarray(const reader &value) noexcept {
     if (!value.is_array()) return std::nullopt;
 
     const auto info = value.container_header();

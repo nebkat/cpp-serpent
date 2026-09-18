@@ -1,7 +1,6 @@
 #pragma once
 
-// decode() and try_decode(), which own the whole of a read and so keep a memo of their own -
-// isolating the traversal from anything else the thread is reading at the same time.
+// decode() and try_decode(): a whole document into one of your types.
 
 #include <serpent/json/reader.hpp>
 
@@ -11,17 +10,10 @@
 
 namespace serpent::json {
 
-/**
- * Decodes a value from JSON text.
- *
- * Read through a walking handle, which leaves a note of how far each traversal got so the step
- * to the next value resumes rather than restarting. Nothing about the result changes; a document
- * that decodes one way decodes the same the other, which the suite asserts.
- */
+/** Decodes a value from JSON text. */
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::string_view text) {
-    walk_memo memo;
-    return reader::over(text, memo).template as<T>();
+    return reader::over(text).template as<T>();
 }
 
 /**
@@ -34,8 +26,7 @@ template<typename T>
 template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::string_view text) {
     if (const auto checked = validate(text); !checked) return std::unexpected { checked.error() };
-    walk_memo memo;
-    auto value = reader::over(text, memo).template as<T>();
+    auto value = reader::over(text).template as<T>();
     if (!value) {
         if (const auto absent = first_missing_member<T>(reader::over(text)); !absent.empty()) {
             return std::unexpected { error { errc::missing_key, 0, absent } };

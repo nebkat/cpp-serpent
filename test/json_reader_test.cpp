@@ -14,10 +14,10 @@
 using namespace serpent;
 using namespace serpent::json;
 
-static_assert(std::forward_iterator<array_iterator>);
-static_assert(std::forward_iterator<member_iterator>);
-static_assert(std::ranges::forward_range<array_range>);
-static_assert(std::ranges::forward_range<member_range>);
+static_assert(std::input_iterator<array_iterator>);
+static_assert(std::input_iterator<member_iterator>);
+static_assert(std::ranges::input_range<array_range>);
+static_assert(std::ranges::input_range<member_range>);
 
 namespace {
 
@@ -117,7 +117,7 @@ void containers() {
     check(!spaced["missing"].is_valid(), "missing key poisons");
 
     std::string keys;
-    for (const auto entry : spaced.items())
+    for (const auto &entry : spaced.items())
         keys += entry.key_string();
     check_equal(keys, std::string { "ab" }, "items preserves order");
 
@@ -185,11 +185,11 @@ void truncation() {
             // Traversal of an unvalidated truncated document must still be safe.
             const auto value = reader::over(prefix);
             std::size_t seen = 0;
-            for (const auto element : value.array()) {
+            for (const auto &element : value.array()) {
                 std::ignore = element.as<long long>();
                 if (++seen > 64) break;
             }
-            for (const auto entry : value.items()) {
+            for (const auto &entry : value.items()) {
                 std::ignore = entry.key_is("a");
                 std::ignore = entry.value.as<std::string>();
                 if (++seen > 64) break;

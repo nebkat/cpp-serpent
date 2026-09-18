@@ -125,8 +125,8 @@ void a_member_of_another_type() {
 
     // The tree is read through the same document as everything else, so a reader that wants
     // only part of it does not build the rest.
-    const auto view = bjdata::view::over(bytes);
-    check_equal(*view["detail"]["records"].as<int>(), 12, "read in place without a tree at all");
+    const auto reader = bjdata::reader::over(bytes);
+    check_equal(*reader["detail"]["records"].as<int>(), 12, "read in place without a tree at all");
 }
 
 #if SERPENT_HAS_REFLECTION
@@ -192,14 +192,14 @@ void a_tree_is_a_source() {
     check(recovered && recovered->reason == "out_of_range", "its members are there");
     check(recovered && *recovered->detail["records"].as<int>() == 12, "nested, including a tree inside it");
 
-    // The same answers a view gives, from the same document held the other way.
+    // The same answers a reader gives, from the same document held the other way.
     const serpent::value_reader handle { tree };
     check(handle.is_object() && handle.size() == 2, "shape");
     check_equal(*handle["reason"].as<std::string_view>(), std::string_view { "out_of_range" }, "a member by key");
     check(!handle["nope"].is_valid(), "and an absent member is invalid, not null");
 
     std::size_t walked = 0;
-    for (const auto entry : handle.items()) walked += entry.key_is("reason") ? 1 : 0;
+    for (const auto &entry : handle.items()) walked += entry.key_is("reason") ? 1 : 0;
     check_equal(walked, std::size_t { 1 }, "items() walks it the way every reader's does");
 
     const auto numbers = serpent::to_value(std::vector<int> { 4, 5, 6 });

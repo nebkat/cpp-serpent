@@ -53,13 +53,14 @@ type per format actually used:
 Only types actually used with both pay it. Erasing the writer would remove that cost, at the
 price of the concrete API that the zero-copy paths are built on.
 
-## Why `view` is not called `reader`
+## Why a reader cannot be copied
 
-`bjdata::view` never advances. Copy it, index it, iterate it — it still refers to the same
-value. That is `span`/`string_view` semantics.
-
-`json::reader` cannot be a view because JSON values must be constructed. The distinction is
-the format's, and naming them the same would hide it exactly where it matters.
+A reader is a handle to one value and holds nothing of its own - but it does keep a note of how
+far a walk of that value got, so that the iterator that owns it can step past it without walking
+it again. A copy would carry a note of its own that the iterator never sees, and a loop written
+`for (auto child : ...)` would quietly cost twice what `for (auto &child : ...)` costs. Deleting
+the copy makes the compiler say so. Nothing is shared between traversals or between threads, and
+nothing points at anything that can die before it.
 
 ## Correctness
 

@@ -4,6 +4,7 @@
 #include <serpent/fwd.hpp>
 
 #include <concepts>
+#include <iterator>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -93,10 +94,12 @@ struct convert_probe {
  */
 template<typename Source>
 class read_visitor {
-    using iterator = decltype(std::declval<const Source &>().items().begin());
+    using range = decltype(std::declval<const Source &>().items());
+    using iterator = decltype(std::declval<const range &>().begin());
 
-    Source source {};
-    iterator cursor {};
+    const Source *source = nullptr;
+    range members;
+    iterator cursor;
     bool complete = true;
     std::size_t found = 0;
     std::string_view absent {};
@@ -104,7 +107,10 @@ class read_visitor {
 public:
     static constexpr bool is_reading = true;
 
-    explicit read_visitor(Source source) noexcept : source(source), cursor(source.items().begin()) {}
+    explicit read_visitor(const Source &source) noexcept
+    : source(&source)
+    , members(source.items())
+    , cursor(this->members.begin()) {}
 
     /**
      * A member the document has to carry.
@@ -158,8 +164,8 @@ public:
 private:
     template<typename T>
     bool take(std::string_view name, T &value) {
-        if (this->cursor != iterator {}) {
-            const auto entry = *this->cursor;
+        if (this->cursor != this->members.end()) {
+            const auto &entry = *this->cursor;
             if (entry.key_is(name)) {
                 if (!read_into(entry.value, value)) this->complete = false;
                 ++this->found;
@@ -167,7 +173,7 @@ private:
                 return true;
             }
         }
-        const auto elsewhere = this->source[name];
+        const auto elsewhere = (*this->source)[name];
         if (!elsewhere.is_valid()) return false; // absent: the caller decides whether that is allowed
         ++this->found;
         if (!read_into(elsewhere, value)) this->complete = false;

@@ -3,13 +3,13 @@
 // An owning document tree, for building a document whose shape is decided as it is written.
 //
 // Its own header, included by nothing else, because the library is built the other way round:
-// bytes are read in place through a view and written straight from your types, with no tree in
+// bytes are read in place through a reader and written straight from your types, with no tree in
 // between. That is still true of everything else here - this is the escape hatch for the case
 // the rest of the library cannot serve, where the fields are not known until run time and the
 // document is assembled a piece at a time.
 //
 // Reading is not what this is for. A document you have the bytes of is already a tree, one that
-// costs nothing: view::over(bytes) and reader::over(text) walk it in place. Build a value when
+// costs nothing: bjdata::reader::over(bytes) and json::reader::over(text) walk it in place. Build a value when
 // you are the one producing the document.
 
 #include <serpent/error.hpp>
@@ -508,7 +508,7 @@ template<typename T>
  * @brief A handle to one node of a tree, answering what a reader over bytes answers.
  *
  * The third of the three ways to hold a document, and the same interface as the other two: a
- * view scans the bytes on every step, an index would record where each value ends, and this one
+ * reader scans the bytes on every step, an index would record where each value ends, and this one
  * has the values already. Nothing that reads names a reader type, so a type is decoded from any
  * of them by the same code.
  *
@@ -723,7 +723,7 @@ struct serializer<value, void> {
     }
 
     template<typename Source>
-    static bool read(Source source, value &item) {
+    static bool read(const Source &source, value &item) {
         switch (source.type()) {
         case kind::invalid: return false;
         case kind::null: item = value {}; return true;
@@ -758,7 +758,7 @@ struct serializer<value, void> {
             if constexpr (requires { source.size_hint(); }) {
                 if (const auto hint = source.size_hint()) items.reserve(*hint);
             }
-            for (const auto element : source.array()) {
+            for (const auto &element : source.array()) {
                 if (!read(element, items.emplace_back())) return false;
             }
             item = value { std::move(items) };
@@ -766,7 +766,7 @@ struct serializer<value, void> {
         }
         case kind::object: {
             value::object members;
-            for (const auto entry : source.items()) {
+            for (const auto &entry : source.items()) {
                 // key_string() rather than the key itself, which a text format leaves encoded.
                 if (!read(entry.value, members[entry.key_string()])) return false;
             }

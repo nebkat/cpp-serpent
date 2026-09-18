@@ -25,11 +25,11 @@ struct fragment {
     // ask what is being written.
     template<bjdata::prefer Preference>
     friend void to_json(bjdata::basic_writer<Preference> &out, const fragment &value) {
-        bjdata::write_value(out, bjdata::view::over(value.bytes));
+        bjdata::write_value(out, bjdata::reader::over(value.bytes));
     }
 
     friend void to_json(json::writer &out, const fragment &value) {
-        json::write_value(out, bjdata::view::over(value.bytes));
+        json::write_value(out, bjdata::reader::over(value.bytes));
     }
 };
 
@@ -56,11 +56,11 @@ int main() {
     std::printf("%s\n", json::encode(response).c_str());
 
     const auto binary = bjdata::encode(response);
-    std::printf("%s\n", json::encode(bjdata::view::over(binary)).c_str());
+    std::printf("%s\n", json::encode(bjdata::reader::over(binary)).c_str());
 
     // And it is a real part of the document, not an opaque blob: it reads back through the
     // envelope like anything else.
-    const auto nested = bjdata::view::over(binary)["info"];
+    const auto nested = bjdata::reader::over(binary)["info"];
     const auto message = nested["message"].as<std::string_view>().value_or("");
     if (message != "bad argument") return 1;
     if (nested["offending"][1].as<int>().value_or(0) != 7) return 1;

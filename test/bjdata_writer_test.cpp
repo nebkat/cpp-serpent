@@ -162,7 +162,7 @@ void ranges_of_numbers() {
         check(encode<prefer::speed>(values) == small, "the same bytes whichever is preferred");
         check_equal(std::string_view { hex(small).substr(0, 8) }, "5b246c23", "[$l# whatever the values are");
         check(decode<std::vector<std::int32_t>>(small) == values, "and reads back");
-        check(view::over(small).as<nonstd::unaligned_little_span<const std::int32_t>>().has_value(), "or is viewed in place");
+        check(reader::over(small).as<nonstd::unaligned_little_span<const std::int32_t>>().has_value(), "or is viewed in place");
     }
 
     check_equal(std::string_view { hex(encode(std::vector<double> { 1.5, 2.5 })) },

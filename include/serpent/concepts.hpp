@@ -143,7 +143,7 @@ concept structurally_readable = optional_like<T> || variant_like<T> || byte_rang
 
 /**
  * A handle's text, borrowed where the handle can lend it and copied where it cannot: a binary
- * view lends, a JSON reader has to decode. For code that reads a string from either kind.
+ * reader lends, a JSON reader has to decode. For code that reads a string from either kind.
  */
 template<typename Source>
 [[nodiscard]] auto text_of(const Source &source) {

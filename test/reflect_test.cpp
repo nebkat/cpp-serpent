@@ -76,7 +76,7 @@ struct serpent::serializer<specialized, void> {
         out.value(object.value);
     }
     template<typename Source>
-    static bool read(Source source, specialized &object) {
+    static bool read(const Source &source, specialized &object) {
         const auto number = source.template as<int>();
         if (!number) return false;
         object.value = *number;
@@ -251,7 +251,7 @@ void the_generated_reader_agrees_with_the_generic_one() {
     check(strong && strong->x == 7 && strong->y == 9, "a strongly typed object reads");
 
     // Reordered and partial, against the generated reader specifically.
-    check(bjdata::view::over(bjdata::encode(point { 1, 2 })).is_object(), "an object is what we wrote");
+    check(bjdata::reader::over(bjdata::encode(point { 1, 2 })).is_object(), "an object is what we wrote");
     const auto reordered = json::decode<point>(R"({"y":20,"x":10})");
     check(reordered && reordered->x == 10 && reordered->y == 20, "declaration order is not required");
     check(!json::decode<point>(R"({"x":7})"), "a member the type needs may not be left out");
@@ -444,7 +444,7 @@ void the_same_type_serves_both_formats() {
     check(back && back->cacheGeneration == 0, "and honours skip");
 
     // The keys are the same on both wires, so a document written as one reads as the other.
-    check(json::encode(bjdata::view::over(bytes)) == json::encode(config), "both formats agree on the keys");
+    check(json::encode(bjdata::reader::over(bytes)) == json::encode(config), "both formats agree on the keys");
 }
 
 void naming_styles() {

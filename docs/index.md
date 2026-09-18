@@ -47,7 +47,7 @@ See [Annotations](reflection.md).
 auto document = json::reader::over(text);
 
 document["port"].as<int>();                   // parsed on demand
-for (auto host : document["hosts"].array()) { }   // walked in place
+for (const auto &host : document["hosts"].array()) { }   // walked in place
 ```
 
 Nothing is inflated into an object graph first. A reader is a small handle over bytes you

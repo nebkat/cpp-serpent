@@ -84,7 +84,7 @@ struct connection {
         }
     }
 
-    friend bool from_json(auto source, connection &value) {
+    friend bool from_json(const auto &source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
         value.host = source["host"].template as<std::string>().value_or(defaults.host);
@@ -111,7 +111,7 @@ struct serpent::serializer<timestamp, void> {
         out.value(value.seconds);
     }
     template<typename Source>
-    static bool read(Source source, timestamp &value) {
+    static bool read(const Source &source, timestamp &value) {
         const auto seconds = source.template as<std::int64_t>();
         if (!seconds) return false;
         value.seconds = *seconds;
@@ -255,7 +255,7 @@ void containers_that_hand_out_proxies() {
 
     // T and F are not valid strong types, so this stays a counted untyped array rather than
     // becoming a packed one.
-    const auto document = bjdata::view::over(bytes);
+    const auto document = bjdata::reader::over(bytes);
     check(document.is_array() && document.size() == 4, "an array of four");
     check(document[0].as<bool>().value_or(false) && !document[1].as<bool>().value_or(true),
             "whose elements are booleans, not numbers");

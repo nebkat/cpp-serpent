@@ -26,7 +26,7 @@ int main() {
     std::printf("wrote %zu bytes into a %zu byte buffer\n", *written, storage.size());
 
     // Read it back. The document is never inflated into an intermediate representation.
-    const auto document = bjdata::view::over(out.written());
+    const auto document = bjdata::reader::over(out.written());
 
     const auto id = document["id"].as<std::string_view>();
     if (!id) return 1;

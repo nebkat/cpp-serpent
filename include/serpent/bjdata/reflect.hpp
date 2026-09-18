@@ -3,7 +3,7 @@
 // Reading a reflected type from BJData without going through the member iterator.
 //
 // The generic path is written in terms of handles: an iterator that parses an entry into a key
-// and a view, a visitor that compares the key against a name it is handed at run time. That is
+// and a reader, a visitor that compares the key against a name it is handed at run time. That is
 // the right shape for a reader that knows nothing about the type. For a type whose fields the
 // compiler can enumerate, none of it is necessary - the keys are constants, their lengths are
 // constants, and the destination of each is known - so this walks the bytes once and assigns
@@ -13,7 +13,7 @@
 
 #include <serpent/bjdata/detail.hpp>
 #include <serpent/bjdata/direct.hpp>
-#include <serpent/bjdata/view.hpp>
+#include <serpent/bjdata/reader.hpp>
 #include <serpent/bjdata/writer.hpp>
 #include <serpent/config.hpp>
 #include <serpent/member_runs.hpp>
@@ -266,7 +266,7 @@ private:
         return this->read_value_through_view<Member>(kind);
     }
 
-    /** Anything else - and a value that was not what its member is - through a view of it, then stepped over. */
+    /** Anything else - and a value that was not what its member is - through a reader of it, then stepped over. */
     template<std::meta::info Member>
     [[nodiscard]] bool read_value_through_view(marker kind) {
         if (!is_value(kind)) {
@@ -275,7 +275,7 @@ private:
         }
 
         auto &field = this->value.[:Member:];
-        const view held { kind, this->buffer, this->scan.position };
+        const reader held { kind, this->buffer, this->scan.position };
         if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
             using declared = [:std::meta::type_of(Member):];
             auto wrapper = make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field);
@@ -309,7 +309,7 @@ bool read_object_body(detail::cursor &scan, const std::span<const std::byte> buf
  */
 template<typename T>
     requires reflected_type<T>
-bool read_reflected(const view &source, T &value) {
+bool read_reflected(const reader &source, T &value) {
     if (!source.is_object()) return false;
     detail::cursor scanner { source.buffer(), source.data() };
     return detail::read_object_body(scanner, source.buffer(), value);
@@ -327,7 +327,7 @@ template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
         out.clear();
         out.emplace_back();
     }
-std::optional<bool> read_sequence(const view &source, C &out) {
+std::optional<bool> read_sequence(const reader &source, C &out) {
     if (!source.is_array()) return std::nullopt;
 
     const auto info = source.container_header();

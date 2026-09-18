@@ -48,11 +48,11 @@ struct legacy {
         scope.member("readings", value.readings);
     }
 
-    friend bool from_json(auto source, legacy &value) {
+    friend bool from_json(const auto &source, legacy &value) {
         if (!source.is_object()) return false;
         value.code = source["code"].template as<int>().value_or(0);
         value.readings.clear();
-        for (const auto element : source["readings"].array()) {
+        for (const auto &element : source["readings"].array()) {
             value.readings.push_back(element.template as<std::uint16_t>().value_or(0));
         }
         return true;
@@ -69,9 +69,9 @@ std::string hex(std::span<const std::byte> bytes) {
     return out;
 }
 
-view parse(std::string_view text, std::vector<std::byte> &storage) {
+reader parse(std::string_view text, std::vector<std::byte> &storage) {
     storage = from_hex(text);
-    return view::over(storage);
+    return reader::over(storage);
 }
 
 void scalars_and_escaping() {

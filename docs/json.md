@@ -16,7 +16,7 @@ json::validate(text);
 ```cpp
 #include <serpent/bjdata/json.hpp>
 
-auto text = json::encode(bjdata::view::over(bytes));
+auto text = json::encode(bjdata::reader::over(bytes));
 ```
 
 This is the one header that knows both formats. It is also how a type using `to_json`/

@@ -14,24 +14,23 @@
 using namespace serpent;
 using namespace serpent::bjdata;
 
-static_assert(std::forward_iterator<array_iterator>);
-static_assert(std::forward_iterator<member_iterator>);
-static_assert(std::ranges::forward_range<array_range>);
-static_assert(std::ranges::forward_range<member_range>);
-static_assert(std::ranges::view<array_range>);
+static_assert(std::input_iterator<array_iterator>);
+static_assert(std::input_iterator<member_iterator>);
+static_assert(std::ranges::input_range<array_range>);
+static_assert(std::ranges::input_range<member_range>);
 
 namespace {
 
 std::vector<std::byte> storage;
 
-view parse(std::string_view hex) {
+reader parse(std::string_view hex) {
     storage = from_hex(hex);
-    return view::over(storage);
+    return reader::over(storage);
 }
 
-std::vector<long long> integers(const view &value) {
+std::vector<long long> integers(const reader &value) {
     std::vector<long long> result;
-    for (const auto element : value.array())
+    for (const auto &element : value.array())
         result.push_back(element.as<long long>().value_or(-999));
     return result;
 }
@@ -39,7 +38,7 @@ std::vector<long long> integers(const view &value) {
 void arrays() {
     check(parse("5b5d").is_array(), "[] is an array");
     check_equal(parse("5b5d").size(), std::size_t { 0 }, "[] is empty");
-    check(parse("5b5d").array().empty(), "[] iterates empty");
+    check(parse("5b5d").array().begin() == std::default_sentinel, "[] iterates empty");
 
     const auto three = std::vector<long long> { 1, 2, 3 };
     check_equal(integers(parse("5b5501550255035d")), three, "[1,2,3] unbounded");
@@ -76,7 +75,7 @@ void objects() {
 
     std::string keys;
     long long sum = 0;
-    for (const auto [key, value] : object.items()) {
+    for (const auto &[key, value] : object.items()) {
         keys += key;
         sum += value.as<long long>().value_or(0);
     }
@@ -197,13 +196,13 @@ void truncation() {
             check(!validate(prefix).has_value(), "a truncated document fails validation");
 
             // Traversal of an unvalidated truncated document must still be safe.
-            const auto value = view::over(prefix);
+            const auto value = reader::over(prefix);
             std::size_t seen = 0;
-            for (const auto element : value.array()) {
+            for (const auto &element : value.array()) {
                 std::ignore = element.as<long long>();
                 if (++seen > 64) break;
             }
-            for (const auto [key, element] : value.items()) {
+            for (const auto &[key, element] : value.items()) {
                 std::ignore = key;
                 std::ignore = element.as<long long>();
                 if (++seen > 64) break;
@@ -260,7 +259,7 @@ void checked_accessors() {
     // as<T>() never throws, whatever it is asked for.
     check(!document["a"].as<int>().has_value(), "as<int>() on a string is empty");
     check_equal(document["a"].as<std::string_view>().value_or("?"), "hello", "as<string_view>()");
-    check(!document["missing"].as<bool>().has_value(), "as<T>() on a poisoned view is empty");
+    check(!document["missing"].as<bool>().has_value(), "as<T>() on a poisoned reader is empty");
 
     // A value that will not fit the requested type is refused rather than truncated.
     const auto wide = parse("750001");

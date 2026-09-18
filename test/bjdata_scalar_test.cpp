@@ -11,9 +11,9 @@ using namespace serpent::bjdata;
 
 namespace {
 
-view parse(std::string_view hex, std::vector<std::byte> &storage) {
+reader parse(std::string_view hex, std::vector<std::byte> &storage) {
     storage = from_hex(hex);
-    return view::over(storage);
+    return reader::over(storage);
 }
 
 void scalars() {
@@ -85,7 +85,7 @@ void strings() {
 void poisoning() {
     std::vector<std::byte> storage;
 
-    check(!view {}.is_valid(), "a default view is invalid");
+    check(!reader {}.is_valid(), "a default reader is invalid");
     check(!parse("", storage).is_valid(), "an empty buffer is invalid");
     check(!parse("45", storage).is_valid(), "E is not a value");
     check(!parse("ff", storage).is_valid(), "an unknown byte is not a value");

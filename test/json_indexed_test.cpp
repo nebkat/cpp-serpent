@@ -25,7 +25,7 @@ constexpr std::string_view document = R"({
 
 /** Everything a reader can be asked, asked of both, compared. */
 template<typename Scanning, typename Indexed>
-void compare(Scanning left, Indexed right, const std::string &path) {
+void compare(const Scanning &left, const Indexed &right, const std::string &path) {
     check(left.is_valid() == right.is_valid(), path + ": validity");
     check(left.type() == right.type(), path + ": kind");
 
@@ -38,9 +38,10 @@ void compare(Scanning left, Indexed right, const std::string &path) {
     } else if (left.is_boolean()) {
         check(left.template as<bool>() == right.template as<bool>(), path + ": boolean");
     } else if (left.is_array()) {
-        auto scanning = left.array().begin();
+        const auto scanning_range = left.array();
+        auto scanning = scanning_range.begin();
         std::size_t position = 0;
-        for (auto element : right.array()) {
+        for (const auto &element : right.array()) {
             compare(*scanning, element, path + "/" + std::to_string(position));
             // and the same element reached by index rather than by walking
             compare(*scanning, right[position], path + "[" + std::to_string(position) + "]");
@@ -50,7 +51,7 @@ void compare(Scanning left, Indexed right, const std::string &path) {
         check(position == left.size(), path + ": element count");
     } else if (left.is_object()) {
         std::size_t position = 0;
-        for (auto member : right.items()) {
+        for (const auto &member : right.items()) {
             const auto key = member.key_string();
             compare(left[key], member.value, path + "/" + key);
             compare(left[key], right[key], path + ": by key " + key);
@@ -72,12 +73,12 @@ int main() {
 
     // One entry per value, which is what makes a sibling step a load: no entry stands for
     // anything but a value, and none is missing.
-    const auto counted = [](auto value, auto &&self) -> std::size_t {
+    const auto counted = [](const auto &value, auto &&self) -> std::size_t {
         std::size_t total = 1;
         if (value.is_array()) {
-            for (auto child : value.array()) total += self(child, self);
+            for (const auto &child : value.array()) total += self(child, self);
         } else if (value.is_object()) {
-            for (auto member : value.items()) total += self(member.value, self);
+            for (const auto &member : value.items()) total += self(member.value, self);
         }
         return total;
     };

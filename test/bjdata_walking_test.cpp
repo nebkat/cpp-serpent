@@ -66,7 +66,7 @@ int main() {
     // rest must still scan. Every element must still be reached.
     std::size_t counted = 0;
     int last_id = 0;
-    for (const auto element : bjdata::view::over(bytes).array()) {
+    for (const auto &element : bjdata::reader::over(bytes).array()) {
         last_id = element["id"].as<int>().value_or(-1);
         ++counted;
     }
@@ -74,7 +74,7 @@ int main() {
     check_equal(last_id, values.back().id, "and the last element is the last one");
 
     // Elements read out of order: the note is about one value and must not be taken for another.
-    const auto document = bjdata::view::over(bytes);
+    const auto document = bjdata::reader::over(bytes);
     check_equal(document[7]["name"].as<std::string_view>().value_or(""), values[7].name, "an element by index");
     check_equal(document[3]["name"].as<std::string_view>().value_or(""), values[3].name, "an earlier one after it");
     check_equal(document[39]["name"].as<std::string_view>().value_or(""), values[39].name, "and the last");
@@ -101,7 +101,7 @@ int main() {
     // An object whose members are read in an order the document does not use: the cursor misses,
     // every lookup restarts, and the memo must not paper over a wrong position.
     const auto one_bytes = bjdata::encode(values.at(2));
-    const auto one = bjdata::view::over(one_bytes);
+    const auto one = bjdata::reader::over(one_bytes);
     check_equal(one["tags"].array().begin() == one["tags"].array().end() ? 0 : 3, 3, "a member out of order");
     check_equal(one["id"].as<int>().value_or(-1), values.at(2).id, "an earlier member after it");
     check_equal(one["name"].as<std::string_view>().value_or(""), values.at(2).name, "and the one between them");

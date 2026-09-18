@@ -42,10 +42,10 @@ namespace query {
 inline double canada_coordinates(const std::string &text) {
     double total = 0;
     auto document = json::reader::over(text);
-    for (auto feature : document["features"].array())
-        for (auto ring : feature["geometry"]["coordinates"].array())
-            for (auto point : ring.array())
-                for (auto number : point.array())
+    for (const auto &feature : document["features"].array())
+        for (const auto &ring : feature["geometry"]["coordinates"].array())
+            for (const auto &point : ring.array())
+                for (const auto &number : point.array())
                     total += number.as<double>().value_or(0);
     return total;
 }
@@ -53,10 +53,10 @@ inline double canada_coordinates(const std::string &text) {
 inline double canada_coordinates_indexed(const std::string &text) {
     double total = 0;
     const auto index = json::structural_index::over(text);
-    for (auto feature : index.root()["features"].array())
-        for (auto ring : feature["geometry"]["coordinates"].array())
-            for (auto point : ring.array())
-                for (auto number : point.array())
+    for (const auto &feature : index.root()["features"].array())
+        for (const auto &ring : feature["geometry"]["coordinates"].array())
+            for (const auto &point : ring.array())
+                for (const auto &number : point.array())
                     total += number.as<double>().value_or(0);
     return total;
 }
@@ -122,7 +122,7 @@ inline double canada_coordinates_rapidjson(const std::string &text) {
 inline std::uint64_t twitter_ids(const std::string &text) {
     std::uint64_t total = 0;
     auto document = json::reader::over(text);
-    for (auto status : document["statuses"].array())
+    for (const auto &status : document["statuses"].array())
         total += status["id"].as<std::uint64_t>().value_or(0);
     return total;
 }
@@ -169,13 +169,13 @@ inline std::uint64_t twitter_ids_rapidjson(const std::string &text) {
 // only touches the top level, so it would have looked like a whole-document read while doing a
 // fraction of the work.
 
-inline std::uint64_t count_values(json::reader value) {
+inline std::uint64_t count_values(const json::reader &value) {
     std::uint64_t total = 1;
     if (value.is_array()) {
-        for (auto child : value.array())
+        for (const auto &child : value.array())
             total += count_values(child);
     } else if (value.is_object()) {
-        for (auto member : value.items())
+        for (const auto &member : value.items())
             total += count_values(member.value);
     }
     return total;
@@ -184,9 +184,9 @@ inline std::uint64_t count_values(json::reader value) {
 inline std::uint64_t count_values_indexed(json::indexed_reader value) {
     std::uint64_t total = 1;
     if (value.is_array()) {
-        for (auto child : value.array()) total += count_values_indexed(child);
+        for (const auto &child : value.array()) total += count_values_indexed(child);
     } else if (value.is_object()) {
-        for (auto member : value.items()) total += count_values_indexed(member.value);
+        for (const auto &member : value.items()) total += count_values_indexed(member.value);
     }
     return total;
 }
@@ -623,7 +623,7 @@ static void documents(const std::string &canada, const std::string &twitter, con
     bench::measure(ids, "twitter sum ids", "serpent (indexed)", twitter.size(), [&] {
         std::uint64_t total = 0;
         const auto index = json::structural_index::over(twitter);
-        for (auto status : index.root()["statuses"].array()) total += status["id"].as<std::uint64_t>().value_or(0);
+        for (const auto &status : index.root()["statuses"].array()) total += status["id"].as<std::uint64_t>().value_or(0);
         return total;
     });
     bench::measure(ids, "twitter sum ids", "simdjson", twitter.size(), [&] { return query::twitter_ids_simdjson(parser, twitter_padded); }, uncounted);

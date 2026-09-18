@@ -295,7 +295,7 @@ void emit_wire_form(Emitter &out, const as &form) {
 
 /** Whether a source holds exactly this wire form. */
 template<typename Source>
-bool source_is(Source source, const as &form) {
+bool source_is(const Source &source, const as &form) {
     switch (form.held) {
     case as::kind::null: return source.is_null();
     case as::kind::boolean: return source.template as<bool>() == form.truth;
@@ -321,7 +321,7 @@ void emit_wire_form(Emitter &out) {
 }
 
 template<serpent::as Form, typename Source>
-bool source_is(Source source) {
+bool source_is(const Source &source) {
     return source_is(source, Form);
 }
 
@@ -372,7 +372,7 @@ bool emit_table_enum(Emitter &out, E value) {
 /** Reads from a table, taking the fallback entry when nothing matches. */
 template<typename Source, typename E>
     requires tabulated_enum<E>
-bool read_table_enum(Source source, E &value) {
+bool read_table_enum(const Source &source, E &value) {
     if (!source.is_valid()) return false;
 
     for (const auto &entry : describe<E>::values) {
@@ -1166,7 +1166,7 @@ bool emit_annotated_enum(Emitter &out, E value) {
 /** Reads an annotated enumeration, taking the fallback enumerator when nothing matches. */
 template<typename Source, typename E>
     requires annotated_enum<E>
-bool read_annotated_enum(Source source, E &value) {
+bool read_annotated_enum(const Source &source, E &value) {
     if (!source.is_valid()) return false;
 
     bool matched = false;
@@ -1261,7 +1261,7 @@ template<typename Emitter, typename E>
 bool emit_annotated_enum(Emitter &out, E value);
 
 template<typename Source, typename E>
-bool read_annotated_enum(Source source, E &value);
+bool read_annotated_enum(const Source &source, E &value);
 
 // Never defined: the concepts above are false, so every call to these is discarded. They exist
 // so that the discarded branches still name something.
@@ -1327,7 +1327,7 @@ bool emit_mapped_enum(Emitter &out, E value) {
 /** Reads a mapped enumeration, taking the fallback when nothing matches. */
 template<typename Source, typename E>
     requires mapped_enum<E>
-bool read_mapped_enum(Source source, E &value) {
+bool read_mapped_enum(const Source &source, E &value) {
     static_assert(!(detail::tabulated_enum<E> && detail::annotated_enum<E>),
             "this enumeration is annotated and also has a serpent::describe table. The table "
             "would be used and the annotations would do nothing; remove whichever of the two you "

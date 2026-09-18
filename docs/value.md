@@ -33,7 +33,7 @@ added to across branches, and cannot be held.
 ## When it is not
 
 **Reading.** A document you have the bytes of is already a tree, and one that costs nothing:
-`view::over(bytes)` and `reader::over(text)` walk it in place, with every string and span pointing
+`bjdata::reader::over(bytes)` and `json::reader::over(text)` walk it in place, with every string and span pointing
 into the buffer you already had. Building a `value` out of one copies the whole document to learn
 what the view would have told you for free.
 

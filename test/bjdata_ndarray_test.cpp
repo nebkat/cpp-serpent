@@ -16,9 +16,9 @@ namespace {
 
 std::vector<std::byte> storage;
 
-view parse(std::string_view hex) {
+reader parse(std::string_view hex) {
     storage = from_hex(hex);
-    return view::over(storage);
+    return reader::over(storage);
 }
 
 int element_at(const ndarray_view &array, std::size_t row, std::size_t column) {
@@ -151,7 +151,7 @@ void truncation() {
             const auto prefix = std::span { whole }.first(length);
             check(!validate(prefix).has_value(), "truncated N-D document fails validation");
 
-            const auto value = view::over(prefix);
+            const auto value = reader::over(prefix);
             if (const auto array = as_ndarray(value)) {
                 for (std::size_t row = 0; row < 4; ++row) {
                     for (std::size_t column = 0; column < 4; ++column) {

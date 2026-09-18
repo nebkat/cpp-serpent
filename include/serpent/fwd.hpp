@@ -20,7 +20,7 @@ bool emit_mapped_enum(Emitter &out, E value);
 
 /** Reads one value into a destination. Defined in serializer.hpp. */
 template<typename Source, typename T>
-bool read_into(Source source, T &value);
+bool read_into(const Source &source, T &value);
 
 /**
  * On a std::variant field: the key that says which alternative the document holds.

@@ -20,7 +20,7 @@ int main() {
 
     check(validate(bytes).has_value(), "validates without exceptions");
 
-    const auto document = view::over(bytes);
+    const auto document = reader::over(bytes);
     check_equal(document["a"].as<std::string_view>().value_or("?"), "hello", "string accessor");
     check_equal(document["b"].as<nonstd::unaligned_little_span<const std::uint8_t>>()->size(), std::size_t { 3 }, "span accessor");
     check_equal(document["c"].as<bool>().value_or(false), true, "bool accessor");
@@ -46,7 +46,7 @@ int main() {
     // Not compared byte for byte against the input: the document above was hand-written with
     // a typed [$U#U3 array, while the writer measures three small ints and correctly finds the
     // generic form one byte smaller.
-    const auto reread = view::over(produced);
+    const auto reread = reader::over(produced);
     check_equal(reread["a"].as<std::string_view>().value_or("?"), "hello", "round-trips the string");
     check_equal(reread["b"].size(), std::size_t { 3 }, "round-trips the array");
     check_equal(reread["c"].as<bool>().value_or(false), true, "round-trips the boolean");

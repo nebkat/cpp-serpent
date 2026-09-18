@@ -28,7 +28,7 @@ struct serializer<std::chrono::duration<Rep, Period>, void> {
     }
 
     template<typename Source>
-    static bool read(Source source, value_type &value) {
+    static bool read(const Source &source, value_type &value) {
         Rep count {};
         if (!read_into(source, count)) return false;
         value = value_type { count };
@@ -47,7 +47,7 @@ struct serializer<std::chrono::time_point<Clock, Duration>, void> {
     }
 
     template<typename Source>
-    static bool read(Source source, value_type &value) {
+    static bool read(const Source &source, value_type &value) {
         Duration since {};
         if (!serializer<Duration, void>::read(source, since)) return false;
         value = value_type { since };
@@ -67,7 +67,7 @@ struct serializer<std::chrono::hh_mm_ss<Duration>, void> {
     }
 
     template<typename Source>
-    static bool read(Source source, value_type &value) {
+    static bool read(const Source &source, value_type &value) {
         precision elapsed {};
         if (!serializer<precision, void>::read(source, elapsed)) return false;
         value = value_type { elapsed };

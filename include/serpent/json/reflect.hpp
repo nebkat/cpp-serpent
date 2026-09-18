@@ -74,7 +74,6 @@ class object_filler {
     T &value;
     scanner::cursor &scan; ///< borrowed, so that one cursor can be carried from object to object
     std::string_view document;
-    walk_memo *notes;
 
     std::uint64_t seen = 0;   ///< one bit for each member read
     bool converted = true;    ///< whether every member read so far converted
@@ -82,11 +81,10 @@ class object_filler {
 
 public:
     /** `scan` stands just past the object's opening brace, and is left just past its closing one. */
-    object_filler(T &value, scanner::cursor &scan, std::string_view document, walk_memo *notes) noexcept
+    object_filler(T &value, scanner::cursor &scan, std::string_view document) noexcept
     : value(value)
     , scan(scan)
-    , document(document)
-    , notes(notes) {}
+    , document(document) {}
 
     /**
      * Reads the members that stand exactly as this library would have written them.
@@ -218,7 +216,7 @@ private:
         } else {
             // Anything else is read through a handle, by whatever reads that type anywhere else -
             // and says, as it is read, how far into the text it got.
-            const reader held { this->document, this->scan.position, this->notes };
+            const reader held { this->document, this->scan.position };
             if constexpr (tag.has_value()) {
                 // A tagged variant is read through the tag that names its alternatives; reading it
                 // plainly would go back to trying each alternative in turn.
@@ -228,15 +226,15 @@ private:
             } else {
                 if (!read_into(held, field)) this->converted = false;
             }
-            step_over_value(this->scan, this->document, this->notes);
+            step_over_value(this->scan, held);
         }
     }
 };
 
 /** Reads the object whose opening brace the cursor has just passed, leaving it past the closing one. */
 template<typename T>
-[[nodiscard]] bool read_object(T &value, scanner::cursor &scan, std::string_view document, walk_memo *notes) {
-    object_filler<T> filler { value, scan, document, notes };
+[[nodiscard]] bool read_object(T &value, scanner::cursor &scan, std::string_view document) {
+    object_filler<T> filler { value, scan, document };
     filler.read_members_as_written();
     filler.read_remaining_entries();
     return filler.succeeded();
@@ -255,7 +253,7 @@ bool read_reflected(const reader &source, T &value) {
     if (!source.is_object()) return false;
 
     scanner::cursor scan { source.document(), source.data() + 1 };
-    const bool read = read_object(value, scan, source.document(), source.notes());
+    const bool read = read_object(value, scan, source.document());
     // Whoever is stepping through the container this object sits in can step to here.
     if (scan.ok()) source.note_end(scan.position);
     return read;
@@ -286,7 +284,7 @@ std::optional<bool> read_sequence(const reader &source, C &out) {
         do {
             scanner::skip_whitespace(scan);
             if (!scanner::accept(scan, '{')) return false;
-            if (!read_object(out.emplace_back(), scan, source.document(), source.notes())) return false;
+            if (!read_object(out.emplace_back(), scan, source.document())) return false;
             scanner::skip_whitespace(scan);
         } while (scanner::accept(scan, ','));
 

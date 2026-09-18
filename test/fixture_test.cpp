@@ -1,4 +1,4 @@
-// Cross-implementation check against the reference implementation. For every fixture the C++ view must
+// Cross-implementation check against the reference implementation. For every fixture the C++ reader must
 // produce the same block notation and decode to the same values as the reference.
 // Regenerate with: python3 test/generate_fixtures.py /tmp/bjdatacli
 
@@ -62,7 +62,7 @@ std::string repr_real(double value) {
 }
 
 /** Mirrors digest() in generate_fixtures.py. */
-std::string digest(const view &value) {
+std::string digest(const reader &value) {
     switch (value.type()) {
     case kind::null: return "Z";
     case kind::boolean: return value.as<bool>() == true ? "T" : "F";
@@ -86,7 +86,7 @@ std::string digest(const view &value) {
     case kind::array: {
         std::string out = "[";
         bool first = true;
-        for (const auto element : value.array()) {
+        for (const auto &element : value.array()) {
             if (!std::exchange(first, false)) out += ',';
             out += digest(element);
         }
@@ -95,7 +95,7 @@ std::string digest(const view &value) {
     case kind::object: {
         std::string out = "{";
         bool first = true;
-        for (const auto [key, element] : value.items()) {
+        for (const auto &[key, element] : value.items()) {
             if (!std::exchange(first, false)) out += ',';
             out += key;
             out += '=';
@@ -113,7 +113,7 @@ std::string digest(const view &value) {
  * that must be re-emitted by marker, since H reads back as an ordinary string.
  */
 template<prefer Preference>
-void reencode(basic_writer<Preference> &out, view source) {
+void reencode(basic_writer<Preference> &out, const reader &source) {
     switch (source.type()) {
     case kind::null: out.null(); return;
     case kind::boolean: out.value(source.as<bool>() == true); return;
@@ -133,33 +133,33 @@ void reencode(basic_writer<Preference> &out, view source) {
         bool any = false;
         bool all_integer = true;
         bool all_real = true;
-        for (const auto element : source.array()) {
+        for (const auto &element : source.array()) {
             any = true;
             all_integer = all_integer && element.type() == kind::integer;
             all_real = all_real && element.type() == kind::real;
         }
         if (any && all_integer) {
             std::vector<std::int64_t> values;
-            for (const auto element : source.array())
+            for (const auto &element : source.array())
                 values.push_back(element.as<std::int64_t>().value_or(0));
             out.value(values);
             return;
         }
         if (any && all_real) {
             std::vector<double> values;
-            for (const auto element : source.array())
+            for (const auto &element : source.array())
                 values.push_back(element.as<double>().value_or(0.0));
             out.value(values);
             return;
         }
         const auto scope = out.array();
-        for (const auto element : source.array())
+        for (const auto &element : source.array())
             reencode(out, element);
         return;
     }
     case kind::object: {
         const auto scope = out.object();
-        for (const auto [key, element] : source.items()) {
+        for (const auto &[key, element] : source.items()) {
             out.key(key);
             reencode(out, element);
         }
@@ -169,7 +169,7 @@ void reencode(basic_writer<Preference> &out, view source) {
     }
 }
 
-/** The same canonical rendering as digest(), over the JSON reader instead of the view. */
+/** The same canonical rendering as digest(), over the JSON reader instead of the reader. */
 std::string json_digest(const json::reader &source) {
     switch (source.type()) {
     case kind::null: return "Z";
@@ -192,7 +192,7 @@ std::string json_digest(const json::reader &source) {
     case kind::array: {
         std::string out = "[";
         bool first = true;
-        for (const auto element : source.array()) {
+        for (const auto &element : source.array()) {
             if (!std::exchange(first, false)) out += ',';
             out += json_digest(element);
         }
@@ -201,7 +201,7 @@ std::string json_digest(const json::reader &source) {
     case kind::object: {
         std::string out = "{";
         bool first = true;
-        for (const auto entry : source.items()) {
+        for (const auto &entry : source.items()) {
             if (!std::exchange(first, false)) out += ',';
             out += entry.key_string();
             out += '=';
@@ -264,7 +264,7 @@ int main(int argc, char **argv) {
                 std::string_view { text_of(name, directory / (name + ".blocks"), &own_text::blocks) },
                 name + ": block notation matches the reference implementation");
 
-        check_equal(std::string_view { digest(view::over(bytes)) },
+        check_equal(std::string_view { digest(reader::over(bytes)) },
                 std::string_view { read_text(directory / (name + ".digest")) },
                 name + ": decodes to the same values as the reference implementation");
 
@@ -274,10 +274,10 @@ int main(int argc, char **argv) {
             std::vector<std::byte> produced;
             container_sink out { produced };
             basic_writer<Preference> target { out };
-            reencode(target, view::over(bytes));
+            reencode(target, reader::over(bytes));
             check(target.finish().has_value(), name + ": re-encodes cleanly");
             check(validate(produced).has_value(), name + ": and what it wrote validates");
-            check_equal(std::string_view { digest(view::over(produced)) },
+            check_equal(std::string_view { digest(reader::over(produced)) },
                     std::string_view { read_text(directory / (name + ".digest")) },
                     name + ": re-encoded, it decodes to the same values");
             return produced.size();
@@ -289,7 +289,7 @@ int main(int argc, char **argv) {
         // JSON output is checked against the reference's own JSON rendering of the same
         // bytes, so the number formatting, key order, escaping and indentation all have to
         // agree - not just the structure.
-        check_equal(std::string_view { json::encode(view::over(bytes), { .indent = 2 }) },
+        check_equal(std::string_view { json::encode(reader::over(bytes), { .indent = 2 }) },
                 std::string_view { text_of(name, directory / (name + ".json.expected"), &own_text::json) },
                 name + ": JSON matches the reference implementation");
 
@@ -311,7 +311,7 @@ int main(int argc, char **argv) {
             std::vector<std::byte> spliced;
             container_sink out { spliced };
             writer target { out };
-            write_value(target, view::over(bytes));
+            write_value(target, reader::over(bytes));
             check(target.finish().has_value(), name + ": splices cleanly");
             check_equal(std::string_view { hex(spliced) }, std::string_view { hex(bytes) },
                     name + ": splices to identical bytes");
@@ -321,7 +321,7 @@ int main(int argc, char **argv) {
         for (std::size_t length = 0; length < bytes.size(); ++length) {
             const auto prefix = std::span { bytes }.first(length);
             check(!validate(prefix).has_value(), name + ": truncation is rejected");
-            std::ignore = digest(view::over(prefix));
+            std::ignore = digest(reader::over(prefix));
             std::ignore = block_notation(prefix);
         }
     }

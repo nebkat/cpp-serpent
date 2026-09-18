@@ -1,15 +1,17 @@
-// The walking reader must answer exactly what the plain one answers, always.
+// The reader must answer exactly what a tree built from the same document answers, always.
 //
-// It goes faster by leaving a note of how far a traversal got, so a step can resume rather than
-// restart. The note is a memo and never the truth: every handle still knows its own position, so
-// anything the memo does not describe falls back to scanning. These are the cases that would
-// break if that were not so - a value read twice, two handles held at once, members taken out of
-// order, a traversal abandoned half way - and each is checked against the plain reader.
+// It goes faster by leaving a note of how far a traversal of a value got, so the step past that
+// value can resume rather than restart. The note is never the truth: every handle still knows
+// its own position, so anything the note does not cover falls back to scanning. These are the
+// cases that would break if that were not so - a value read twice, two handles held at once,
+// members taken out of order, a traversal abandoned half way - each checked against the tree.
 
 #include "check.hpp"
 
 #include <serpent/json.hpp>
+#include <serpent/value.hpp>
 
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,7 +31,7 @@ constexpr std::string_view document = R"({
 
 /** Everything, asked of both, compared. */
 template<typename Plain, typename Walking>
-void compare(Plain left, Walking right, const std::string &path) {
+void compare(const Plain &left, const Walking &right, const std::string &path) {
     check(left.is_valid() == right.is_valid(), path + ": validity");
     check(left.type() == right.type(), path + ": kind");
 
@@ -38,17 +40,15 @@ void compare(Plain left, Walking right, const std::string &path) {
     } else if (left.is_integer()) {
         check(left.template as<std::int64_t>() == right.template as<std::int64_t>(), path + ": integer");
     } else if (left.is_array()) {
-        auto plain = left.array().begin();
         std::size_t index = 0;
-        for (auto element : right.array()) {
-            compare(*plain, element, path + "/" + std::to_string(index));
-            ++plain;
+        for (const auto &element : right.array()) {
+            compare(left[index], element, path + "/" + std::to_string(index));
             ++index;
         }
         check_equal(index, left.size(), path + ": element count");
     } else if (left.is_object()) {
         std::size_t seen = 0;
-        for (auto member : right.items()) {
+        for (const auto &member : right.items()) {
             const auto key = member.key_string();
             compare(left[key], member.value, path + "/" + key);
             check(member.key_is(key), path + ": key_is agrees with key_string");
@@ -62,13 +62,9 @@ void compare(Plain left, Walking right, const std::string &path) {
 
 int main() {
     const std::string text { document };
-    // Two readers over one document, each with its own memo, so the comparison is between a
-    // traversal that leaves notes and one that cannot use them.
-    // Two readers over one document: one with a memo of its own, one with none at all, so the
-    // comparison is between a traversal that leaves notes and one that cannot.
-    json::walk_memo memo;
-    const auto walking = json::reader::over(text, memo);
-    const auto plain = json::reader { text, json::reader::over(text).data(), nullptr };
+    const auto tree = json::decode<serpent::value>(text).value();
+    const serpent::value_reader plain { tree };
+    const auto walking = json::reader::over(text);
 
     compare(plain, walking, "");
 
@@ -77,10 +73,10 @@ int main() {
     check_equal(walking["rows"][0][1].as<int>().value_or(-1), 2, "and read again");
 
     // Two handles held at once, used in the other order.
-    const auto rows = walking["rows"];
+    const auto rows_handle = walking["rows"];
     const auto after = walking["after"];
     check_equal(after.as<std::string>().value_or("?"), std::string { "still here" }, "the second handle");
-    check_equal(rows.size(), std::size_t { 4 }, "and the first is still good");
+    check_equal(rows_handle.size(), std::size_t { 4 }, "and the first is still good");
 
     // Members out of document order.
     check_equal(walking["after"].as<std::string>().value_or("?"), std::string { "still here" }, "a later member first");
@@ -88,8 +84,8 @@ int main() {
 
     // A traversal abandoned part way must leave the outer one correct.
     std::size_t rows_seen = 0;
-    for (auto row : walking["rows"].array()) {
-        for (auto value : row.array()) {
+    for (const auto &row : walking["rows"].array()) {
+        for (const auto &value : row.array()) {
             std::ignore = value;
             break; // abandon every inner walk after one element
         }
@@ -99,50 +95,54 @@ int main() {
 
     // Abandoning the outer walk part way, then walking it again from the start.
     std::size_t first_pass = 0;
-    for (auto row : walking["rows"].array()) {
+    for (const auto &row : walking["rows"].array()) {
         std::ignore = row;
         if (++first_pass == 2) break;
     }
     std::size_t second_pass = 0;
-    for (auto row : walking["rows"].array()) {
+    for (const auto &row : walking["rows"].array()) {
         std::ignore = row;
         ++second_pass;
     }
     check_equal(second_pass, std::size_t { 4 }, "and the whole thing walks again afterwards");
 
-    // Deeply nested, where the memo is most active.
+    // Deeply nested, where the notes are most active.
     std::int64_t deepest = 0;
-    for (auto entry : walking["escaped\tkey"].array())
-        for (auto member : entry.items())
-            for (auto element : member.value.array())
-                for (auto inner : element.array())
-                    for (auto deeper : inner.array())
-                        for (auto leaf : deeper.array()) deepest = leaf.as<std::int64_t>().value_or(0);
+    for (const auto &entry : walking["escaped\tkey"].array())
+        for (const auto &member : entry.items())
+            for (const auto &element : member.value.array())
+                for (const auto &inner : element.array())
+                    for (const auto &deeper : inner.array())
+                        for (const auto &leaf : deeper.array()) deepest = leaf.as<std::int64_t>().value_or(0);
     check_equal(deepest, std::int64_t { 4 }, "the deepest value, reached through six levels");
 
     // And a type decodes from it, because it answers what a source answers.
     const auto rows_out = walking["rows"].as<std::vector<std::vector<int>>>();
     check(rows_out && rows_out->size() == 4 && (*rows_out)[0][2] == 3, "a type reads out of it");
 
-    // A memo says which document it is about, not only which value. Two documents walked in
-    // turn through the one ambient memo must not take each other's notes - and a document
-    // allocated where a dead one stood is the same question with worse odds.
+    // Two documents walked at once, their iterators interleaved, are none of each other's business.
     const std::string other = R"({"name": [[9, 9], [9]], "rows": "not an array"})";
     const auto second = json::reader::over(other);
-    std::size_t first_rows = 0, second_names = 0;
-    auto outer = json::reader::over(text)["rows"].array().begin();
-    for (auto name : second["name"].array()) {
-        std::ignore = name;
-        ++second_names;
+    const auto first_rows = walking["rows"];
+    const auto second_names = second["name"];
+    const auto rows_range = first_rows.array();
+    const auto names_range = second_names.array();
+    auto rows = rows_range.begin();
+    auto names = names_range.begin();
+    std::size_t rows_walked = 0, names_seen = 0;
+    while (rows != std::default_sentinel || names != std::default_sentinel) {
+        if (rows != std::default_sentinel) {
+            ++rows_walked;
+            ++rows;
+        }
+        if (names != std::default_sentinel) {
+            ++names_seen;
+            ++names;
+        }
     }
-    for (auto row : json::reader::over(text)["rows"].array()) {
-        std::ignore = row;
-        ++first_rows;
-    }
-    check_equal(second_names, std::size_t { 2 }, "the other document walks");
-    check_equal(first_rows, std::size_t { 4 }, "and the first is unaffected by its notes");
+    check_equal(rows_walked, std::size_t { 4 }, "the first document's rows, interleaved with");
+    check_equal(names_seen, std::size_t { 2 }, "the other document's names");
     check(second["rows"].is_string(), "a key that means something else in the other document");
-    std::ignore = outer;
 
     return report("json_walking");
 }

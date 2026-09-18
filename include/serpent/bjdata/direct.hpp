@@ -2,10 +2,10 @@
 
 // Reading a value whose type is already known.
 //
-// A view is for a caller who does not yet know what a value is: it can be asked, copied and read
+// A reader is for a caller who does not yet know what a value is: it can be asked, copied and read
 // more than once. Underneath, each of its scalar reads is one of the functions here - which
 // markers a type can be read from, and what the payload under each of them means - and a reader
-// generated for a type, which knows what each member is, calls them with no view in between.
+// generated for a type, which knows what each member is, calls them with no reader in between.
 //
 // The loads say what a payload is worth, given its marker and how many bytes are there. The
 // reads below them do the same at a cursor that stands on a payload, stepping over it when they
@@ -120,7 +120,7 @@ SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(detail::cursor &scan, marke
  * A string, which always owns its bytes once read: from S, from H, whose digits are text, and
  * from C, which is one character.
  *
- * The length is read once here, where reading the text through a view and then stepping over
+ * The length is read once here, where reading the text through a reader and then stepping over
  * the value reads it twice.
  */
 [[nodiscard]] inline bool read(detail::cursor &scan, marker kind, std::string &into) {

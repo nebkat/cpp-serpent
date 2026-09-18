@@ -68,7 +68,7 @@ struct connection {
         if (value.port) scope.member("port", *value.port);   // (1)!
     }
 
-    friend bool from_json(auto source, connection &value) {
+    friend bool from_json(const auto &source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
         value.host = source["host"].template as<std::string>().value_or(defaults.host);
@@ -106,7 +106,7 @@ struct serpent::serializer<timestamp, void> {
     static void write(Writer &out, const timestamp &value) { out.value(value.unix_seconds()); }
 
     template<typename Source>
-    static bool read(Source source, timestamp &value) {
+    static bool read(const Source &source, timestamp &value) {
         const auto seconds = source.template as<std::int64_t>();
         if (!seconds) return false;
         value = timestamp::from_unix(*seconds);
@@ -129,7 +129,7 @@ a `.cpp`:
 template<>
 struct serpent::serializer<ip4, void> {
     static void write(serpent::bjdata::writer &out, const ip4 &value);
-    static bool read(serpent::bjdata::view source, ip4 &value);
+    static bool read(const serpent::bjdata::reader &source, ip4 &value);
 };
 ```
 

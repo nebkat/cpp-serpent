@@ -52,7 +52,7 @@ role.
 auto document = json::reader::over(text);
 document["port"].as<int>();                // parsed on demand, nothing built
 
-auto stored = bjdata::view::over(bytes);
+auto stored = bjdata::reader::over(bytes);
 stored["name"].as<std::string_view>();                    // string_view INTO bytes
 stored["samples"].as<nonstd::unaligned_little_span<const std::uint16_t>>();    // span INTO bytes
 ```

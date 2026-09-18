@@ -126,7 +126,7 @@ struct connection {
         scope.member("fallback", value.fallback);
     }
 
-    friend bool from_json(auto source, connection &value) {
+    friend bool from_json(const auto &source, connection &value) {
         if (!source.is_object()) return false;
         const connection defaults {};
         value.host = source["host"].template as<std::string>().value_or(defaults.host);
@@ -291,7 +291,7 @@ void every_container_shape_round_trips() {
     check(!json::decode<std::array<int, 2>>("[1,2,3]").has_value(), "nor does a long one");
 
     // A byte array is binary, not a sequence of numbers, in a format that has binary.
-    check(view::over(encode(std::array<std::byte, 3> { std::byte { 1 } })).is_binary(),
+    check(reader::over(encode(std::array<std::byte, 3> { std::byte { 1 } })).is_binary(),
             "a fixed byte sequence is still binary");
 }
 
@@ -358,7 +358,7 @@ void members_into_an_open_object() {
     }
     check(target.finish().has_value(), "flattened object");
 
-    const auto document = view::over(bytes);
+    const auto document = reader::over(bytes);
     check_equal(document.size(), std::size_t { 3 }, "the type's members and the caller's, side by side");
     check_equal(document["x"].as<int>().value_or(0), 3, "a member of the type");
     check_equal(document["label"].as<std::string_view>().value_or("?"), "corner", "and one only the caller knew");
@@ -418,7 +418,7 @@ void members_named_from_outside() {
         object.member("interface", "wlan0");
     }
     check(flat_target.finish().has_value(), "flattened");
-    check_equal(view::over(flat).size(), std::size_t { 4 }, "its members and the caller's, side by side");
+    check_equal(reader::over(flat).size(), std::size_t { 4 }, "its members and the caller's, side by side");
 
     // The list can come from the compiler instead of from the keyboard, and be narrowed with
     // ordinary range code - the same walk either way.
@@ -752,14 +752,14 @@ void counted_containers() {
     }
 
     // The point of the count: it is readable without walking the elements.
-    const auto hint = view::over(fast).size_hint();
+    const auto hint = reader::over(fast).size_hint();
     check(hint && *hint == 3, "a counted array states its length");
-    check(!view::over(small).size_hint(), "an unbounded one does not, rather than counting");
-    check(view::over(small).size() == 3, "though size() will still walk it");
+    check(!reader::over(small).size_hint(), "an unbounded one does not, rather than counting");
+    check(reader::over(small).size() == 3, "though size() will still walk it");
 
     // An array of numbers is typed whichever is preferred, and so always carries a count.
     const auto typed = encode(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });
-    const auto typed_hint = view::over(typed).size_hint();
+    const auto typed_hint = reader::over(typed).size_hint();
     check(typed_hint && *typed_hint == 5, "a typed array states its length already");
 }
 

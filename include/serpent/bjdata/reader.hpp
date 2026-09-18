@@ -37,84 +37,59 @@ concept unaligned_span = requires {
 } // namespace detail
 
 class array_iterator;
-class array_range;
 class member_iterator;
-class member_range;
+template<typename Iterator>
+class element_range;
+using array_range = element_range<array_iterator>;
+using member_range = element_range<member_iterator>;
 
 /**
- * @brief A non-owning handle to one BJData value, holding no storage of its own.
- *
- * Never advances: copying one and indexing it leave it referring to the same value, which is
- * span/string_view semantics rather than those of a cursor. The types that do advance are
- * array_iterator and member_iterator, and detail::cursor internally.
+ * @brief A handle to one BJData value inside a buffer, holding no storage of its own.
  *
  * Every accessor is total: a malformed document, a missing key or a value of the wrong type
- * yields an invalid view or an empty optional rather than throwing. The checked accessors
- * (at, get, string, binary, span) wrap those and raise instead, so both styles run over the
- * same bytes and the same single parsing implementation.
- */
-/**
- * How far a traversal got into which value of which document.
+ * yields an invalid reader or an empty optional rather than throwing. The checked accessors
+ * (at, get) wrap those and raise instead, so both styles run over the same bytes and the same
+ * single parsing implementation.
  *
- * A forward iterator has to walk a value to find its sibling, so a container read element by
- * element is scanned once to read each element and again to step over it - every byte twice, and
- * once more for each level above it. When something has already walked an element to its end,
- * this is where it says so, and the iterator steps to that instead of scanning.
- *
- * Only a completed walk is recorded. A traversal that stopped in the middle of a value leaves
- * nothing, and the iterator scans as it always did: knowing where a walk paused would not be
- * enough to resume, because a counted container's remaining count is not recoverable from a
- * position alone.
+ * What the binary reader can do that the JSON one cannot is lend: as<std::string_view>() and
+ * as<nonstd::unaligned_little_span<const T>>() hand back the document's own bytes.
  */
-struct walk_memo {
-    const std::byte *base = nullptr;    ///< the document these positions are into
-    const std::byte *owner = nullptr;   ///< first byte after the marker of the value walked
-    const std::byte *reached = nullptr; ///< one past the end of that value
-
-    /**
-     * Whether this says anything about the value beginning at `first` of this document.
-     *
-     * The document is part of the question, not only the value. A memo outlives the document it
-     * was taken about, so a later document allocated where an earlier one stood would otherwise
-     * match a note about the dead one and resume into a position that means nothing.
-     */
-    [[nodiscard]] constexpr bool describes(const std::byte *document, const std::byte *first) const noexcept {
-        return this->base == document && this->owner == first && this->reached != nullptr;
-    }
-
-    constexpr void note(const std::byte *document, const std::byte *first, const std::byte *end) noexcept {
-        this->base = document;
-        this->owner = first;
-        this->reached = end;
-    }
-
-    constexpr void forget() noexcept { this->reached = nullptr; }
-};
-
-/** The memo a view uses when it was not given one. Not per-thread: this library has no threads. */
-[[nodiscard]] inline walk_memo &ambient_memo() noexcept {
-    static walk_memo memo;
-    return memo;
-}
-
-class view {
+class reader {
     marker element = marker::invalid;
     std::span<const std::byte> source {}; ///< the whole document, so bounds and offsets are absolute
     const std::byte *payload = nullptr; ///< first byte after this value's marker
 
+    // One past the end of this value, once a walk of it has been completed - for whoever steps
+    // over it next, which is the iterator that owns this handle. A forward iterator has to walk
+    // a value to find its sibling, so a container read element by element would otherwise be
+    // scanned once to read each element and again to step over it, and once more for each
+    // level above. Only a completed walk is recorded: a counted container's remaining count is
+    // not recoverable from a position alone, so knowing where a walk paused would not do.
+    //
+    // Which is why a reader can be moved but not copied: a copy would have a note of its own,
+    // and a loop written `for (auto child : ...)` would quietly walk every byte twice.
+    mutable const std::byte *reached = nullptr;
+
 public:
-    constexpr view() = default;
-    constexpr view(marker element, std::span<const std::byte> source, const std::byte *payload) noexcept
+    constexpr reader() = default;
+    constexpr reader(marker element, std::span<const std::byte> source, const std::byte *payload) noexcept
     : element(element)
     , source(source)
     , payload(payload) {}
+    reader(const reader &) = delete;
+    reader &operator=(const reader &) = delete;
+    reader(reader &&) = default;
+    reader &operator=(reader &&) = default;
+
+    /** Records where this value ends, so that stepping to the next need not scan it again. */
+    void note_end(const std::byte *end) const noexcept { this->reached = end; }
 
     /** Wraps a buffer, reading its leading marker. Performs no deep parsing. */
-    [[nodiscard]] static view over(std::span<const std::byte> buffer) noexcept {
+    [[nodiscard]] static reader over(std::span<const std::byte> buffer) noexcept {
         if (buffer.empty()) return {};
         const auto kind = to_marker(buffer.front());
         if (!is_value(kind)) return {};
-        return view { kind, buffer, buffer.data() + 1 };
+        return reader { kind, buffer, buffer.data() + 1 };
     }
 
     [[nodiscard]] constexpr marker type_marker() const noexcept { return this->element; }
@@ -199,22 +174,24 @@ public:
      */
     [[nodiscard]] std::optional<std::size_t> size_hint() const noexcept;
 
-    [[nodiscard]] array_range array() const noexcept;
-    [[nodiscard]] member_range items() const noexcept;
+    [[nodiscard]] array_range array() const & noexcept;
+    [[nodiscard]] array_range array() && noexcept;
+    [[nodiscard]] member_range items() const & noexcept;
+    [[nodiscard]] member_range items() && noexcept;
 
-    [[nodiscard]] view operator[](std::size_t index) const noexcept;
-    [[nodiscard]] view operator[](std::string_view key) const noexcept;
-    [[nodiscard]] view find(std::string_view key) const noexcept { return (*this)[key]; }
+    [[nodiscard]] reader operator[](std::size_t index) const noexcept;
+    [[nodiscard]] reader operator[](std::string_view key) const noexcept;
+    [[nodiscard]] reader find(std::string_view key) const noexcept { return (*this)[key]; }
 
     // ---------------- checked ----------------
 
-    [[nodiscard]] view at(std::size_t index) const {
+    [[nodiscard]] reader at(std::size_t index) const {
         auto result = (*this)[index];
         if (!result.is_valid()) raise(errc::out_of_range, this->offset());
         return result;
     }
 
-    [[nodiscard]] view at(std::string_view key) const {
+    [[nodiscard]] reader at(std::string_view key) const {
         auto result = (*this)[key];
         if (!result.is_valid()) raise(errc::missing_key, this->offset(), key);
         return result;
@@ -290,7 +267,7 @@ private:
         return value;
     }
 
-    /** S and H yield their raw bytes; C yields a one-character view. Never copies. */
+    /** S and H yield their raw bytes; C yields a one-character reader. Never copies. */
     [[nodiscard]] std::optional<std::string_view> read_text() const noexcept {
         if (this->element == marker::character) {
             if (this->available() < 1) return std::nullopt;
@@ -346,45 +323,57 @@ private:
 
     friend class array_iterator;
     friend class member_iterator;
+    friend reader move_to(reader &, marker, const std::byte *) noexcept;
 };
 
 /** A key and its value, for structured bindings over items(). */
 struct key_value {
     std::string_view key;
-    view value;
+    reader value;
 
     /** Present so this and json_key_value offer the same interface to generic code. */
     [[nodiscard]] constexpr bool key_is(std::string_view other) const noexcept { return this->key == other; }
     [[nodiscard]] std::string key_string() const { return std::string { this->key }; }
 };
 
+/** Points a handle at another value of the same document, with nothing known about it yet. */
+inline reader move_to(reader &handle, marker element, const std::byte *payload) noexcept {
+    handle.element = element;
+    handle.payload = payload;
+    handle.reached = nullptr;
+    return {};
+}
+
 /**
- * @brief Forward iterator over the elements of an array.
+ * Iterator over the elements of an array.
  *
- * All the traversal state lives here - a cursor, the count still owed, and the strong type
- * when there is one - so nothing is ever materialised for the container itself.
+ * All the traversal state lives here - a cursor, the count still owed, the strong type when
+ * there is one, and the element it stands on. It hands out a reference to that element, so
+ * that a walk of it leaves its note where the step to the next one reads it; and tells the
+ * array being walked, through the reference it was given to it, when the walk is complete. An
+ * input iterator, since what it owns cannot be copied.
  */
 class array_iterator {
 public:
-    using value_type = view;
-    using reference = view;
+    using value_type = reader;
+    using reference = const reader &;
     using difference_type = std::ptrdiff_t;
-    using iterator_concept = std::forward_iterator_tag;
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_concept = std::input_iterator_tag;
 
 private:
-    std::span<const std::byte> source {};
+    const reader *container = nullptr;
     const std::byte *cursor = nullptr;
     marker element = marker::invalid;
     std::uint64_t remaining = 0;
     bool counted = false;
     bool exhausted = true;
-    key_value current {};
+    reader current;
 
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
-        return this->source.data() + this->source.size();
+        return this->container->source.data() + this->container->source.size();
     }
 
+    /** Settles whether the cursor stands on an element, and if so points `current` at it. */
     void normalise() noexcept {
         if (this->cursor == nullptr) {
             this->exhausted = true;
@@ -396,32 +385,50 @@ private:
         }
         if (this->counted) {
             this->exhausted = this->remaining == 0 || this->cursor >= this->limit();
+        } else {
+            this->exhausted = this->cursor >= this->limit() || to_marker(*this->cursor) == marker::array_end;
+        }
+        if (this->exhausted) {
+            this->publish();
             return;
         }
-        this->exhausted = this->cursor >= this->limit() || to_marker(*this->cursor) == marker::array_end;
+        if (this->element != marker::invalid) {
+            move_to(this->current, this->element, this->cursor);
+            return;
+        }
+        const auto kind = to_marker(*this->cursor);
+        if (!is_value(kind)) {
+            this->exhausted = true;
+            return;
+        }
+        move_to(this->current, kind, this->cursor + 1);
+    }
+
+    /** Says where the array ended, once it has been walked all the way. */
+    void publish() const noexcept {
+        if (this->counted) {
+            if (this->remaining == 0) this->container->note_end(this->cursor);
+        } else if (this->cursor != nullptr && this->cursor < this->limit()
+                && to_marker(*this->cursor) == marker::array_end) {
+            this->container->note_end(this->cursor + 1);
+        }
     }
 
 public:
     array_iterator() = default;
 
-    array_iterator(std::span<const std::byte> source, const detail::header &info) noexcept
-    : source(source)
+    array_iterator(const reader &container, const detail::header &info) noexcept
+    : container(&container)
     , cursor(info.body)
     , element(info.element)
     , remaining(info.count)
-    , counted(!info.unbounded) {
+    , counted(!info.unbounded)
+    , current(marker::invalid, container.source, nullptr) {
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
 
-    [[nodiscard]] view operator*() const noexcept {
-        if (this->exhausted) return {};
-        if (this->element != marker::invalid) return view { this->element, this->source, this->cursor };
-
-        const auto kind = to_marker(*this->cursor);
-        if (!is_value(kind)) return {};
-        return view { kind, this->source, this->cursor + 1 };
-    }
+    [[nodiscard]] const reader &operator*() const noexcept { return this->current; }
 
     array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
@@ -433,26 +440,13 @@ public:
                 return *this;
             }
             this->cursor += width;
-        } else {
-            detail::cursor scanner { this->source, this->cursor };
-            if (!scanner.need(1)) {
-                this->exhausted = true;
-                return *this;
-            }
-            const auto kind = to_marker(scanner.peek());
-            if (!is_value(kind)) {
-                this->exhausted = true;
-                return *this;
-            }
-            scanner.advance(1);
+        } else if (this->current.reached != nullptr) {
             // Something already walked this element to its end, so step to where it finished
             // rather than scanning the same bytes a second time to find the same place.
-            if (auto &memo = ambient_memo(); memo.describes(this->source.data(), scanner.position)) {
-                scanner.position = memo.reached;
-                memo.forget();
-            } else {
-                detail::skip_value(scanner, kind, 1);
-            }
+            this->cursor = this->current.reached;
+        } else {
+            detail::cursor scanner { this->container->source, this->current.payload };
+            detail::skip_value(scanner, this->current.element, 1);
             if (!scanner.ok()) {
                 this->exhausted = true;
                 return *this;
@@ -465,87 +459,69 @@ public:
         return *this;
     }
 
-    array_iterator operator++(int) noexcept {
-        auto previous = *this;
-        ++(*this);
-        return previous;
-    }
+    void operator++(int) noexcept { ++(*this); }
 
-    [[nodiscard]] friend bool operator==(const array_iterator &left, const array_iterator &right) noexcept {
-        if (left.exhausted || right.exhausted) return left.exhausted == right.exhausted;
-        return left.cursor == right.cursor;
-    }
+    [[nodiscard]] bool operator==(std::default_sentinel_t) const noexcept { return this->exhausted; }
 };
 
-/** Forward iterator over the key/value pairs of an object. */
+/** Iterator over the key/value pairs of an object; the same arrangement as array_iterator. */
 class member_iterator {
 public:
     using value_type = key_value;
-    // The entry is parsed once, on arrival, so dereferencing hands it back rather than
-    // rebuilding it - and a forward iterator is allowed to say so.
     using reference = const key_value &;
     using difference_type = std::ptrdiff_t;
-    using iterator_concept = std::forward_iterator_tag;
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_concept = std::input_iterator_tag;
 
 private:
-    std::span<const std::byte> source {};
+    const reader *container = nullptr;
     const std::byte *cursor = nullptr;
     marker element = marker::invalid;
     std::uint64_t remaining = 0;
     bool counted = false;
     bool exhausted = true;
-    key_value current {};
-    const std::byte *owner = nullptr; ///< the object being walked, for the memo
+    key_value current;
 
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
-        return this->source.data() + this->source.size();
+        return this->container->source.data() + this->container->source.size();
     }
 
     /**
      * Says where this object ended, once it has been walked all the way.
      *
-     * Only on exhaustion, and only for a counted object: an unbounded one ends at a terminator
-     * the cursor has not stepped over, so the position here is not yet past the value.
+     * Only on exhaustion: an unbounded object ends at a terminator the cursor stops on rather
+     * than steps over, so the value ends one byte further on than the walk reached.
      */
     void publish() const noexcept {
-        if (this->owner == nullptr || !this->exhausted) return;
-
-        const std::byte *end = nullptr;
         if (this->counted) {
-            // Every member owed has been read, so the cursor is already past the last of them.
-            if (this->remaining != 0) return;
-            end = this->cursor;
-        } else {
-            // An unbounded object ends at a terminator the cursor stops on rather than steps
-            // over, so the value ends one byte further on than the walk reached.
-            if (this->cursor == nullptr || this->cursor >= this->limit()) return;
-            if (to_marker(*this->cursor) != marker::object_end) return;
-            end = this->cursor + 1;
+            if (this->remaining == 0) this->container->note_end(this->cursor);
+        } else if (this->cursor != nullptr && this->cursor < this->limit()
+                && to_marker(*this->cursor) == marker::object_end) {
+            this->container->note_end(this->cursor + 1);
         }
-        ambient_memo().note(this->source.data(), this->owner, end);
     }
 
-    /** Parses the entry at the cursor. Called once per position, by normalise(). */
-    [[nodiscard]] key_value parse_here() const noexcept {
-        detail::cursor scanner { this->source, this->cursor };
+    /** Parses the entry at the cursor into `current`; false if it is malformed. */
+    [[nodiscard]] bool parse_here() noexcept {
+        detail::cursor scanner { this->container->source, this->cursor };
         const auto key = detail::read_key(scanner);
-        if (!scanner.ok()) return {};
+        if (!scanner.ok()) return false;
 
         if (this->element != marker::invalid) {
-            return key_value { key, view { this->element, this->source, scanner.position } };
+            this->current.key = key;
+            move_to(this->current.value, this->element, scanner.position);
+            return true;
         }
-        if (!scanner.need(1)) return {};
-
+        if (!scanner.need(1)) return false;
         const auto kind = to_marker(scanner.peek());
-        if (!is_value(kind)) return {};
-        return key_value { key, view { kind, this->source, scanner.position + 1 } };
+        if (!is_value(kind)) return false;
+        this->current.key = key;
+        move_to(this->current.value, kind, scanner.position + 1);
+        return true;
     }
 
     void normalise() noexcept {
         if (this->cursor == nullptr) {
             this->exhausted = true;
-            this->current = {};
             return;
         }
         // Unlike a typed array, an object skips noops whether or not it has a strong type.
@@ -557,127 +533,112 @@ private:
         } else {
             this->exhausted = this->cursor >= this->limit() || to_marker(*this->cursor) == marker::object_end;
         }
-
         // The key and the value marker are read here rather than in operator*, so that
         // advancing can resume from the value instead of parsing the key a second time.
-        this->current = this->exhausted ? key_value {} : this->parse_here();
+        if (this->exhausted) this->publish();
+        else if (!this->parse_here()) this->exhausted = true;
     }
 
 public:
     member_iterator() = default;
 
-    member_iterator(std::span<const std::byte> source, const detail::header &info,
-            const std::byte *owner = nullptr) noexcept
-    : source(source)
+    member_iterator(const reader &container, const detail::header &info) noexcept
+    : container(&container)
     , cursor(info.body)
     , element(info.element)
     , remaining(info.count)
     , counted(!info.unbounded)
-    , owner(owner) {
+    , current { {}, reader { marker::invalid, container.source, nullptr } } {
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
 
     [[nodiscard]] const key_value &operator*() const noexcept { return this->current; }
+    [[nodiscard]] const key_value *operator->() const noexcept { return &this->current; }
 
     member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
         // The key and the value's marker were consumed by normalise(), so resume at the value.
-        if (!this->current.value.is_valid()) {
-            this->exhausted = true;
-            return *this;
-        }
-
-        detail::cursor scanner { this->source, this->current.value.data() };
         if (this->element != marker::invalid) {
-            if (!scanner.need(payload_width(this->element))) {
+            const auto width = payload_width(this->element);
+            if (static_cast<std::uint64_t>(this->limit() - this->current.value.payload) < width) {
                 this->exhausted = true;
                 return *this;
             }
-            scanner.advance(payload_width(this->element));
+            this->cursor = this->current.value.payload + width;
+        } else if (this->current.value.reached != nullptr) {
+            this->cursor = this->current.value.reached;
         } else {
-            detail::skip_value(scanner, this->current.value.type_marker(), 1);
+            detail::cursor scanner { this->container->source, this->current.value.payload };
+            detail::skip_value(scanner, this->current.value.element, 1);
             if (!scanner.ok()) {
                 this->exhausted = true;
                 return *this;
             }
+            this->cursor = scanner.position;
         }
 
-        this->cursor = scanner.position;
         if (this->counted && this->remaining > 0) --this->remaining;
         this->normalise();
-        this->publish();
         return *this;
     }
 
-    member_iterator operator++(int) noexcept {
-        auto previous = *this;
-        ++(*this);
-        return previous;
-    }
+    void operator++(int) noexcept { ++(*this); }
 
-    [[nodiscard]] friend bool operator==(const member_iterator &left, const member_iterator &right) noexcept {
-        if (left.exhausted || right.exhausted) return left.exhausted == right.exhausted;
-        return left.cursor == right.cursor;
-    }
+    [[nodiscard]] bool operator==(std::default_sentinel_t) const noexcept { return this->exhausted; }
 };
 
-class array_range : public std::ranges::view_interface<array_range> {
-    array_iterator head;
+/**
+ * The elements of an array, or the members of an object, as a range.
+ *
+ * Made from a reader that will outlive the loop, it refers to it, and the walk leaves its note
+ * there for whatever steps over that reader next. Made from a temporary - `document["a"].array()`
+ * - it keeps the reader itself, and the note has nowhere further to go.
+ */
+template<typename Iterator>
+class element_range {
+    const reader *container = nullptr;
+    std::optional<reader> owned;
+
+    [[nodiscard]] const reader &of() const noexcept { return this->owned ? *this->owned : *this->container; }
 
 public:
-    array_range() = default;
-    explicit array_range(array_iterator head) noexcept : head(head) {}
+    explicit element_range(const reader &container) noexcept : container(&container) {}
+    explicit element_range(reader &&container) noexcept : owned(std::move(container)) {}
 
-    [[nodiscard]] array_iterator begin() const noexcept { return this->head; }
-    [[nodiscard]] array_iterator end() const noexcept { return {}; }
+    [[nodiscard]] Iterator begin() const noexcept { return Iterator { this->of(), this->of().container_header() }; }
+    [[nodiscard]] std::default_sentinel_t end() const noexcept { return {}; }
 };
 
-class member_range : public std::ranges::view_interface<member_range> {
-    member_iterator head;
+inline array_range reader::array() const & noexcept { return array_range { *this }; }
+inline array_range reader::array() && noexcept { return array_range { std::move(*this) }; }
+inline member_range reader::items() const & noexcept { return member_range { *this }; }
+inline member_range reader::items() && noexcept { return member_range { std::move(*this) }; }
 
-public:
-    member_range() = default;
-    explicit member_range(member_iterator head) noexcept : head(head) {}
-
-    [[nodiscard]] member_iterator begin() const noexcept { return this->head; }
-    [[nodiscard]] member_iterator end() const noexcept { return {}; }
-};
-
-inline array_range view::array() const noexcept {
-    if (this->element != marker::array_begin) return {};
-    return array_range { array_iterator { this->source, this->container_header() } };
-}
-
-inline member_range view::items() const noexcept {
-    if (this->element != marker::object_begin) return {};
-    return member_range { member_iterator { this->source, this->container_header(), this->payload } };
-}
-
-inline std::optional<std::size_t> view::size_hint() const noexcept {
+inline std::optional<std::size_t> reader::size_hint() const noexcept {
     const auto info = this->container_header();
     if (info.body == nullptr || info.unbounded) return std::nullopt;
     return static_cast<std::size_t>(info.count);
 }
 
-inline std::size_t view::size() const noexcept {
+inline std::size_t reader::size() const noexcept {
     const auto info = this->container_header();
     if (info.body == nullptr) return 0;
     if (!info.unbounded) return static_cast<std::size_t>(info.count);
 
     std::size_t total = 0;
     if (this->element == marker::object_begin) {
-        for ([[maybe_unused]] auto entry : this->items())
+        for ([[maybe_unused]] const auto &entry : this->items())
             ++total;
     } else {
-        for ([[maybe_unused]] auto entry : this->array())
+        for ([[maybe_unused]] const auto &entry : this->array())
             ++total;
     }
     return total;
 }
 
-inline view view::operator[](std::size_t index) const noexcept {
+inline reader reader::operator[](std::size_t index) const noexcept {
     if (this->element != marker::array_begin) return {};
 
     const auto info = this->container_header();
@@ -689,20 +650,20 @@ inline view view::operator[](std::size_t index) const noexcept {
         const auto width = payload_width(info.element);
         // Check before forming the pointer, so an out-of-range index never computes one.
         if (static_cast<std::uint64_t>(this->limit() - info.body) < (index + 1) * width) return {};
-        return view { info.element, this->source, info.body + index * width };
+        return reader { info.element, this->source, info.body + index * width };
     }
 
     std::size_t position = 0;
-    for (auto value : this->array()) {
-        if (position++ == index) return value;
+    for (const auto &value : this->array()) {
+        if (position++ == index) return reader { value.element, value.source, value.payload };
     }
     return {};
 }
 
-inline view view::operator[](std::string_view key) const noexcept {
+inline reader reader::operator[](std::string_view key) const noexcept {
     if (this->element != marker::object_begin) return {};
-    for (auto entry : this->items()) {
-        if (entry.key == key) return entry.value;
+    for (const auto &entry : this->items()) {
+        if (entry.key == key) return reader { entry.value.element, entry.value.source, entry.value.payload };
     }
     return {};
 }
@@ -739,7 +700,7 @@ inline view view::operator[](std::string_view key) const noexcept {
  */
 template<std::ranges::contiguous_range C, typename T = std::ranges::range_value_t<C>>
     requires (strong_type_for<T>() != marker::invalid) && std::is_arithmetic_v<T> && requires(C &out) { out.resize(std::size_t {}); }
-std::optional<bool> read_sequence(const view &source, C &out) {
+std::optional<bool> read_sequence(const reader &source, C &out) {
     const auto values = source.template as<nonstd::unaligned_little_span<const T>>();
     if (!values) return std::nullopt;
 

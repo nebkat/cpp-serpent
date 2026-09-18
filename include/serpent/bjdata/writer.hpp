@@ -36,7 +36,7 @@ namespace serpent::bjdata {
  *                        size                                  speed
  *   a number             the narrowest marker that holds it    the marker of its own type
  *   a range of numbers   typed, [$T#n, when that is smaller,   always typed, at its own type: one
- *                        at the narrowest marker for them all  copy to write, one to read, a span to view
+ *                        at the narrowest marker for them all  copy to write, one to read, a span to reader
  *   any other range      unbounded, since a count costs bytes  counted, so a reader sizes its container once
  *
  * Both are read by the same reader, which takes whatever marker it finds.

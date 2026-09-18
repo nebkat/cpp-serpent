@@ -25,23 +25,24 @@ matching.
 It costs a second pass, because validating and decoding are separate walks. Reach for `decode`
 when the answer is all you want.
 
-## Two handles, one shape
+## Two readers, one shape
 
-| | | |
-|---|---|---|
-| `bjdata::view` | a **view** | values *are* the bytes, so strings and typed arrays are borrowed |
-| `json::reader` | a **reader** | values must be constructed, so strings and numbers are decoded |
+`bjdata::reader` and `json::reader` are the same kind of thing - a handle to one value inside a
+buffer, holding nothing of its own - with one difference the format dictates: BJData values
+*are* the bytes, so the binary reader can lend them (`as<std::string_view>()`, a typed array as a
+span), where a JSON string has to be decoded and is only ever handed over as a `std::string`.
+Everything else is the same: the same `errc`, the same `as<T>()`, the same iteration.
 
-The difference is the format's, not a naming choice. Everything else is the same: the same
-`errc`, the same accessors, the same forward iterators.
+A reader can be moved but not copied, for a reason explained [below](#walking-a-document-costs-one-pass),
+so a loop over one is written `for (const auto &element : ...)`.
 
 ```cpp
-auto document = bjdata::view::over(bytes);      // or json::reader::over(text)
+auto document = bjdata::reader::over(bytes);    // or json::reader::over(text)
 
 document["name"];                 // missing key gives an invalid handle, not an error
 document["ports"][2];
-for (auto element : document["ports"].array()) { }
-for (auto [key, value] : document.items()) { }
+for (const auto &element : document["ports"].array()) { }
+for (const auto &[key, value] : document.items()) { }
 ```
 
 ## Three tiers over one parser
@@ -94,7 +95,7 @@ value.as<double>();
 value.as<std::string_view>();
 ```
 
-On `bjdata::view` only:
+On `bjdata::reader` only:
 
 ```cpp
 value.as<std::span<const std::byte>>();                 // a [$B# array, as its raw bytes
@@ -113,7 +114,7 @@ auto samples = document["samples"].as<nonstd::unaligned_little_span<const std::u
 
 // JSON: decoded into a container you own
 auto samples = json::decode<std::vector<std::uint16_t>>(text);
-for (auto element : reader["samples"].array()) element.as<std::uint16_t>();
+for (const auto &element : reader["samples"].array()) element.as<std::uint16_t>();
 ```
 
 !!! note "Not alignment-sensitive"
@@ -148,18 +149,21 @@ nothing written down the only way to know is to walk it. Left alone, that means 
 once by the loop that wants it and again by the loop stepping over it — once for every level of
 nesting above it.
 
-It is not left alone. A reader keeps a note of how far a traversal got, so the step to the next
-value resumes instead of starting again:
+It is not left alone. Every reader keeps a note of how far a walk of *it* got, and the iterator
+that owns it reads the note to step past it:
 
 ```cpp
-for (auto row : document.array())          // outer
-    for (auto value : row.array())         // inner, and it leaves the note
-        total += value.as<int>();      // so the outer step resumes
+for (const auto &row : document.array())          // outer
+    for (const auto &value : row.array())         // inner, and it leaves the note in `row`
+        total += value.as<int>();                 // so the outer step resumes
 ```
 
-Nothing to switch on and nothing to hold. The note is only ever about one value at a time, so a
-traversal it does not describe simply scans, exactly as it would have anyway — which is why a
-value read twice, two handles held at once, and members taken out of order all keep working.
+Nothing is shared: not between two traversals, not between threads. The note lives in the
+handle, which is why the handle cannot be copied - a copy would have a note of its own, and
+`for (auto row : ...)` would silently walk every byte twice; `for (auto &row : ...)` walks them
+once, and the compiler insists on the `&`. A traversal the note does not cover simply scans,
+exactly as it would have anyway, which is why a value read twice, two handles held at once, and
+members taken out of order all keep working.
 
 Decoding into a type gets the same treatment from the other side: a reflected type is read by
 walking the document once and handing each key to the member that claims it, so a document whose
@@ -173,7 +177,7 @@ records where every value is, once:
 ```cpp
 const auto index = json::structural_index::over(text);
 
-for (auto row : index.root()["rows"].array())      // every step is a hop, not a scan
+for (const auto &row : index.root()["rows"].array())      // every step is a hop, not a scan
     total += row["value"].as<double>().value_or(0);
 ```
 
