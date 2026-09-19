@@ -25,7 +25,7 @@
 
 namespace serpent::json::direct {
 
-[[nodiscard]] inline bool read(scanner::cursor &scan, bool &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(scanner::cursor &scan, bool &into) noexcept {
     if (scanner::accept(scan, "true")) {
         into = true;
         return true;

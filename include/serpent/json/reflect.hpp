@@ -242,10 +242,16 @@ private:
         using field_type = std::remove_cvref_t<decltype(field)>;
         constexpr auto tag = serpent::detail::annotation_of<tagged>(Member);
 
-        if constexpr (read_with_cursor<field_type>() && !tag.has_value()) {
-            // The kinds of member a schema is mostly made of, read where they stand. One that
-            // does not convert is stepped over from its start, so the members after it are
-            // still read and the object still closes.
+        if constexpr (direct::readable<field_type> && !tag.has_value()) {
+            // The kinds of member a schema is mostly made of, read where they stand - and
+            // inline, which read_at() below cannot be, since it recurses.
+            if (direct::read(this->scan, field)) return;
+            this->converted = false;
+            scanner::skip_value(this->scan, 1);
+        } else if constexpr (read_with_cursor<field_type>() && !tag.has_value()) {
+            // A nested described type or a sequence, read with the same cursor. One that does
+            // not convert is stepped over from its start, so the members after it are still
+            // read and the object still closes.
             const char *const start = this->scan.position;
             if (read_at(this->scan, this->document, field)) return;
             this->converted = false;
