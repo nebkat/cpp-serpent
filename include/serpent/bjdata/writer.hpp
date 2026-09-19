@@ -222,6 +222,20 @@ public:
         return true;
     }
 
+    /**
+     * Writes a whole object as one piece, braces included, into room claimed once - for an
+     * object every member of which has a longest length. It is never opened, so the depth is
+     * left as it is; only an object that would have been allowed to open is written this way.
+     */
+    template<typename Write>
+    [[nodiscard]] bool compose_object(std::size_t at_most, Write write) noexcept {
+        if (this->depth >= max_depth) return false;
+        char *const to = this->room_for(at_most);
+        if (to == nullptr) return false;
+        this->used(write(to));
+        return true;
+    }
+
     // ---------------- scalars ----------------
 
     void null() noexcept { this->put_marker(marker::null); }
