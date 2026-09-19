@@ -134,14 +134,20 @@ public:
 
     [[nodiscard]] bool is_valid() const noexcept { return this->type() != kind::invalid; }
     [[nodiscard]] explicit operator bool() const noexcept { return this->is_valid(); }
-    [[nodiscard]] bool is_null() const noexcept { return this->type() == kind::null; }
+    /** What the first character says, for the kinds one character settles - asked far more
+     * often than the full classification, which has to scan a number to say which it is. */
+    [[nodiscard]] SERPENT_ALWAYS_INLINE bool begins_with(char opening) const noexcept {
+        return this->first != nullptr && this->first < this->limit() && *this->first == opening;
+    }
+
+    [[nodiscard]] bool is_null() const noexcept { return this->begins_with('n'); }
     [[nodiscard]] bool is_boolean() const noexcept { return this->type() == kind::boolean; }
     [[nodiscard]] bool is_integer() const noexcept { return this->type() == kind::integer; }
     [[nodiscard]] bool is_real() const noexcept { return this->type() == kind::real; }
     [[nodiscard]] bool is_number() const noexcept { return this->is_integer() || this->is_real(); }
-    [[nodiscard]] bool is_string() const noexcept { return this->type() == kind::string; }
-    [[nodiscard]] bool is_array() const noexcept { return this->type() == kind::array; }
-    [[nodiscard]] bool is_object() const noexcept { return this->type() == kind::object; }
+    [[nodiscard]] bool is_string() const noexcept { return this->begins_with('"'); }
+    [[nodiscard]] bool is_array() const noexcept { return this->begins_with('['); }
+    [[nodiscard]] bool is_object() const noexcept { return this->begins_with('{'); }
 
     // ---------------- scalars ----------------
 

@@ -74,7 +74,7 @@ concept back_insertable = requires(T &target) {
  */
 template<typename T>
 concept fixed_sequence = std::ranges::sized_range<T> && !back_insertable<T> && !string_like<T> && !byte_range<T>
-        && !map_like<T> && requires(T &target) {
+        && !map_like<T> && !optional_like<T> && requires(T &target) {
                { *std::ranges::begin(target) = std::ranges::range_value_t<T> {} };
            };
 

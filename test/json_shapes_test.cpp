@@ -7,6 +7,7 @@
 
 #include <serpent/json.hpp>
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -42,6 +43,14 @@ struct [[= serpent::serializable {}]] prefixes {
 struct [[= serpent::serializable {}]] holder {
     std::string name;
     record inner;
+};
+
+struct [[= serpent::serializable {}]] grid {
+    std::vector<std::array<int, 2>> cells;
+    std::vector<std::vector<std::string>> rows;
+    int after = 0;
+
+    friend bool operator==(const grid &, const grid &) = default;
 };
 
 struct [[= serpent::serializable {}]] nothing_required {
@@ -122,6 +131,26 @@ int main() {
             "a string where an integer belongs fails");
     check(!json::decode<record>(R"({"id":1.5,"name":"north","ratio":0.5,"active":true,"tags":[]})").has_value(),
             "and so does a real");
+
+    // Sequences of sequences are read with the one cursor too, whatever the depth.
+    const grid expected_grid { { { 1, 2 }, { 3, 4 } }, { { "a" }, {}, { "b", "c" } }, 7 };
+    check(json::decode<grid>(R"({"cells":[[1,2],[3,4]],"rows":[["a"],[],["b","c"]],"after":7})") == expected_grid,
+            "nested sequences read in place");
+    check(json::decode<grid>(R"( { "cells" : [ [ 1 , 2 ] , [ 3 , 4 ] ] , "rows" : [ [ "a" ] , [ ] , [ "b" , "c" ] ] , "after" : 7 } )")
+                    == expected_grid,
+            "with whitespace anywhere");
+    check(!json::decode<grid>(R"({"cells":[[1,2,3]],"rows":[],"after":7})").has_value(),
+            "a fixed-length element of another length is not this type");
+    check(!json::decode<grid>(R"({"cells":[[1,2]],"rows":[["a",1]],"after":7})").has_value(),
+            "an element that is not of the type is refused");
+    check(!json::decode<grid>(R"({"cells":[[1,2],[3,]],"rows":[],"after":7})").has_value(), "and so is a malformed one");
+
+    // A member that does not convert is stepped over, and the members after it are still read:
+    // the object is reported as not converting, not as missing them.
+    grid partly;
+    check(!json::decode_into(R"({"cells":[[1,"x"]],"rows":[["z"]],"after":7})", partly), "a member that does not convert fails the read");
+    check(partly.after == 7 && partly.rows == std::vector<std::vector<std::string>> { { "z" } },
+            "but the members after it were still read");
 
     // Read into an object that already holds one, a nested member is filled where it stands: its
     // containers keep the capacity they have rather than being built afresh and moved in.

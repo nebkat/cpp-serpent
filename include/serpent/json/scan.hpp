@@ -115,7 +115,7 @@ inline constexpr auto character_class = [] {
  * suits a string, whose runs are long, and would not suit the runs advance_while is otherwise
  * asked about. SERPENT_WIDE_STRING_SCAN=0 makes it advance_while and nothing more.
  */
-[[nodiscard]] constexpr const char *end_of_plain_text(const char *position, const char *limit) noexcept {
+[[nodiscard]] SERPENT_ALWAYS_INLINE constexpr const char *end_of_plain_text(const char *position, const char *limit) noexcept {
 #if SERPENT_WIDE_STRING_SCAN
     if (!std::is_constant_evaluated()) {
         while (limit - position >= 8) {

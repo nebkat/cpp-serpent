@@ -47,6 +47,40 @@ template<const std::string_view &Name>
 inline constexpr auto written_next_key = serpent::detail::joined<Name.size() + 4>({ ",\"", Name, "\":" });
 
 /**
+ * Whether a type is read with a cursor alone, no handle in between: a scalar, a described type,
+ * or a sequence - fixed or growable - of such, however deep. A byte range is not, since it may
+ * be carried another way, and a sequence whose elements cannot be reached by reference has
+ * nothing to read into where they lie.
+ */
+template<typename T>
+consteval bool read_with_cursor() {
+    using bare = std::remove_cvref_t<T>;
+    if constexpr (direct::readable<bare> || reflected_type<bare>) {
+        return true;
+    } else if constexpr (serpent::detail::byte_range<bare> || serpent::detail::string_like<bare>) {
+        return false;
+    } else if constexpr (serpent::detail::back_insertable<bare>) {
+        if constexpr (std::is_lvalue_reference_v<decltype(std::declval<bare &>().emplace_back())>)
+            return read_with_cursor<std::ranges::range_value_t<bare>>();
+        else
+            return false;
+    } else if constexpr (serpent::detail::fixed_sequence<bare>) {
+        return read_with_cursor<std::ranges::range_value_t<bare>>();
+    } else {
+        return false;
+    }
+}
+
+/**
+ * Reads the value at the cursor into `into`, leaving the cursor just past it. False for a value
+ * that is not of this type or is malformed; the cursor is then somewhere inside it, and failed
+ * where the text was at fault.
+ */
+template<typename T>
+    requires (read_with_cursor<T>())
+[[nodiscard]] bool read_at(scanner::cursor &scan, std::string_view document, T &into);
+
+/**
  * Fills one object of a described type from the text of a JSON object.
  *
  * Holds what reading an object needs to carry from one member to the next: where the cursor is,
@@ -208,10 +242,15 @@ private:
         using field_type = std::remove_cvref_t<decltype(field)>;
         constexpr auto tag = serpent::detail::annotation_of<tagged>(Member);
 
-        if constexpr (direct::readable<field_type> && !tag.has_value()) {
-            // The kinds of member a schema is mostly made of, read where they stand.
-            if (direct::read(this->scan, field)) return;
+        if constexpr (read_with_cursor<field_type>() && !tag.has_value()) {
+            // The kinds of member a schema is mostly made of, read where they stand. One that
+            // does not convert is stepped over from its start, so the members after it are
+            // still read and the object still closes.
+            const char *const start = this->scan.position;
+            if (read_at(this->scan, this->document, field)) return;
             this->converted = false;
+            if (!this->scan.ok()) return;
+            this->scan.position = start;
             scanner::skip_value(this->scan, 1);
         } else {
             // Anything else is read through a handle, by whatever reads that type anywhere else -
@@ -259,68 +298,56 @@ bool read_reflected(const reader &source, T &value) {
     return read;
 }
 
-/**
- * Fills a container of described objects from a JSON array, reading the document once.
- *
- * Without this each element is reached through the array iterator: a handle is made for it, the
- * handle is asked what it holds, and the iterator then finds its way past the element to the next.
- * One cursor carried from each object to the one after it needs none of that.
- *
- * Returns nothing for a value that is not an array, which leaves the general path to refuse it.
- */
-template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
-    requires reflected_type<T> && requires(C &out) {
-        out.clear();
-        { out.emplace_back() } -> std::same_as<T &>;
-    }
-std::optional<bool> read_sequence(const reader &source, C &out) {
-    if (!source.is_array()) return std::nullopt;
-
-    scanner::cursor scan { source.document(), source.data() + 1 };
-    out.clear();
-
+template<typename T>
+    requires (read_with_cursor<T>())
+[[nodiscard]] bool read_at(scanner::cursor &scan, std::string_view document, T &into) {
     scanner::skip_whitespace(scan);
-    if (!scanner::accept(scan, ']')) {
+    if constexpr (direct::readable<T>) {
+        return direct::read(scan, into);
+    } else if constexpr (reflected_type<T>) {
+        if (!scanner::accept(scan, '{')) return false;
+        return read_object(into, scan, document);
+    } else if constexpr (serpent::detail::fixed_sequence<T>) {
+        // Its length is part of what it is, so a document of another length is not this type.
+        if (!scanner::accept(scan, '[')) return false;
+        auto slot = std::ranges::begin(into);
+        const auto limit = std::ranges::end(into);
+        scanner::skip_whitespace(scan);
+        if (scanner::accept(scan, ']')) return slot == limit;
         do {
-            scanner::skip_whitespace(scan);
-            if (!scanner::accept(scan, '{')) return false;
-            if (!read_object(out.emplace_back(), scan, source.document())) return false;
+            if (slot == limit || !read_at(scan, document, *slot)) return false;
+            ++slot;
             scanner::skip_whitespace(scan);
         } while (scanner::accept(scan, ','));
-
-        if (!scanner::accept(scan, ']')) return false;
+        return scanner::accept(scan, ']') && slot == limit;
+    } else {
+        if (!scanner::accept(scan, '[')) return false;
+        into.clear();
+        scanner::skip_whitespace(scan);
+        if (scanner::accept(scan, ']')) return true;
+        do {
+            if (!read_at(scan, document, into.emplace_back())) return false;
+            scanner::skip_whitespace(scan);
+        } while (scanner::accept(scan, ','));
+        return scanner::accept(scan, ']');
     }
-
-    source.note_end(scan.position);
-    return true;
 }
 
 /**
- * Fills a container of scalars from a JSON array the same way: one cursor, each element
- * converted where it lands. An element that is not of the type asked for fails the read, as it
- * does through a handle.
+ * Fills a container from a JSON array with one cursor carried from element to element.
+ *
+ * Without this each element is reached through the array iterator: a handle is made for it, the
+ * handle is asked what it holds, and the iterator then finds its way past the element to the
+ * next. Returns nothing for a value that is not an array, which leaves the general path to
+ * refuse it.
  */
-template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
-    requires direct::readable<T> && requires(C &out) {
-        out.clear();
-        { out.emplace_back() } -> std::same_as<T &>;
-    }
+template<typename C>
+    requires serpent::detail::back_insertable<C> && (read_with_cursor<C>())
 std::optional<bool> read_sequence(const reader &source, C &out) {
     if (!source.is_array()) return std::nullopt;
 
-    scanner::cursor scan { source.document(), source.data() + 1 };
-    out.clear();
-
-    scanner::skip_whitespace(scan);
-    if (!scanner::accept(scan, ']')) {
-        do {
-            scanner::skip_whitespace(scan);
-            if (!direct::read(scan, out.emplace_back())) return false;
-            scanner::skip_whitespace(scan);
-        } while (scanner::accept(scan, ','));
-
-        if (!scanner::accept(scan, ']')) return false;
-    }
+    scanner::cursor scan { source.document(), source.data() };
+    if (!read_at(scan, source.document(), out)) return false;
 
     source.note_end(scan.position);
     return true;
