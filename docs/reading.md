@@ -36,6 +36,29 @@ for (const auto &text : documents)
 
 A member the document leaves out keeps its value. The same three exist for `bjdata`.
 
+## Text with a zero byte after it is read faster
+
+A JSON reader bounds every byte it looks at, because the text may be a slice of a socket buffer
+or a flash page with anything after it. Text that is *known* to end in a zero byte — a
+`std::string`, a string literal — can be read with one test per byte instead of two: the zero
+byte is in no character class, so it ends every run of digits, whitespace or string text by
+itself, and the readers for numbers can walk digits without asking where the text ends. That is
+worth 20–40% on decoding, and it is chosen by the overload, so the text's own type decides:
+
+```cpp
+std::string owned = fetch();
+json::decode<config>(owned);                     // terminated: a std::string keeps a zero after its text
+json::decode<config>(R"({"host":"x"})");          // terminated: a literal ends in one too
+json::decode<config>(std::string_view { owned }); // bounded: a view promises nothing about what follows
+```
+
+`decode_into`, `try_decode` and `validate` choose the same way. A buffer of your own that does end
+in a zero byte — a file read into storage one byte longer than its length, say — is read the
+terminated way through `json::terminated_reader::over(view)`; `json::reader` is the bounded one.
+A zero byte *inside* the text ends a run early in terminated reading; it can only be a control
+character, which JSON never allows unescaped, so the fault is reported where a bounded reading
+would have reported it. The two readings agree on every text, which a test holds them to.
+
 ## Two readers, one shape
 
 `bjdata::reader` and `json::reader` are the same kind of thing - a handle to one value inside a

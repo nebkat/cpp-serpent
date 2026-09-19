@@ -76,9 +76,9 @@ consteval bool read_with_cursor() {
  * that is not of this type or is malformed; the cursor is then somewhere inside it, and failed
  * where the text was at fault.
  */
-template<typename T>
+template<bool Terminated, typename T>
     requires (read_with_cursor<T>())
-[[nodiscard]] bool read_at(scanner::cursor &scan, std::string_view document, T &into);
+[[nodiscard]] bool read_at(scanner::basic_cursor<Terminated> &scan, std::string_view document, T &into);
 
 /**
  * Fills one object of a described type from the text of a JSON object.
@@ -86,7 +86,7 @@ template<typename T>
  * Holds what reading an object needs to carry from one member to the next: where the cursor is,
  * which members have been seen, and whether everything read so far converted.
  */
-template<typename T>
+template<typename T, bool Terminated>
 class object_filler {
     static constexpr auto members = std::define_static_array(serpent::detail::members_including_bases<T>());
     static_assert(members.size() <= 64, "a type with more than 64 members needs a wider seen mask");
@@ -106,7 +106,7 @@ class object_filler {
     }();
 
     T &value;
-    scanner::cursor &scan; ///< borrowed, so that one cursor can be carried from object to object
+    scanner::basic_cursor<Terminated> &scan; ///< borrowed, so that one cursor can be carried from object to object
     std::string_view document;
 
     std::uint64_t seen = 0;   ///< one bit for each member read
@@ -115,7 +115,7 @@ class object_filler {
 
 public:
     /** `scan` stands just past the object's opening brace, and is left just past its closing one. */
-    object_filler(T &value, scanner::cursor &scan, std::string_view document) noexcept
+    object_filler(T &value, scanner::basic_cursor<Terminated> &scan, std::string_view document) noexcept
     : value(value)
     , scan(scan)
     , document(document) {}
@@ -261,7 +261,7 @@ private:
         } else {
             // Anything else is read through a handle, by whatever reads that type anywhere else -
             // and says, as it is read, how far into the text it got.
-            const reader held { this->document, this->scan.position };
+            const basic_reader<Terminated> held { this->document, this->scan.position };
             if constexpr (tag.has_value()) {
                 // A tagged variant is read through the tag that names its alternatives; reading it
                 // plainly would go back to trying each alternative in turn.
@@ -277,9 +277,9 @@ private:
 };
 
 /** Reads the object whose opening brace the cursor has just passed, leaving it past the closing one. */
-template<typename T>
-[[nodiscard]] bool read_object(T &value, scanner::cursor &scan, std::string_view document) {
-    object_filler<T> filler { value, scan, document };
+template<bool Terminated, typename T>
+[[nodiscard]] bool read_object(T &value, scanner::basic_cursor<Terminated> &scan, std::string_view document) {
+    object_filler<T, Terminated> filler { value, scan, document };
     filler.read_members_as_written();
     filler.read_remaining_entries();
     return filler.succeeded();
@@ -292,21 +292,21 @@ template<typename T>
  * member the type insists on that the document did not carry. A key the type does not name is
  * ignored, as it is everywhere else.
  */
-template<typename T>
+template<bool Terminated, typename T>
     requires reflected_type<std::remove_cvref_t<T>>
-bool read_reflected(const reader &source, T &value) {
+bool read_reflected(const basic_reader<Terminated> &source, T &value) {
     if (!source.is_object()) return false;
 
-    scanner::cursor scan { source.document(), source.data() + 1 };
+    scanner::basic_cursor<Terminated> scan { source.document(), source.data() + 1 };
     const bool read = read_object(value, scan, source.document());
     // Whoever is stepping through the container this object sits in can step to here.
     if (scan.ok()) source.note_end(scan.position);
     return read;
 }
 
-template<typename T>
+template<bool Terminated, typename T>
     requires (read_with_cursor<T>())
-[[nodiscard]] bool read_at(scanner::cursor &scan, std::string_view document, T &into) {
+[[nodiscard]] bool read_at(scanner::basic_cursor<Terminated> &scan, std::string_view document, T &into) {
     scanner::skip_whitespace(scan);
     if constexpr (direct::readable<T>) {
         return direct::read(scan, into);
@@ -347,12 +347,12 @@ template<typename T>
  * next. Returns nothing for a value that is not an array, which leaves the general path to
  * refuse it.
  */
-template<typename C>
+template<bool Terminated, typename C>
     requires serpent::detail::back_insertable<C> && (read_with_cursor<C>())
-std::optional<bool> read_sequence(const reader &source, C &out) {
+std::optional<bool> read_sequence(const basic_reader<Terminated> &source, C &out) {
     if (!source.is_array()) return std::nullopt;
 
-    scanner::cursor scan { source.document(), source.data() };
+    scanner::basic_cursor<Terminated> scan { source.document(), source.data() };
     if (!read_at(scan, source.document(), out)) return false;
 
     source.note_end(scan.position);

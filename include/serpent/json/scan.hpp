@@ -77,9 +77,16 @@ inline constexpr auto character_class = [] {
  * sixteen to find a run of one costs far more than it saves. Measured: a sixteen-wide version
  * of this made a number-heavy document four times slower.
  */
+template<bool Terminated = false>
 [[nodiscard]] constexpr const char *advance_while(
         const char *position, const char *limit, std::uint8_t wanted) noexcept {
-    while (position < limit && (character_class[static_cast<unsigned char>(*position)] & wanted) != 0) ++position;
+    if constexpr (Terminated) {
+        // The terminator is in no class, so it ends the run by itself: one test per byte where
+        // the bounded loop makes two. `limit` still marks where the text ends.
+        while ((character_class[static_cast<unsigned char>(*position)] & wanted) != 0) ++position;
+    } else {
+        while (position < limit && (character_class[static_cast<unsigned char>(*position)] & wanted) != 0) ++position;
+    }
     return position;
 }
 
@@ -115,6 +122,7 @@ inline constexpr auto character_class = [] {
  * suits a string, whose runs are long, and would not suit the runs advance_while is otherwise
  * asked about. SERPENT_WIDE_STRING_SCAN=0 makes it advance_while and nothing more.
  */
+template<bool Terminated = false>
 [[nodiscard]] SERPENT_ALWAYS_INLINE constexpr const char *end_of_plain_text(const char *position, const char *limit) noexcept {
 #if SERPENT_WIDE_STRING_SCAN
     if (!std::is_constant_evaluated()) {
@@ -126,7 +134,7 @@ inline constexpr auto character_class = [] {
         }
     }
 #endif
-    return advance_while(position, limit, class_string_body);
+    return advance_while<Terminated>(position, limit, class_string_body);
 }
 
 [[nodiscard]] constexpr int hex_value(char value) noexcept {
@@ -136,8 +144,20 @@ inline constexpr auto character_class = [] {
     return -1;
 }
 
-/** A bounds-checked cursor over the text, latching the first failure. Mirrors detail::cursor. */
-struct cursor {
+/**
+ * A cursor over the text, latching the first failure. Mirrors detail::cursor.
+ *
+ * Bounds-checked against `limit`, which is where the text ends in either mode. A terminated
+ * cursor is one whose caller has promised that the byte at `limit` exists and is zero - a
+ * std::string keeps one there - and that promise lets every run of bytes be scanned with one
+ * test per byte rather than two, since the terminator is in no character class. A zero inside
+ * the text ends a run early in that mode; it can only be a control character, which nothing in
+ * JSON may hold unescaped, so what follows finds the fault where a bounded scan would have.
+ */
+template<bool Terminated>
+struct basic_cursor {
+    static constexpr bool terminated = Terminated;
+
     const char *origin = nullptr;
     const char *position = nullptr;
     const char *limit = nullptr;
@@ -145,8 +165,8 @@ struct cursor {
     errc failure = errc::ok;
     std::size_t failure_offset = 0;
 
-    constexpr cursor() = default;
-    constexpr cursor(std::string_view text, const char *position) noexcept
+    constexpr basic_cursor() = default;
+    constexpr basic_cursor(std::string_view text, const char *position) noexcept
     : origin(text.data())
     , position(position)
     , limit(text.data() + text.size()) {}
@@ -180,9 +200,13 @@ struct cursor {
     [[nodiscard]] constexpr error to_error() const noexcept { return error { this->failure, this->failure_offset }; }
 };
 
-constexpr void skip_whitespace(cursor &scan) noexcept {
+using cursor = basic_cursor<false>;
+using terminated_cursor = basic_cursor<true>;
+
+template<bool Terminated>
+constexpr void skip_whitespace(basic_cursor<Terminated> &scan) noexcept {
     if (!scan.ok() || scan.position == nullptr) return;
-    scan.position = advance_while(scan.position, scan.limit, class_space);
+    scan.position = advance_while<Terminated>(scan.position, scan.limit, class_space);
 }
 
 /** A scanned string: its contents between the quotes, still escaped. */
@@ -197,7 +221,8 @@ struct string_span {
  * Rejects the things JSON forbids rather than tolerating them: a raw control character, an
  * unknown escape, a short \\u, and a surrogate that is not properly paired.
  */
-[[nodiscard]] constexpr string_span scan_string(cursor &scan) noexcept {
+template<bool Terminated>
+[[nodiscard]] constexpr string_span scan_string(basic_cursor<Terminated> &scan) noexcept {
     string_span result;
     if (!scan.need(1)) return result;
     if (scan.peek() != '"') {
@@ -210,7 +235,7 @@ struct string_span {
     while (true) {
         // Everything a string holds as itself goes by without being looked at twice; what stops
         // the run is the quote, a backslash, or a control character, and those are rare.
-        scan.position = end_of_plain_text(scan.position, scan.limit);
+        scan.position = end_of_plain_text<Terminated>(scan.position, scan.limit);
 
         if (!scan.need(1)) return result;
         const char value = scan.take();
@@ -292,7 +317,8 @@ struct string_span {
  * The grammar is checked here rather than left to from_chars, which is more permissive than
  * JSON: it would accept inf, nan, .5, 5. and read 01 as 1.
  */
-[[nodiscard]] constexpr std::string_view scan_number(cursor &scan) noexcept {
+template<bool Terminated>
+[[nodiscard]] constexpr std::string_view scan_number(basic_cursor<Terminated> &scan) noexcept {
     const char *const begin = scan.position;
     const auto reject = [&] {
         scan.fail(errc::invalid_number, begin);
@@ -307,13 +333,13 @@ struct string_span {
         scan.advance(1);
         if (scan.available(1) && is_digit(scan.peek())) return reject(); // no leading zeros
     } else {
-        scan.position = advance_while(scan.position, scan.limit, class_digit);
+        scan.position = advance_while<Terminated>(scan.position, scan.limit, class_digit);
     }
 
     if (scan.available(1) && scan.peek() == '.') {
         scan.advance(1);
         if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-        scan.position = advance_while(scan.position, scan.limit, class_digit);
+        scan.position = advance_while<Terminated>(scan.position, scan.limit, class_digit);
     }
 
     if (scan.available(1) && (scan.peek() == 'e' || scan.peek() == 'E')) {
@@ -327,7 +353,8 @@ struct string_span {
     return std::string_view { begin, static_cast<std::size_t>(scan.position - begin) };
 }
 
-constexpr void scan_literal(cursor &scan, std::string_view word) noexcept {
+template<bool Terminated>
+constexpr void scan_literal(basic_cursor<Terminated> &scan, std::string_view word) noexcept {
     if (!scan.ok()) return;
 
     // Compare what is there before complaining about what is not: "nan" should be reported
@@ -359,8 +386,8 @@ constexpr void scan_literal(cursor &scan, std::string_view word) noexcept {
  * program, as thirteen calls to compare() for every object read. This way the width is a
  * constant wherever the code ends up.
  */
-template<std::size_t Width>
-[[nodiscard]] constexpr bool accept(cursor &scan, const std::array<char, Width> &text) noexcept {
+template<bool Terminated, std::size_t Width>
+[[nodiscard]] constexpr bool accept(basic_cursor<Terminated> &scan, const std::array<char, Width> &text) noexcept {
     if (!scan.available(Width)) return false;
     if (std::char_traits<char>::compare(scan.position, text.data(), Width) != 0) return false;
     scan.advance(Width);
@@ -368,15 +395,16 @@ template<std::size_t Width>
 }
 
 /** The same for one character, which is what most punctuation is. */
-[[nodiscard]] constexpr bool accept(cursor &scan, char character) noexcept {
+template<bool Terminated>
+[[nodiscard]] constexpr bool accept(basic_cursor<Terminated> &scan, char character) noexcept {
     if (!scan.available(1) || scan.peek() != character) return false;
     scan.advance(1);
     return true;
 }
 
 /** The same for a literal, whose terminator is not part of what is looked for. */
-template<std::size_t Size>
-[[nodiscard]] constexpr bool accept(cursor &scan, const char (&literal)[Size]) noexcept {
+template<bool Terminated, std::size_t Size>
+[[nodiscard]] constexpr bool accept(basic_cursor<Terminated> &scan, const char (&literal)[Size]) noexcept {
     std::array<char, Size - 1> text {};
     for (std::size_t index = 0; index < text.size(); ++index) text[index] = literal[index];
     return accept(scan, text);
@@ -534,9 +562,11 @@ inline void decode_string(string_span text, std::string &into) {
     return matched && index == plain.size();
 }
 
-void skip_value(cursor &scan, int depth) noexcept;
+template<bool Terminated>
+void skip_value(basic_cursor<Terminated> &scan, int depth) noexcept;
 
-inline void skip_container(cursor &scan, bool object, int depth) noexcept {
+template<bool Terminated>
+void skip_container(basic_cursor<Terminated> &scan, bool object, int depth) noexcept {
     const char opening = object ? '{' : '[';
     const char closing = object ? '}' : ']';
 
@@ -586,7 +616,8 @@ inline void skip_container(cursor &scan, bool object, int depth) noexcept {
     }
 }
 
-inline void skip_value(cursor &scan, int depth) noexcept {
+template<bool Terminated>
+void skip_value(basic_cursor<Terminated> &scan, int depth) noexcept {
     if (depth > max_depth) {
         scan.fail(errc::depth_exceeded);
         return;

@@ -35,16 +35,35 @@
 
 namespace serpent::json {
 
-class reader;
-class array_iterator;
-class member_iterator;
+template<bool Terminated>
+class basic_reader;
+template<bool Terminated>
+class basic_array_iterator;
+template<bool Terminated>
+class basic_member_iterator;
 template<typename Iterator>
 class element_range;
-using array_range = element_range<array_iterator>;
-using member_range = element_range<member_iterator>;
+template<bool Terminated>
+using basic_array_range = element_range<basic_array_iterator<Terminated>>;
+template<bool Terminated>
+using basic_member_range = element_range<basic_member_iterator<Terminated>>;
+
+// The bounded reader is the reader: what a text of unknown surroundings gets. The terminated
+// one is for a text its caller promises ends in a zero byte - see scanner::basic_cursor.
+using reader = basic_reader<false>;
+using terminated_reader = basic_reader<true>;
+using array_iterator = basic_array_iterator<false>;
+using member_iterator = basic_member_iterator<false>;
+using array_range = basic_array_range<false>;
+using member_range = basic_member_range<false>;
 
 /** @brief A handle to one JSON value inside a text buffer. */
-class reader {
+template<bool Terminated>
+class basic_reader {
+public:
+    static constexpr bool terminated = Terminated;
+
+private:
     std::string_view source;
     const char *first = nullptr; ///< this value's first character, whitespace already skipped
 
@@ -63,19 +82,19 @@ class reader {
     mutable int open = 0;                  ///< containers still open at `reached`, counting from `first`
 
 public:
-    constexpr reader() = default;
-    constexpr reader(std::string_view source, const char *first) noexcept : source(source), first(first) {}
-    reader(const reader &) = delete;
-    reader &operator=(const reader &) = delete;
-    reader(reader &&) = default;
-    reader &operator=(reader &&) = default;
+    constexpr basic_reader() = default;
+    constexpr basic_reader(std::string_view source, const char *first) noexcept : source(source), first(first) {}
+    basic_reader(const basic_reader &) = delete;
+    basic_reader &operator=(const basic_reader &) = delete;
+    basic_reader(basic_reader &&) = default;
+    basic_reader &operator=(basic_reader &&) = default;
 
     /** Wraps a document, skipping leading whitespace. Performs no deep parsing. */
-    [[nodiscard]] static reader over(std::string_view text) noexcept {
-        scanner::cursor scan { text, text.data() };
+    [[nodiscard]] static basic_reader<Terminated> over(std::string_view text) noexcept {
+        scanner::basic_cursor<Terminated> scan { text, text.data() };
         scanner::skip_whitespace(scan);
         if (!scan.available(1)) return {};
-        return reader { text, scan.position };
+        return basic_reader<Terminated> { text, scan.position };
     }
 
     /**
@@ -178,14 +197,14 @@ public:
     // ---------------- containers ----------------
 
     [[nodiscard]] std::size_t size() const noexcept;
-    [[nodiscard]] array_range array() const & noexcept;
-    [[nodiscard]] array_range array() && noexcept;
-    [[nodiscard]] member_range items() const & noexcept;
-    [[nodiscard]] member_range items() && noexcept;
+    [[nodiscard]] basic_array_range<Terminated> array() const & noexcept;
+    [[nodiscard]] basic_array_range<Terminated> array() && noexcept;
+    [[nodiscard]] basic_member_range<Terminated> items() const & noexcept;
+    [[nodiscard]] basic_member_range<Terminated> items() && noexcept;
 
-    [[nodiscard]] reader operator[](std::size_t index) const noexcept;
-    [[nodiscard]] reader operator[](std::string_view key) const noexcept;
-    [[nodiscard]] reader find(std::string_view key) const noexcept { return (*this)[key]; }
+    [[nodiscard]] basic_reader<Terminated> operator[](std::size_t index) const noexcept;
+    [[nodiscard]] basic_reader<Terminated> operator[](std::string_view key) const noexcept;
+    [[nodiscard]] basic_reader<Terminated> find(std::string_view key) const noexcept { return (*this)[key]; }
 
     /** The text this value occupies, or nothing if it does not parse. */
     [[nodiscard]] std::optional<std::string_view> extent() const noexcept {
@@ -198,13 +217,13 @@ public:
 
     // ---------------- checked ----------------
 
-    [[nodiscard]] reader at(std::size_t index) const {
+    [[nodiscard]] basic_reader<Terminated> at(std::size_t index) const {
         auto result = (*this)[index];
         if (!result.is_valid()) raise(errc::out_of_range, this->offset());
         return result;
     }
 
-    [[nodiscard]] reader at(std::string_view key) const {
+    [[nodiscard]] basic_reader<Terminated> at(std::string_view key) const {
         auto result = (*this)[key];
         if (!result.is_valid()) raise(errc::missing_key, this->offset(), key);
         return result;
@@ -257,7 +276,7 @@ public:
 private:
     [[nodiscard]] constexpr const char *limit() const noexcept { return this->source.data() + this->source.size(); }
 
-    [[nodiscard]] scanner::cursor scan() const noexcept { return scanner::cursor { this->source, this->first }; }
+    [[nodiscard]] scanner::basic_cursor<Terminated> scan() const noexcept { return scanner::basic_cursor<Terminated> { this->source, this->first }; }
 
     [[nodiscard]] std::string_view number_text() const noexcept {
         auto scan = this->scan();
@@ -300,15 +319,17 @@ private:
     }
 
 
-    friend class array_iterator;
-    friend class member_iterator;
-    friend void step_over_value(scanner::cursor &scan, const reader &value) noexcept;
+    friend class basic_array_iterator<Terminated>;
+    friend class basic_member_iterator<Terminated>;
+    template<bool T>
+    friend void step_over_value(scanner::basic_cursor<T> &scan, const basic_reader<T> &value) noexcept;
 };
 
 /** A key and its value. The key stays encoded until key_string() or key_is() asks. */
-struct key_value {
+template<bool Terminated>
+struct basic_key_value {
     scanner::string_span key;
-    reader value;
+    basic_reader<Terminated> value;
 
     [[nodiscard]] std::string key_string() const {
         std::string decoded;
@@ -319,10 +340,13 @@ struct key_value {
     [[nodiscard]] bool key_is(std::string_view other) const noexcept { return scanner::equals(this->key, other); }
 };
 
+using key_value = basic_key_value<false>;
+
 namespace scanner {
 
 /** Consumes forward until `open` containers have been closed, leaving the cursor just past. */
-inline void close_containers(cursor &scan, int open) noexcept {
+template<bool Terminated>
+void close_containers(basic_cursor<Terminated> &scan, int open) noexcept {
     while (open > 0) {
         skip_whitespace(scan);
         if (!scan.available(1)) {
@@ -355,7 +379,8 @@ inline void close_containers(cursor &scan, int open) noexcept {
  * which case only what that walk left unread is scanned, which for a value read to its end is
  * nothing at all. This is the one place a note is consulted, whoever is stepping.
  */
-inline void step_over_value(scanner::cursor &scan, const reader &value) noexcept {
+template<bool Terminated>
+void step_over_value(scanner::basic_cursor<Terminated> &scan, const basic_reader<Terminated> &value) noexcept {
     const char *const start = scan.position;
     if (value.reached != nullptr) {
         scan.position = value.reached;
@@ -375,26 +400,28 @@ inline void step_over_value(scanner::cursor &scan, const reader &value) noexcept
  * through the reference it was given to it, how far the walk has got. An input iterator, since
  * what it owns cannot be copied.
  */
-class array_iterator {
+template<bool Terminated>
+class basic_array_iterator {
 public:
-    using value_type = reader;
-    using reference = const reader &;
+    using reader_type = basic_reader<Terminated>;
+    using value_type = reader_type;
+    using reference = const reader_type &;
     using difference_type = std::ptrdiff_t;
     using iterator_concept = std::input_iterator_tag;
 
 private:
-    const reader *container = nullptr;
-    reader current;
+    const basic_reader<Terminated> *container = nullptr;
+    basic_reader<Terminated> current;
     bool exhausted = true;
 
 public:
-    array_iterator() = default;
+    basic_array_iterator() = default;
 
-    explicit array_iterator(const reader &container) noexcept
+    explicit basic_array_iterator(const basic_reader<Terminated> &container) noexcept
     : container(&container)
     , current(container.source, nullptr) {
         if (container.type() != kind::array) return;
-        scanner::cursor scan { container.source, container.first + 1 };
+        scanner::basic_cursor<Terminated> scan { container.source, container.first + 1 };
         scanner::skip_whitespace(scan);
         if (!scan.available(1) || scan.peek() == ']') return;
         this->current.move_to(scan.position);
@@ -403,12 +430,12 @@ public:
         container.note_progress(scan.position, 1);
     }
 
-    [[nodiscard]] const reader &operator*() const noexcept { return this->current; }
+    [[nodiscard]] const basic_reader<Terminated> &operator*() const noexcept { return this->current; }
 
-    array_iterator &operator++() noexcept {
+    basic_array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
-        scanner::cursor scan { this->container->source, this->current.first };
+        scanner::basic_cursor<Terminated> scan { this->container->source, this->current.first };
         step_over_value(scan, this->current);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
@@ -436,22 +463,24 @@ public:
 };
 
 /** Iterator over the key/value pairs of an object; the same arrangement as array_iterator. */
-class member_iterator {
+template<bool Terminated>
+class basic_member_iterator {
 public:
-    using value_type = key_value;
-    using reference = const key_value &;
+    using reader_type = basic_reader<Terminated>;
+    using value_type = basic_key_value<Terminated>;
+    using reference = const value_type &;
     using difference_type = std::ptrdiff_t;
     using iterator_concept = std::input_iterator_tag;
 
 private:
-    const reader *container = nullptr;
+    const basic_reader<Terminated> *container = nullptr;
     const char *cursor = nullptr; ///< at the opening quote of the current key
-    key_value current;
+    basic_key_value<Terminated> current;
     bool exhausted = true;
 
     /** Reads the key at the cursor and sets `current` to it and its value; false if malformed. */
     bool take_entry() noexcept {
-        scanner::cursor scan { this->container->source, this->cursor };
+        scanner::basic_cursor<Terminated> scan { this->container->source, this->cursor };
         const auto key = scanner::scan_string(scan);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ':') return false;
@@ -464,13 +493,13 @@ private:
     }
 
 public:
-    member_iterator() = default;
+    basic_member_iterator() = default;
 
-    explicit member_iterator(const reader &container) noexcept
+    explicit basic_member_iterator(const basic_reader<Terminated> &container) noexcept
     : container(&container)
-    , current { {}, reader { container.source, nullptr } } {
+    , current { {}, basic_reader<Terminated> { container.source, nullptr } } {
         if (container.type() != kind::object) return;
-        scanner::cursor scan { container.source, container.first + 1 };
+        scanner::basic_cursor<Terminated> scan { container.source, container.first + 1 };
         scanner::skip_whitespace(scan);
         if (!scan.available(1) || scan.peek() == '}') return;
         this->cursor = scan.position;
@@ -478,13 +507,13 @@ public:
         if (!this->exhausted) container.note_progress(this->current.value.first, 1);
     }
 
-    [[nodiscard]] const key_value &operator*() const noexcept { return this->current; }
-    [[nodiscard]] const key_value *operator->() const noexcept { return &this->current; }
+    [[nodiscard]] const basic_key_value<Terminated> &operator*() const noexcept { return this->current; }
+    [[nodiscard]] const basic_key_value<Terminated> *operator->() const noexcept { return &this->current; }
 
-    member_iterator &operator++() noexcept {
+    basic_member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
-        scanner::cursor scan { this->container->source, this->current.value.first };
+        scanner::basic_cursor<Terminated> scan { this->container->source, this->current.value.first };
         step_over_value(scan, this->current.value);
         scanner::skip_whitespace(scan);
         if (!scan.ok() || !scan.available(1) || scan.peek() != ',') {
@@ -521,23 +550,30 @@ public:
  */
 template<typename Iterator>
 class element_range {
-    const reader *container = nullptr;
-    std::optional<reader> owned;
+    using reader_type = typename Iterator::reader_type;
+
+    const reader_type *container = nullptr;
+    std::optional<reader_type> owned;
 
 public:
-    explicit element_range(const reader &container) noexcept : container(&container) {}
-    explicit element_range(reader &&container) noexcept : owned(std::move(container)) {}
+    explicit element_range(const reader_type &container) noexcept : container(&container) {}
+    explicit element_range(reader_type &&container) noexcept : owned(std::move(container)) {}
 
     [[nodiscard]] Iterator begin() const noexcept { return Iterator { this->owned ? *this->owned : *this->container }; }
     [[nodiscard]] std::default_sentinel_t end() const noexcept { return {}; }
 };
 
-inline array_range reader::array() const & noexcept { return array_range { *this }; }
-inline array_range reader::array() && noexcept { return array_range { std::move(*this) }; }
-inline member_range reader::items() const & noexcept { return member_range { *this }; }
-inline member_range reader::items() && noexcept { return member_range { std::move(*this) }; }
+template<bool Terminated>
+basic_array_range<Terminated> basic_reader<Terminated>::array() const & noexcept { return basic_array_range<Terminated> { *this }; }
+template<bool Terminated>
+basic_array_range<Terminated> basic_reader<Terminated>::array() && noexcept { return basic_array_range<Terminated> { std::move(*this) }; }
+template<bool Terminated>
+basic_member_range<Terminated> basic_reader<Terminated>::items() const & noexcept { return basic_member_range<Terminated> { *this }; }
+template<bool Terminated>
+basic_member_range<Terminated> basic_reader<Terminated>::items() && noexcept { return basic_member_range<Terminated> { std::move(*this) }; }
 
-inline std::size_t reader::size() const noexcept {
+template<bool Terminated>
+std::size_t basic_reader<Terminated>::size() const noexcept {
     std::size_t total = 0;
     if (this->is_object()) {
         for ([[maybe_unused]] const auto &entry : this->items())
@@ -549,24 +585,27 @@ inline std::size_t reader::size() const noexcept {
     return total;
 }
 
-inline reader reader::operator[](std::size_t index) const noexcept {
+template<bool Terminated>
+basic_reader<Terminated> basic_reader<Terminated>::operator[](std::size_t index) const noexcept {
     std::size_t position = 0;
     for (const auto &element : this->array()) {
-        if (position++ == index) return reader { element.source, element.first };
+        if (position++ == index) return basic_reader<Terminated> { element.source, element.first };
     }
     return {};
 }
 
-inline reader reader::operator[](std::string_view key) const noexcept {
+template<bool Terminated>
+basic_reader<Terminated> basic_reader<Terminated>::operator[](std::string_view key) const noexcept {
     for (const auto &entry : this->items()) {
-        if (entry.key_is(key)) return reader { entry.value.source, entry.value.first };
+        if (entry.key_is(key)) return basic_reader<Terminated> { entry.value.source, entry.value.first };
     }
     return {};
 }
 
 /** Walks the whole document once, checking it is well formed and consumes the whole text. */
-[[nodiscard]] inline std::expected<void, error> validate(std::string_view text) noexcept {
-    scanner::cursor scan { text, text.data() };
+template<bool Terminated = false>
+[[nodiscard]] std::expected<void, error> validate(std::string_view text) noexcept {
+    scanner::basic_cursor<Terminated> scan { text, text.data() };
     scanner::skip_whitespace(scan);
     if (!scan.available(1)) return std::unexpected { error { errc::unexpected_end, 0 } };
 
@@ -578,6 +617,11 @@ inline reader reader::operator[](std::string_view key) const noexcept {
         return std::unexpected { error { errc::trailing_data, static_cast<std::size_t>(scan.position - text.data()) } };
     }
     return {};
+}
+
+/** The same over a std::string, which keeps a zero byte after its text and so is read as terminated. */
+[[nodiscard]] inline std::expected<void, error> validate(const std::string &text) noexcept {
+    return validate<true>(std::string_view { text });
 }
 
 // decode() and try_decode() are in json/decode.hpp, which can reach the walking reader.

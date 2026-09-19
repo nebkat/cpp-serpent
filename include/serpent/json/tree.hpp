@@ -31,8 +31,9 @@ namespace serpent::json {
 
 namespace detail {
 
+template<bool Terminated>
 class tree_builder {
-    scanner::cursor &scan;
+    scanner::basic_cursor<Terminated> &scan;
 
     // The members and elements of a container are gathered here and moved into one sized
     // exactly to them: a vector grown into place would be reallocated and its contents moved
@@ -44,7 +45,7 @@ class tree_builder {
     std::array<serpent::value::array, max_depth + 1> elements_at {};
 
 public:
-    explicit tree_builder(scanner::cursor &scan) noexcept : scan(scan) {}
+    explicit tree_builder(scanner::basic_cursor<Terminated> &scan) noexcept : scan(scan) {}
 
     /** The value at the cursor, whatever it is, into `into`. False leaves the cursor failed. */
     bool build(serpent::value &into, int depth) {
@@ -194,9 +195,10 @@ private:
  * Returns false for a document that is malformed at or below that value. Whoever is stepping
  * through the container the value sits in can step to where it ended.
  */
-inline bool read_tree(const reader &source, serpent::value &into) {
-    scanner::cursor scan { source.document(), source.data() };
-    detail::tree_builder builder { scan };
+template<bool Terminated>
+bool read_tree(const basic_reader<Terminated> &source, serpent::value &into) {
+    scanner::basic_cursor<Terminated> scan { source.document(), source.data() };
+    detail::tree_builder<Terminated> builder { scan };
     if (!builder.build(into, 0)) return false;
     source.note_end(scan.position);
     return true;

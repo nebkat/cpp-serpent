@@ -481,11 +481,20 @@ static void typed_workload(const std::string &workload, const std::vector<T> &va
     });
     bench::measure(workload, "JSON encode", "nlohmann", text.size(), [&] { return other(values).dump().size(); });
 
+    // A std::string is read as terminated, as glaze reads it by default; the bounded reading is
+    // what a text with nothing known past its end gets, and glaze's null_terminated = false
+    // is its equivalent.
     bench::measure(workload, "JSON decode", "serpent", text.size(),
             [&] { return json::decode<std::vector<T>>(text)->size(); });
+    bench::measure(workload, "JSON decode", "serpent (bounded)", text.size(),
+            [&] { return json::decode<std::vector<T>>(std::string_view { text })->size(); });
     bench::measure(workload, "JSON decode", "glaze", text.size(), [&] {
         std::vector<T> out;
         return glz::read_json(out, text) ? 0 : out.size();
+    });
+    bench::measure(workload, "JSON decode", "glaze (bounded)", text.size(), [&] {
+        std::vector<T> out;
+        return glz::read<glz::opts { .null_terminated = false }>(out, text) ? 0 : out.size();
     });
     bench::measure(workload, "JSON decode", "glaze (size build)", text.size(), [&] {
         std::vector<T> out;
@@ -680,7 +689,7 @@ int main(int argc, char **argv) {
 
     if (!bench::chosen.list_only) check_results(readings, canada, citm, twitter);
 
-    bench::row_order = { "serpent", "serpent (for size)", "serpent (indexed)", "glaze", "glaze (CBOR)",
+    bench::row_order = { "serpent", "serpent (bounded)", "serpent (for size)", "serpent (indexed)", "glaze", "glaze (bounded)", "glaze (CBOR)",
         "glaze (size build)", "simdjson", "yyjson", "rapidjson", "nlohmann" };
     std::printf("\nmeasuring ");
     your_own_types(readings);

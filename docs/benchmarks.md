@@ -15,6 +15,12 @@ tools/bench.sh --ablations          # the default with each switch off in turn
 
 Every measured computation is first checked to produce the same answer in every library.
 
+JSON is decoded from a `std::string`, which both serpent and the struct-mapping library read
+[trusting the zero byte after it](reading.md#text-with-a-zero-byte-after-it-is-read-faster)
+rather than checking where the text ends - the struct-mapping library's default, and what a
+`std::string` gets from serpent. The rows marked bounded are each library reading the same text
+with every byte checked, which is what a buffer with nothing known past its end costs.
+
 ## Your own types
 
 Ten thousand records of five members: an integer, a string, two reals and a boolean. Binary is

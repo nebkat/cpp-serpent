@@ -12,6 +12,7 @@ set(TESTS
     bjdata_writer
     json_reader
     json_real_read
+    json_terminated
     json_string_scan
     traversals_apart
     real_text

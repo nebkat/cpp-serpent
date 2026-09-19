@@ -13,8 +13,9 @@ import pathlib
 import re
 import sys
 
-NAMES = {"serpent": "serpent", "serpent (for size)": "serpent, BJData for size", "glaze": "struct-mapping lib",
-         "glaze (CBOR)": "the same, CBOR", "glaze (size build)": "the same, built for size", "nlohmann": "DOM lib"}
+NAMES = {"serpent": "serpent", "serpent (bounded)": "serpent, bounded", "serpent (for size)": "serpent, BJData for size",
+         "glaze": "struct-mapping lib", "glaze (bounded)": "the same, bounded", "glaze (CBOR)": "the same, CBOR",
+         "glaze (size build)": "the same, built for size", "nlohmann": "DOM lib"}
 DOC_NAMES = {"serpent": "serpent", "serpent (indexed)": "serpent, over an index built first", "simdjson": "on-demand parser",
              "yyjson": "fast DOM A", "rapidjson": "fast DOM B", "nlohmann": "DOM lib"}
 OPS = ["JSON encode", "JSON decode", "binary encode", "binary decode"]
