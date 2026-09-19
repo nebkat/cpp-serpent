@@ -120,17 +120,14 @@ public:
                         continue;
                     }
                 } else if constexpr (std::same_as<field_type, bool>) {
-                    if (this->at(key_then<name, marker::boolean_true>, 0)) {
-                        this->scan.advance(key.size() + 1);
-                        this->value.[:member:] = true;
-                        found |= [] { return bit_of(member); }();
-                        continue;
-                    }
-                    if (this->at(key_then<name, marker::boolean_false>, 0)) {
-                        this->scan.advance(key.size() + 1);
-                        this->value.[:member:] = false;
-                        found |= [] { return bit_of(member); }();
-                        continue;
+                    if (this->at(key, 1)) {
+                        const auto kind = static_cast<marker>(this->scan.position[key.size()]);
+                        if (kind == marker::boolean_true || kind == marker::boolean_false) {
+                            this->scan.advance(key.size() + 1);
+                            this->value.[:member:] = kind == marker::boolean_true;
+                            found |= [] { return bit_of(member); }();
+                            continue;
+                        }
                     }
                 } else if constexpr (std::same_as<field_type, std::string>) {
                     if (this->at(key_then<name, marker::string, marker::uint8>, 1)) {
