@@ -117,6 +117,51 @@ class writer : public byte_emitter {
         this->put_constant("\"");
     }
 
+public:
+    /**
+     * `text` between quotes with its escapes, stored at `to`, returning where it ends. For room
+     * already claimed: at most six bytes per character, which is what \u00XX takes.
+     */
+    static char *quote_into(char *to, std::string_view text) noexcept {
+        *to++ = '"';
+        const char *run = text.data();
+        const char *const end = run + text.size();
+        while (true) {
+            const char *const stop = scanner::end_of_plain_text(run, end);
+            std::memcpy(to, run, static_cast<std::size_t>(stop - run));
+            to += stop - run;
+            if (stop == end) break;
+            to = escape_into(to, *stop);
+            run = stop + 1;
+        }
+        *to++ = '"';
+        return to;
+    }
+
+    /** One character JSON cannot hold as itself, stored at `to`: a short escape where there is one, else \u00XX. */
+    static char *escape_into(char *to, char character) noexcept {
+        const auto store = [&](std::string_view escaped) {
+            std::memcpy(to, escaped.data(), escaped.size());
+            return to + escaped.size();
+        };
+        switch (character) {
+        case '"': return store("\\\"");
+        case '\\': return store("\\\\");
+        case '\b': return store("\\b");
+        case '\f': return store("\\f");
+        case '\n': return store("\\n");
+        case '\r': return store("\\r");
+        case '\t': return store("\\t");
+        default: break;
+        }
+        static constexpr char digits[] = "0123456789abcdef";
+        const auto value = static_cast<unsigned char>(character);
+        const char escaped[6] { '\\', 'u', '0', '0', digits[(value >> 4) & 0xF], digits[value & 0xF] };
+        std::memcpy(to, escaped, 6);
+        return to + 6;
+    }
+
+private:
     /** One character JSON cannot hold as itself: a short escape where there is one, else \u00XX. */
     void write_escape(char character) noexcept {
         switch (character) {
@@ -210,7 +255,7 @@ public:
     }
 
     /**
-     * Writes a whole object as one piece - the comma that separates it from the element before,
+     * Writes a whole value as one piece - the comma that separates it from the element before,
      * its braces and everything between - into room claimed once, where opening it, each member
      * and closing it would otherwise ask for their own.
      *
@@ -220,7 +265,7 @@ public:
      * or where the room cannot be had in one piece: the object is then written the usual way.
      */
     template<typename Write>
-    [[nodiscard]] bool compose_object(std::size_t at_most, Write write) noexcept {
+    [[nodiscard]] bool compose_value(std::size_t at_most, Write write) noexcept {
         if (this->options.indent != 0) return false;
         if (this->inside_object() && !this->pending_value) return false;
         const bool comma = !this->inside_object() && this->has_members();
@@ -415,7 +460,6 @@ void writer::bytes(const R &items) noexcept {
 template<std::ranges::input_range R>
 void writer::range(const R &items) noexcept {
     using element = std::remove_cvref_t<std::ranges::range_value_t<R>>;
-    const auto scope = this->array();
 
     // Numbers and booleans have a longest text, so a batch of them is written into room claimed
     // once, comma and all, where each would otherwise ask for its own and then for its comma's.
@@ -423,19 +467,48 @@ void writer::range(const R &items) noexcept {
     // element is written the usual way.
     if constexpr (widest_text<element> != 0) {
         if (this->options.indent == 0) {
+            constexpr std::size_t batch = 16;
+            // A short array is one piece, brackets and all, and is never opened.
+            if constexpr (std::ranges::sized_range<R>) {
+                const auto count = std::ranges::size(items);
+                if (count <= batch) {
+                    const bool composed = this->compose_value(2 + count * (widest_text<element> + 1), [&](char *const to) {
+                        char *cursor = to;
+                        *cursor++ = '[';
+                        bool separated = false;
+                        for (const element item : items) {
+                            if (separated) *cursor++ = ',';
+                            cursor = write_text(cursor, item);
+                            separated = true;
+                        }
+                        *cursor++ = ']';
+                        return static_cast<std::size_t>(cursor - to);
+                    });
+                    if (composed) return;
+                }
+            }
+        }
+    }
+
+    const auto scope = this->array();
+
+    if constexpr (widest_text<element> != 0) {
+        if (this->options.indent == 0) {
             auto at = std::ranges::begin(items);
             const auto end = std::ranges::end(items);
+            bool separated = this->has_members();
             while (at != end) {
                 constexpr std::size_t batch = 16;
                 char *const to = this->room_for(batch * (widest_text<element> + 1));
                 if (to == nullptr) break;
                 char *cursor = to;
                 for (std::size_t written = 0; written < batch && at != end; ++written, ++at) {
-                    if (this->has_members()) *cursor++ = ',';
+                    if (separated) *cursor++ = ',';
                     cursor = write_text(cursor, static_cast<element>(*at));
-                    this->written_mask |= 1u << (this->depth - 1);
+                    separated = true;
                 }
                 this->used(static_cast<std::size_t>(cursor - to));
+                this->written_mask |= 1u << (this->depth - 1);
             }
             for (; at != end; ++at) emit_value(*this, static_cast<element>(*at));
             return;

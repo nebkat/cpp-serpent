@@ -7,6 +7,7 @@
 
 #include <serpent/json.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -154,6 +155,26 @@ int main() {
     fits_exactly(std::vector<double>(50, 0.1), 32);
     fits_exactly(std::vector<int>(100, -7), 32);
     fits_exactly(std::vector<bool> { true, false, true, true, false }, 32);
+    // A short array of scalars is one piece with its brackets; the exact buffer still holds it.
+    fits_exactly(std::vector<int> { 1, 2, 3 }, 32);
+    fits_exactly(std::vector<double> { 0.1, 2.5 }, 64);
+    fits_exactly(std::vector<int> {}, 2);
+
+    // Strings in a run take room for their escapes: short ones six bytes a character unscanned,
+    // long ones what a scan says they need. Both spellings must be exactly what writing them
+    // one at a time gives, at every length around the allowance and with every kind of escape.
+    for (const std::size_t length : { std::size_t { 0 }, std::size_t { 1 }, std::size_t { 170 }, std::size_t { 171 },
+                 std::size_t { 300 }, std::size_t { 5000 } }) {
+        with_text text;
+        text.plain = std::string(length, 'x');
+        text.awkward = std::string(length, '"');
+        same_either_way(text, "long strings, plain and all escapes");
+        text.awkward = std::string(length, '\x01') + "\n\t\\/";
+        same_either_way(text, "control characters and the short escapes");
+        text.plain = std::string(length, '\x1f');
+        same_either_way(text, "a long string that is nothing but escapes");
+        fits_exactly(text, 32 + 6 * std::max(length, std::size_t { 1 }));
+    }
     check_equal(std::string_view { json::encode(std::vector<int> { 1, 2, 3 }, { .indent = 1 }) },
             std::string_view { "[\n 1,\n 2,\n 3\n]" }, "and one at a time when indenting");
 

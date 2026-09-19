@@ -403,8 +403,9 @@ public:
             return false;
         } else {
             constexpr std::size_t all = runs::members.size();
-            if (!this->text_is_plain<0, all>()) return false;
-            return this->out.compose_object(2 + runs::widest_run(0, all) + this->text_bytes<0, all>(), [this](char *const to) {
+            const auto text = this->text_bound<0, all>();
+            if (!text) return false;
+            return this->out.compose_value(2 + runs::widest_run(0, all) + *text, [this](char *const to) {
                 to[0] = '{';
                 char *const end = this->write_run_into<0, all>(to + 1, false);
                 *end = '}';
@@ -454,35 +455,41 @@ private:
      */
     template<std::size_t First, std::size_t Last>
     [[nodiscard]] bool write_run() {
-        if (!this->text_is_plain<First, Last>()) return false;
-        return this->out.compose_members(runs::widest_run(First, Last) + this->text_bytes<First, Last>(), [this](char *const to) {
+        const auto text = this->text_bound<First, Last>();
+        if (!text) return false;
+        return this->out.compose_members(runs::widest_run(First, Last) + *text, [this](char *const to) {
             return static_cast<std::size_t>(this->write_run_into<First, Last>(to, this->out.has_members()) - to);
         });
     }
 
-    /** The length of the strings among the members from `First` up to `Last`, which the bound cannot know. */
+    /**
+     * Room for the strings among the members from `First` up to `Last`, which the bound cannot
+     * know: a string is written with its escapes, and an escape is at most six bytes for one.
+     * Short text is simply allowed six bytes a character; long text is scanned for whether it
+     * needs any, since six times a long string is real room. Nothing for a run whose strings
+     * are too long to be composed at all, which are then written the usual way.
+     */
     template<std::size_t First, std::size_t Last>
-    [[nodiscard]] std::size_t text_bytes() const noexcept {
+    [[nodiscard]] std::optional<std::size_t> text_bound() const noexcept {
+        constexpr std::size_t allowed_unscanned = 1024;
+        constexpr std::size_t composed_at_most = std::size_t { 1 } << 20;
         std::size_t total = 0;
         template for (constexpr auto member : runs::members) {
             if constexpr (runs::within(member, First, Last) && runs::text[runs::position_of(member)])
                 total += std::string_view { this->value.[:member:] }.size();
         }
-        return total;
-    }
+        if (total * 6 <= allowed_unscanned) return total * 6;
 
-    /** Whether every string among those members can stand between quotes as it is. One that cannot is
-     *  written the usual way, escapes and all, and takes its run with it. */
-    template<std::size_t First, std::size_t Last>
-    [[nodiscard]] bool text_is_plain() const noexcept {
-        bool plain = true;
+        std::size_t bound = 0;
         template for (constexpr auto member : runs::members) {
             if constexpr (runs::within(member, First, Last) && runs::text[runs::position_of(member)]) {
                 const std::string_view text { this->value.[:member:] };
-                plain = plain && scanner::end_of_plain_text(text.data(), text.data() + text.size()) == text.data() + text.size();
+                const bool plain = scanner::end_of_plain_text(text.data(), text.data() + text.size()) == text.data() + text.size();
+                bound += plain ? text.size() : text.size() * 6;
             }
         }
-        return plain;
+        if (bound > composed_at_most) return std::nullopt;
+        return bound;
     }
 
     /** The members from `First` up to `Last` stored at `to`, the first with a comma before it if `after_another`. */
@@ -493,11 +500,7 @@ private:
                 static constexpr std::string_view name = serpent::detail::field_key<T, member>();
                 to = after_another ? copy_constant(to, written_next_key<name>) : copy_constant(to, written_key<name>);
                 if constexpr (runs::text[runs::position_of(member)]) {
-                    const std::string_view text { this->value.[:member:] };
-                    *to++ = '"';
-                    std::memcpy(to, text.data(), text.size());
-                    to += text.size();
-                    *to++ = '"';
+                    to = writer::quote_into(to, std::string_view { this->value.[:member:] });
                 } else {
                     to = write_text(to, this->value.[:member:]);
                 }
