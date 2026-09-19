@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <sstream>
+#include <cstring>
 #include <string>
 #include <variant>
 #include <vector>
@@ -21,6 +22,26 @@ using namespace serpent::bjdata;
 // The bodies below take `auto &` so they bind to whichever writer emit() hands them.
 
 namespace {
+
+/** A document with a payload far longer than the room a writer works in. */
+struct bulk_t {
+    std::string before = "head";
+    std::vector<double> samples = [] {
+        std::vector<double> values(1500);
+        for (std::size_t index = 0; index < values.size(); ++index) values[index] = static_cast<double>(index) * 0.5;
+        return values;
+    }();
+    std::vector<std::int32_t> counts = std::vector<std::int32_t>(700, 7);
+    std::string after = "tail";
+
+    friend void json_convert(auto &visitor, conversion_object_t<decltype(visitor), bulk_t> item) {
+        visitor.member("before", item.before);
+        visitor.member("samples", item.samples);
+        visitor.member("counts", item.counts);
+        visitor.member("after", item.after);
+    }
+};
+
 
 std::string hex(std::span<const std::byte> bytes) {
     static constexpr char digits[] = "0123456789abcdef";
@@ -271,6 +292,42 @@ void sinks() {
     };
     sweep(std::vector<int> { 1, 2, 3 }, 12); // a typed array's payload is one token
     sweep(words, 8);
+
+    // A payload longer than the room a writer works in - a typed array of thousands - is handed
+    // to the sink whole, between pieces that are not, and every kind of sink holds the same
+    // bytes: the one that is lent room in place, whether or not the append moves it, and the
+    // fixed one, which fits it exactly or not at all.
+    {
+        const bulk_t bulk;
+        const auto expected = encode(bulk);
+        check(expected.size() > 14'000, "the document is long enough to be handed over whole");
+
+        std::vector<std::byte> grown;
+        container_sink into_vector { grown };
+        writer growing { into_vector };
+        growing.value(bulk);
+        check(growing.finish().has_value() && grown == expected, "a vector holds the same bytes");
+
+        std::string text;
+        container_sink into_string { text };
+        writer appending { into_string };
+        appending.value(bulk);
+        check(appending.finish().has_value() && text.size() == expected.size()
+                        && std::memcmp(text.data(), expected.data(), expected.size()) == 0,
+                "and so does a string");
+
+        std::vector<std::byte> fixed(expected.size());
+        span_sink fitted_bulk { fixed };
+        writer fitting_bulk { fitted_bulk };
+        fitting_bulk.value(bulk);
+        check(fitting_bulk.finish().has_value() && fixed == expected, "and a buffer sized exactly to it");
+
+        std::vector<std::byte> short_by_one(expected.size() - 1);
+        span_sink cramped { short_by_one };
+        writer failing { cramped };
+        failing.value(bulk);
+        check(!failing.finish().has_value() && cramped.overflowed(), "one byte short overflows");
+    }
 
     std::vector<std::byte> exact(reference.size());
     span_sink fitted { exact };

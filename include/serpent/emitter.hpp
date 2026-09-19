@@ -75,6 +75,8 @@ class byte_emitter {
      * back; doubling keeps a long one from asking many times.
      */
     static constexpr std::size_t first_chunk = 256;
+    /** A payload this long is handed to the sink whole rather than copied into room lent for it. */
+    static constexpr std::size_t appended_whole = 512;
     static constexpr std::size_t largest_chunk = 16384;
     std::size_t next_chunk = first_chunk;
 
@@ -342,6 +344,28 @@ public:
         if (!this->ok()) return;
 
         if (this->lend_room != nullptr) {
+            if (bytes.size() >= appended_whole) {
+                // Large enough that the sink's own append - one copy - beats being lent room
+                // for it, which a container may have to clear before it can be written into.
+                // The room in hand is kept first, since the append may move the container.
+                this->keep_room(this->context, this->room_used);
+                this->settled += this->room_used;
+                this->room_used = 0;
+                this->room_size = 0;
+                if (!this->write_bytes(this->context, bytes)) {
+                    this->fail(errc::sink_failed);
+                    return;
+                }
+                this->settled += bytes.size();
+                const auto next = this->lend_room(this->context, 0, this->next_chunk);
+                if (next.empty()) {
+                    this->fail(errc::sink_failed);
+                    return;
+                }
+                this->room = next.data();
+                this->room_size = next.size();
+                return;
+            }
             if (!this->renew_room(bytes.size())) return;
             std::memcpy(this->room + this->room_used, bytes.data(), bytes.size());
             this->room_used += bytes.size();
