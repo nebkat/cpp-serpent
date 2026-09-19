@@ -9,19 +9,16 @@ both directions.
 #include <serpent/bjdata.hpp>
 #include <serpent/json.hpp>
 
-namespace bjdata = serpent::bjdata;
-namespace json = serpent::json;
-
 struct [[= serpent::serializable {}]] reading {
     std::uint32_t at;
     double celsius;
 };
 
-const auto text = json::encode(value);      // {"at":1700000000,"celsius":4.5}
-const auto bytes = bjdata::encode(value);   // the same value, compact binary
+const auto text = serpent::json::encode(value);      // {"at":1700000000,"celsius":4.5}
+const auto bytes = serpent::bjdata::encode(value);   // the same value, compact binary
 
-const auto a = json::decode<reading>(text);
-const auto b = bjdata::decode<reading>(bytes);
+const auto a = serpent::json::decode<reading>(text);
+const auto b = serpent::bjdata::decode<reading>(bytes);
 ```
 
 The compiler already knows what the fields are called, so that annotation is the whole
@@ -49,10 +46,10 @@ shape is only known at run time, in a header nothing else includes, and that is 
 role.
 
 ```cpp
-auto document = json::reader::over(text);
+auto document = serpent::json::reader::over(text);
 document["port"].as<int>();                // parsed on demand, nothing built
 
-auto stored = bjdata::reader::over(bytes);
+auto stored = serpent::bjdata::reader::over(bytes);
 stored["name"].as<std::string_view>();                    // string_view INTO bytes
 stored["samples"].as<nonstd::unaligned_little_span<const std::uint16_t>>();    // span INTO bytes
 ```
@@ -123,3 +120,28 @@ mkdocs serve
 
 Publishing to GitHub Pages needs a plan that allows it for a private repository. The workflow
 builds the site on every push and deploys once the `PAGES_ENABLED` repository variable is set.
+
+## Acknowledgements
+
+serpent owes the most to [Glaze](https://github.com/stephenberry/glaze). Its approach — one
+description of a type serving both directions, reflection writing that description where the
+compiler can, and the reader handing back views into the caller's own buffer rather than a tree —
+is the shape serpent is built in, and Glaze got there first and faster. Its integer formatting is
+not merely an influence but vendored outright, in `include/serpent/external/glaze/`. The
+benchmarks measure against it precisely because it is the bar worth clearing, and
+[Benchmarks](docs/benchmarks.md) records the workloads where it still wins.
+
+Two more libraries are here as code rather than as ideas: [Żmij](https://github.com/vitaut/zmij)
+by Victor Zverovich writes the shortest text that round-trips a real, and
+[fast_float](https://github.com/fastfloat/fast_float) by Daniel Lemire, João Paulo Magalhaes and
+its contributors reads one back exactly rounded. Both do a job that is easy to get subtly wrong
+and that neither the standard library nor this author would have done as well.
+`glaze/itoa_40kb.hpp` carries its own lineage back to ibireme's `itoa_yy.c` and RealTimeChris's
+Jsonifier.
+
+The BJData format itself is [a specification by Qianqian Fang and
+contributors](https://neurojson.org/bjdata), building on Universal Binary JSON.
+
+## Licence
+
+MIT — see [LICENSE.md](LICENSE.md), which also lists the licences of the code above.

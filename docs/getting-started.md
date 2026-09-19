@@ -28,9 +28,6 @@ by default. It is one of several such switches, each with a plainer way kept bes
 #include <serpent/bjdata.hpp>
 #include <serpent/json.hpp>
 
-namespace bjdata = serpent::bjdata;
-namespace json = serpent::json;
-
 struct [[= serpent::serializable {}]] station { // (1)!
     std::string name;
     std::optional<int> altitude;
@@ -40,11 +37,11 @@ struct [[= serpent::serializable {}]] station { // (1)!
 int main() {
     const station value { "north ridge", 1840, { 4.5, 4.25, 3.75 } };
 
-    const auto bytes = bjdata::encode(value);        // compact binary
-    const auto text = json::encode(value, { .indent = 2 });   // readable
+    const auto bytes = serpent::bjdata::encode(value);        // compact binary
+    const auto text = serpent::json::encode(value, { .indent = 2 });   // readable
 
-    const auto back = bjdata::decode<station>(bytes);
-    const auto also = json::decode<station>(text);
+    const auto back = serpent::bjdata::decode<station>(bytes);
+    const auto also = serpent::json::decode<station>(text);
 }
 ```
 
