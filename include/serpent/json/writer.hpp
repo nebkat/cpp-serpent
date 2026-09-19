@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace serpent::json {
 
@@ -61,7 +62,7 @@ class writer : public byte_emitter {
     }
 
     /** Comma and indentation for the next element at this level. */
-    void separate() noexcept {
+    SERPENT_ALWAYS_INLINE void separate() noexcept {
         if (this->depth == 0) return;
         const auto bit = 1u << (this->depth - 1);
         if ((this->written_mask & bit) != 0) this->put_constant(",");
@@ -70,7 +71,7 @@ class writer : public byte_emitter {
     }
 
     /** Called before every value: an array element separates, an object value follows its key. */
-    void begin_value() noexcept {
+    SERPENT_ALWAYS_INLINE void begin_value() noexcept {
         if (this->depth == 0) return;
         if (this->inside_object()) {
             if (!this->pending_value) {
@@ -91,15 +92,27 @@ class writer : public byte_emitter {
      * Almost every string is plain from end to end and goes out in one piece.
      */
     void write_quoted(std::string_view text) noexcept {
-        this->put_constant("\"");
         const char *run = text.data();
         const char *const end = run + text.size();
+        const char *stop = scanner::end_of_plain_text(run, end);
+        // Nearly every string needs no escape, and then quotes and text are one piece, put into
+        // room claimed once.
+        if (stop == end) {
+            if (char *const to = this->room_for(text.size() + 2)) {
+                to[0] = '"';
+                std::memcpy(to + 1, run, text.size());
+                to[text.size() + 1] = '"';
+                this->used(text.size() + 2);
+                return;
+            }
+        }
+        this->put_constant("\"");
         while (true) {
-            const char *const stop = scanner::end_of_plain_text(run, end);
             this->put_text(std::string_view { run, stop });
             if (stop == end) break;
             this->write_escape(*stop);
             run = stop + 1;
+            stop = scanner::end_of_plain_text(run, end);
         }
         this->put_constant("\"");
     }
@@ -285,6 +298,24 @@ public:
         if (!this->inside_object()) {
             this->fail(errc::key_outside_object);
             return;
+        }
+        // A name that needs no escape, in a document that is not indented, is framed - the
+        // comma before it, its quotes, the colon after - in one piece.
+        if (this->options.indent == 0 && scanner::end_of_plain_text(name.data(), name.data() + name.size()) == name.data() + name.size()) {
+            if (char *const to = this->room_for(name.size() + 4)) {
+                const auto level = 1u << (this->depth - 1);
+                char *at = to;
+                if ((this->written_mask & level) != 0) *at++ = ',';
+                *at++ = '"';
+                std::memcpy(at, name.data(), name.size());
+                at += name.size();
+                *at++ = '"';
+                *at++ = ':';
+                this->used(static_cast<std::size_t>(at - to));
+                this->written_mask |= level;
+                this->pending_value = true;
+                return;
+            }
         }
         this->separate();
         this->write_quoted(name);
