@@ -49,40 +49,44 @@ namespace serpent::json::direct {
  * decided by looking at a single character afterwards: it accepts a leading zero, which JSON
  * forbids, and it stops happily at the point or exponent of a real, which here means the value
  * is not an integer at all. So there is no need to walk the digits first to check the grammar.
- *
- * Read as the widest integer of its signedness and then checked against the type asked for, so
- * that "does not fit" is one test whatever the width.
+ * Converted into the type asked for, which is how "does not fit" is found: a value too wide for
+ * it is out of range.
  */
 template<std::integral T>
     requires (!std::same_as<T, bool>)
-[[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
     if (!at_number(scan)) return false;
 
     const char *const start = scan.position;
-    const bool negative = *start == '-';
-    const char *const digits = negative ? start + 1 : start;
-
     T value {};
-    const auto convert = [&]<typename Wide>() -> const char * {
-        Wide wide {};
-        const auto converted = std::from_chars(start, scan.limit, wide);
-        if (converted.ec != std::errc {} || !std::in_range<T>(wide)) return nullptr;
-        value = static_cast<T>(wide);
-        return converted.ptr;
-    };
-    const char *const end = negative ? convert.template operator()<std::int64_t>()
-                                     : convert.template operator()<std::uint64_t>();
-    if (end == nullptr) return false;
+    std::from_chars_result converted {};
+    if constexpr (std::is_unsigned_v<T>) {
+        // A negative integer fits an unsigned type only as -0, which from_chars will not read
+        // into one; the signed read says whether it is that.
+        if (*start == '-') {
+            std::int64_t negative {};
+            converted = std::from_chars(start, scan.limit, negative);
+            if (converted.ec != std::errc {} || !std::in_range<T>(negative)) return false;
+            value = static_cast<T>(negative);
+        } else {
+            converted = std::from_chars(start, scan.limit, value);
+        }
+    } else {
+        converted = std::from_chars(start, scan.limit, value);
+    }
+    if (converted.ec != std::errc {}) return false;
 
-    if (*digits == '0' && end - digits > 1) {
+    const char *const digits = *start == '-' ? start + 1 : start;
+    if (*digits == '0' && converted.ptr - digits > 1) {
         scan.fail(errc::invalid_number, start);
         return false;
     }
-    const bool is_real = end != scan.limit && (*end == '.' || *end == 'e' || *end == 'E');
+    const bool is_real = converted.ptr != scan.limit
+            && (*converted.ptr == '.' || *converted.ptr == 'e' || *converted.ptr == 'E');
     if (is_real) return false;
 
     into = value;
-    scan.position = end;
+    scan.position = converted.ptr;
     return true;
 }
 
@@ -94,7 +98,7 @@ template<std::integral T>
  * conversion is only ever shown text the grammar has already passed.
  */
 template<std::floating_point T>
-[[nodiscard]] bool read_real_in_two_walks(scanner::cursor &scan, T &into) noexcept {
+[[nodiscard, gnu::noinline, gnu::cold]] bool read_real_in_two_walks(scanner::cursor &scan, T &into) noexcept {
     const auto text = scanner::scan_number(scan);
     if (!scan.ok()) return false;
 
@@ -143,7 +147,7 @@ template<std::floating_point T>
 #endif
 
 template<std::floating_point T>
-[[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] bool read(scanner::cursor &scan, T &into) noexcept {
     if (!at_number(scan)) return false;
 #if SERPENT_USE_FAST_FLOAT
     return read_real_in_one_walk(scan, into);

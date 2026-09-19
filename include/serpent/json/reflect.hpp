@@ -295,6 +295,37 @@ std::optional<bool> read_sequence(const reader &source, C &out) {
     return true;
 }
 
+/**
+ * Fills a container of scalars from a JSON array the same way: one cursor, each element
+ * converted where it lands. An element that is not of the type asked for fails the read, as it
+ * does through a handle.
+ */
+template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
+    requires direct::readable<T> && requires(C &out) {
+        out.clear();
+        { out.emplace_back() } -> std::same_as<T &>;
+    }
+std::optional<bool> read_sequence(const reader &source, C &out) {
+    if (!source.is_array()) return std::nullopt;
+
+    scanner::cursor scan { source.document(), source.data() + 1 };
+    out.clear();
+
+    scanner::skip_whitespace(scan);
+    if (!scanner::accept(scan, ']')) {
+        do {
+            scanner::skip_whitespace(scan);
+            if (!direct::read(scan, out.emplace_back())) return false;
+            scanner::skip_whitespace(scan);
+        } while (scanner::accept(scan, ','));
+
+        if (!scanner::accept(scan, ']')) return false;
+    }
+
+    source.note_end(scan.position);
+    return true;
+}
+
 #if SERPENT_BOUNDED_OBJECT_WRITE
 
 /**
