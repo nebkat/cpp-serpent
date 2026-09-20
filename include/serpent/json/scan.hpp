@@ -10,6 +10,10 @@
 #include <serpent/error.hpp>
 #include <serpent/limits.hpp>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 #include <charconv>
 #include <span>
 #include <array>
@@ -114,6 +118,26 @@ template<bool Terminated = false>
 
 [[nodiscard]] constexpr bool holds_byte_to_escape(std::uint64_t word) noexcept { return bytes_to_escape(word) != 0; }
 
+#if SERPENT_WIDE_STRING_SCAN && defined(__ARM_NEON)
+#define SERPENT_NEON_STRING_SCAN 1
+/**
+ * The same over the sixteen bytes at `from`, as a vector: each byte compared with the quote,
+ * the backslash and the control range at once. The lanes are narrowed to four bits a byte,
+ * so the first flagged byte is the count of trailing zeros over four, and zero means none.
+ */
+SERPENT_ALWAYS_INLINE inline std::uint64_t bytes_to_escape_in_block(const char *from) noexcept {
+    const uint8x16_t bytes = vld1q_u8(reinterpret_cast<const std::uint8_t *>(from));
+    const uint8x16_t flagged = vorrq_u8(
+            vorrq_u8(vceqq_u8(bytes, vdupq_n_u8('"')), vceqq_u8(bytes, vdupq_n_u8('\\'))),
+            vcltq_u8(bytes, vdupq_n_u8(0x20)));
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(flagged), 4)), 0);
+}
+inline constexpr std::size_t string_block = 16;
+#else
+#define SERPENT_NEON_STRING_SCAN 0
+inline constexpr std::size_t string_block = 8;
+#endif
+
 /**
  * The first byte from `position` that a string cannot hold as itself, or `limit`.
  *
@@ -126,11 +150,20 @@ template<bool Terminated = false>
 [[nodiscard]] SERPENT_ALWAYS_INLINE constexpr const char *end_of_plain_text(const char *position, const char *limit) noexcept {
 #if SERPENT_WIDE_STRING_SCAN
     if (!std::is_constant_evaluated()) {
+        // One word first, since most strings end inside it and a word's answer stays in the
+        // integer registers; only a string that has outrun a word is worth a vector, whose
+        // answer has to be moved out of the vector unit to be acted on.
         while (limit - position >= 8) {
             std::uint64_t word;
             std::memcpy(&word, position, sizeof word);
             if (const auto found = bytes_to_escape(word); found != 0) return position + std::countr_zero(found) / 8;
             position += 8;
+#if SERPENT_NEON_STRING_SCAN
+            while (limit - position >= 16) {
+                if (const auto found = bytes_to_escape_in_block(position); found != 0) return position + std::countr_zero(found) / 4;
+                position += 16;
+            }
+#endif
         }
     }
 #endif
@@ -546,7 +579,8 @@ inline constexpr auto short_escapes = [] {
     };
     while (from != limit) {
 #if SERPENT_WIDE_STRING_SCAN
-        // A word with no backslash in it is copied and done with; one that has is walked.
+        // A word with no backslash in it is copied and done with; one that has is walked. Past
+        // a clean word the text goes on by blocks, as end_of_plain_text does.
         if (limit - from >= 8) {
             std::uint64_t word;
             std::memcpy(&word, from, sizeof word);
@@ -554,6 +588,14 @@ inline constexpr auto short_escapes = [] {
             if (!holds_byte_to_escape(word)) {
                 from += 8;
                 to += 8;
+#if SERPENT_NEON_STRING_SCAN
+                while (limit - from >= 16) {
+                    vst1q_u8(reinterpret_cast<std::uint8_t *>(to), vld1q_u8(reinterpret_cast<const std::uint8_t *>(from)));
+                    if (bytes_to_escape_in_block(from) != 0) break;
+                    from += 16;
+                    to += 16;
+                }
+#endif
                 continue;
             }
         }

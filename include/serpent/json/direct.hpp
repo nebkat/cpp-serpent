@@ -27,7 +27,7 @@
 namespace serpent::json::direct {
 
 template<bool Terminated>
-SERPENT_ALWAYS_INLINE [[nodiscard]] bool read(scanner::basic_cursor<Terminated> &scan, bool &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(scanner::basic_cursor<Terminated> &scan, bool &into) noexcept {
     if (scanner::accept(scan, "true")) {
         into = true;
         return true;
@@ -64,7 +64,7 @@ template<bool Terminated>
  */
 template<std::integral T>
     requires (!std::same_as<T, bool>)
-SERPENT_ALWAYS_INLINE [[nodiscard]] bool read_terminated(scanner::terminated_cursor &scan, T &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read_terminated(scanner::terminated_cursor &scan, T &into) noexcept {
     const char *const start = scan.position;
     const char *at = start;
     const bool negative = *at == '-';
@@ -117,7 +117,7 @@ SERPENT_ALWAYS_INLINE [[nodiscard]] bool read_terminated(scanner::terminated_cur
 
 template<bool Terminated, std::integral T>
     requires (!std::same_as<T, bool>)
-SERPENT_ALWAYS_INLINE [[nodiscard]] bool read(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
     if constexpr (Terminated) return read_terminated(scan, into);
 
     if (!at_number(scan)) return false;
@@ -308,7 +308,7 @@ template<std::floating_point T>
 #endif
 
 template<bool Terminated, std::floating_point T>
-SERPENT_ALWAYS_INLINE [[nodiscard]] bool read(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
 #if SERPENT_USE_FAST_FLOAT
     if constexpr (Terminated) return read_real_terminated(scan, into);
     if (!at_number(scan)) return false;

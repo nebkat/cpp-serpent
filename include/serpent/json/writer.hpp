@@ -138,6 +138,16 @@ public:
             if (scanner::holds_byte_to_escape(word)) break;
             run += 8;
             to += 8;
+#if SERPENT_NEON_STRING_SCAN
+            // A string that has outrun a word goes on by blocks; see end_of_plain_text.
+            while (end - run >= 16) {
+                vst1q_u8(reinterpret_cast<std::uint8_t *>(to), vld1q_u8(reinterpret_cast<const std::uint8_t *>(run)));
+                if (scanner::bytes_to_escape_in_block(run) != 0) break;
+                run += 16;
+                to += 16;
+            }
+            if (end - run >= 16) break;
+#endif
         }
 #endif
         while (run != end) {

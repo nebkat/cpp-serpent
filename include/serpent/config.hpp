@@ -60,7 +60,10 @@
 
 /**
  * Looks for what a string cannot hold as itself - a quote, a backslash, a control character -
- * eight bytes at a time rather than one, when writing a string and when reading one.
+ * eight bytes at a time rather than one, when writing a string and when reading one. Where the
+ * target has NEON, a string that has outrun a word goes on sixteen bytes at a time, by a vector
+ * compare; the word comes first because most strings end inside it and a word's answer never
+ * leaves the integer registers.
  */
 #ifndef SERPENT_WIDE_STRING_SCAN
 #define SERPENT_WIDE_STRING_SCAN 1
