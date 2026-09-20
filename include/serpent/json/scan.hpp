@@ -91,28 +91,28 @@ template<bool Terminated = false>
 }
 
 /**
- * Whether any of the eight bytes in `word` is one a string cannot hold as itself: a quote, a
- * backslash, or a control character.
+ * Which of the eight bytes in `word` are ones a string cannot hold as itself: a quote, a
+ * backslash, or a control character. The top bit of each such byte is set in the result, and
+ * no other bit, so the first is found by counting trailing zeros.
  *
- * Each test is the usual one for "is any byte of this word zero", or "less than n": subtracting
- * from every byte at once borrows out of exactly the bytes that were too small, and the borrow
- * shows in the top bit of a byte whose own top bit was clear. It can spill into the byte above a
- * byte that matched, so this says whether there is such a byte, not which - and which is found
- * by looking at the eight one at a time, which happens once per escape rather than once per byte.
- * A byte of 0x80 or more, which is part of a character outside ASCII, never matches.
+ * Each test works on the low seven bits of every byte at once: a byte equal to the character
+ * xors to zero, and adding 0x7F to zero leaves the top bit clear where any other value carries
+ * into it - and the carry never reaches the byte above, since 0x7F + 0x7F fits. A byte of 0x80
+ * or more, part of a character outside ASCII, has its own top bit set and is ruled out by it.
  */
-[[nodiscard]] constexpr bool holds_byte_to_escape(std::uint64_t word) noexcept {
+[[nodiscard]] constexpr std::uint64_t bytes_to_escape(std::uint64_t word) noexcept {
     constexpr std::uint64_t every_byte = 0x0101010101010101;
-    constexpr std::uint64_t top_bits = 0x8080808080808080;
+    constexpr std::uint64_t low_seven = every_byte * 0x7F;
+    constexpr std::uint64_t top_bits = every_byte * 0x80;
 
-    const auto any_byte_below = [](std::uint64_t bytes, std::uint64_t bound) {
-        return (bytes - every_byte * bound) & ~bytes & top_bits;
-    };
-    const auto any_byte_equal_to = [&](std::uint64_t bytes, char wanted) {
-        return any_byte_below(bytes ^ (every_byte * static_cast<unsigned char>(wanted)), 1);
-    };
-    return (any_byte_below(word, 0x20) | any_byte_equal_to(word, '"') | any_byte_equal_to(word, '\\')) != 0;
+    const std::uint64_t low = word & low_seven;
+    const std::uint64_t not_quote = (low ^ (every_byte * '"')) + low_seven;
+    const std::uint64_t not_backslash = (low ^ (every_byte * '\\')) + low_seven;
+    const std::uint64_t not_control = (word & (every_byte * 0x60)) + low_seven;
+    return ~((not_quote & not_backslash & not_control) | word) & top_bits;
 }
+
+[[nodiscard]] constexpr bool holds_byte_to_escape(std::uint64_t word) noexcept { return bytes_to_escape(word) != 0; }
 
 /**
  * The first byte from `position` that a string cannot hold as itself, or `limit`.
@@ -129,7 +129,7 @@ template<bool Terminated = false>
         while (limit - position >= 8) {
             std::uint64_t word;
             std::memcpy(&word, position, sizeof word);
-            if (holds_byte_to_escape(word)) break;
+            if (const auto found = bytes_to_escape(word); found != 0) return position + std::countr_zero(found) / 8;
             position += 8;
         }
     }
@@ -516,6 +516,73 @@ struct writing_to {
     }
 };
 
+/** What a short escape's second character stands for, or zero for the ones that take more. */
+inline constexpr auto short_escapes = [] {
+    std::array<char, 256> table {};
+    table[static_cast<unsigned char>('"')] = '"';
+    table[static_cast<unsigned char>('\\')] = '\\';
+    table[static_cast<unsigned char>('/')] = '/';
+    table[static_cast<unsigned char>('b')] = '\b';
+    table[static_cast<unsigned char>('f')] = '\f';
+    table[static_cast<unsigned char>('n')] = '\n';
+    table[static_cast<unsigned char>('r')] = '\r';
+    table[static_cast<unsigned char>('t')] = '\t';
+    return table;
+}();
+
+/**
+ * Decodes a string's contents, which scan_string has passed, into room the caller has sized
+ * to the text, returning where the decoded text ends. One pass: each byte is copied, and the
+ * backslash - the one byte such contents hold that is not itself - is decoded from where it
+ * stands, a short escape by a table and a \u by the same arithmetic as everywhere else.
+ */
+[[nodiscard]] inline char *decode_escaped_into(char *to, std::string_view contents) noexcept {
+    const char *from = contents.data();
+    const char *const limit = from + contents.size();
+    const auto read_hex = [](const char *at) {
+        std::uint32_t code = 0;
+        for (int index = 0; index < 4; ++index) code = (code << 4) | static_cast<std::uint32_t>(hex_value(at[index]));
+        return code;
+    };
+    while (from != limit) {
+#if SERPENT_WIDE_STRING_SCAN
+        // A word with no backslash in it is copied and done with; one that has is walked.
+        if (limit - from >= 8) {
+            std::uint64_t word;
+            std::memcpy(&word, from, sizeof word);
+            std::memcpy(to, &word, sizeof word);
+            if (!holds_byte_to_escape(word)) {
+                from += 8;
+                to += 8;
+                continue;
+            }
+        }
+#endif
+        const char value = *from++;
+        if (value != '\\') {
+            *to++ = value;
+            continue;
+        }
+        const char kind = *from++;
+        if (const char meaning = short_escapes[static_cast<unsigned char>(kind)]; meaning != 0) {
+            *to++ = meaning;
+            continue;
+        }
+        std::uint32_t code = read_hex(from);
+        from += 4;
+        if (code >= 0xD800 && code <= 0xDBFF) {
+            const std::uint32_t low = read_hex(from + 2);
+            from += 6;
+            code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+        }
+        writing_to at { to };
+        append_utf8(code, at);
+        to = at.position;
+    }
+    return to;
+}
+
+
 /**
  * The decoded string, in a std::string's own storage. A string that carries no escape is taken
  * whole; one that does is decoded into room the size of the text as it stands, since every
@@ -527,9 +594,7 @@ inline void decode_string(string_span text, std::string &into) {
         return;
     }
     into.resize_and_overwrite(text.contents.size(), [&](char *buffer, std::size_t) {
-        writing_to at { buffer };
-        decode_string(text, at);
-        return static_cast<std::size_t>(at.position - buffer);
+        return static_cast<std::size_t>(decode_escaped_into(buffer, text.contents) - buffer);
     });
 }
 
