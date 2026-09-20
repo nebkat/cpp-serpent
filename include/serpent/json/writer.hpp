@@ -504,6 +504,33 @@ void writer::range(const R &items) noexcept {
         }
     }
 
+    // A short array of strings is one piece too, given room for their escapes: six bytes a
+    // character, which is the most one takes, and the seven the word-wide copy may run past a
+    // byte it then rewrites. Short, so that six times the text is never much room.
+    if constexpr (detail::string_like<element>) {
+        if constexpr (std::ranges::sized_range<R>) {
+            if (this->options.indent == 0 && std::ranges::size(items) <= 16) {
+                std::size_t bytes = 0;
+                for (const std::string_view text : items) bytes += text.size();
+                if (bytes <= 256) {
+                    const bool composed = this->compose_value(2 + std::ranges::size(items) * 3 + bytes * 6 + 8, [&](char *const to) {
+                        char *cursor = to;
+                        *cursor++ = '[';
+                        bool separated = false;
+                        for (const std::string_view text : items) {
+                            if (separated) *cursor++ = ',';
+                            cursor = quote_into(cursor, text);
+                            separated = true;
+                        }
+                        *cursor++ = ']';
+                        return static_cast<std::size_t>(cursor - to);
+                    });
+                    if (composed) return;
+                }
+            }
+        }
+    }
+
     const auto scope = this->array();
 
     if constexpr (widest_text<element> != 0) {

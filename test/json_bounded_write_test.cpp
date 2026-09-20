@@ -159,6 +159,11 @@ int main() {
     fits_exactly(std::vector<int> { 1, 2, 3 }, 32);
     fits_exactly(std::vector<double> { 0.1, 2.5 }, 64);
     fits_exactly(std::vector<int> {}, 2);
+    // And a short array of strings, escapes included.
+    fits_exactly(std::vector<std::string> { "Cat", "a \"quoted\" dog", "", "tab\there", std::string(100, '\x01') }, 64 + 600);
+    fits_exactly(std::vector<std::string_view> { "x" }, 8);
+    check_equal(std::string_view { json::encode(std::vector<std::string> { "a", "b\n" }, { .indent = 1 }) },
+            std::string_view { "[\n \"a\",\n \"b\\n\"\n]" }, "and one at a time when indenting");
 
     // Strings in a run take room for their escapes: short ones six bytes a character unscanned,
     // long ones what a scan says they need. Both spellings must be exactly what writing them
