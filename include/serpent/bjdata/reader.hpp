@@ -10,6 +10,7 @@
 #include <nonstd/unaligned_ptr.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <concepts>
 #include <expected>
 #include <iterator>
@@ -58,6 +59,7 @@ class reader {
     marker element = marker::invalid;
     std::span<const std::byte> source {}; ///< the whole document, so bounds and offsets are absolute
     const std::byte *payload = nullptr; ///< first byte after this value's marker
+    soa::place table {};                ///< set when this value is a record of a table, or a field of one
 
     // One past the end of this value, once a walk of it has been completed - for whoever steps
     // over it next, which is the iterator that owns this handle. A forward iterator has to walk
@@ -83,6 +85,16 @@ public:
 
     /** Records where this value ends, so that stepping to the next need not scan it again. */
     void note_end(const std::byte *end) const noexcept { this->reached = end; }
+
+    /** Another handle on the same value, with nothing known about it yet. */
+    [[nodiscard]] reader clone() const noexcept {
+        reader copy { this->element, this->source, this->payload };
+        copy.table = this->table;
+        return copy;
+    }
+
+    /** Where this value stands in a table, if it is a record or a field of one. */
+    [[nodiscard]] constexpr const soa::place &place_in_table() const noexcept { return this->table; }
 
     /** Wraps a buffer, reading its leading marker. Performs no deep parsing. */
     [[nodiscard]] static reader over(std::span<const std::byte> buffer) noexcept {
@@ -121,7 +133,12 @@ public:
         case marker::string:
         case marker::high_precision: return kind::string;
         case marker::array_begin: return kind::array;
-        case marker::object_begin: return kind::object;
+        case marker::object_begin:
+            // A table laid out column by column opens with `{` but is a sequence of records.
+            if (!this->table.in_table() && this->available() >= 2 && to_marker(this->payload[0]) == marker::strong_type
+                    && to_marker(this->payload[1]) == marker::object_begin)
+                return kind::array;
+            return kind::object;
         default: return kind::invalid;
         }
     }
@@ -158,6 +175,8 @@ public:
 
     [[nodiscard]] detail::header container_header() const noexcept {
         if (this->element != marker::array_begin && this->element != marker::object_begin) return {};
+        // A record of a table, or a run of elements in one, has no header: its shape is the schema's.
+        if (this->table.in_table()) return {};
         auto scanner = this->scan();
         const auto info = detail::parse_header(scanner, this->element == marker::object_begin);
         if (!scanner.ok()) return {};
@@ -269,6 +288,12 @@ private:
 
     /** S and H yield their raw bytes; C yields a one-character reader. Never copies. */
     [[nodiscard]] std::optional<std::string_view> read_text() const noexcept {
+        // Text in a table - fixed, or from an offset table - has no length of its own; the
+        // handle was told it. A dictionary entry has one and reads as any string does.
+        if (this->table.in_table() && this->table.extent != soa::place::prefixed) {
+            if (this->element != marker::string && this->element != marker::high_precision) return std::nullopt;
+            return std::string_view { reinterpret_cast<const char *>(this->payload), this->table.extent };
+        }
         if (this->element == marker::character) {
             if (this->available() < 1) return std::nullopt;
             return std::string_view { reinterpret_cast<const char *>(this->payload), 1 };
@@ -324,6 +349,8 @@ private:
     friend class array_iterator;
     friend class member_iterator;
     friend reader move_to(reader &, marker, const std::byte *) noexcept;
+    friend void place_field(reader &, const soa::table &, const soa::field &, const std::byte *) noexcept;
+    friend void place_record(reader &, const std::byte *, std::uint64_t) noexcept;
 };
 
 /** A key and its value, for structured bindings over items(). */
@@ -341,7 +368,64 @@ inline reader move_to(reader &handle, marker element, const std::byte *payload) 
     handle.element = element;
     handle.payload = payload;
     handle.reached = nullptr;
+    handle.table = {};
     return {};
+}
+
+/** Points a handle at record `index` of the table whose container marker is at `container`. */
+inline void place_record(reader &handle, const std::byte *container, std::uint64_t index) noexcept {
+    handle.element = marker::object_begin;
+    handle.payload = container;
+    handle.reached = nullptr;
+    handle.table = { .container = container, .field = soa::place::whole_record, .record = static_cast<std::uint32_t>(index) };
+}
+
+/**
+ * Points a handle at one field of a record, whose bytes begin at `at`. A scalar, a boolean and
+ * a null are given the marker their bytes would have carried, so that every question a handle
+ * answers about a value is answered the same way; a dictionary entry is a string with its
+ * length prefix; fixed and offset text are strings told their length; a nested record and a
+ * fixed run of elements keep their place in the table for whoever walks them.
+ */
+inline void place_field(reader &handle, const soa::table &source, const soa::field &field, const std::byte *at) noexcept {
+    using soa::field_kind;
+    handle.reached = nullptr;
+    handle.payload = at;
+    handle.table = { .container = handle.table.container, .field = static_cast<std::uint32_t>(&field - source.fields().begin()),
+        .record = handle.table.record };
+    switch (field.kind) {
+    case field_kind::scalar: handle.element = field.type; break;
+    case field_kind::boolean: handle.element = to_marker(*at); break;
+    case field_kind::null: handle.element = marker::null; break;
+    case field_kind::text:
+        handle.element = field.type;
+        handle.table.extent = static_cast<std::uint32_t>(soa::table::fixed_text(field, at).size());
+        break;
+    case field_kind::dictionary: {
+        std::uint64_t index = 0;
+        handle.element = marker::invalid;
+        if (!direct::load_integer(field.type, at, field.width, index)) break;
+        if (const auto entry = source.dictionary_entry(field, index)) {
+            handle.element = marker::string;
+            handle.payload = reinterpret_cast<const std::byte *>(entry->data());
+            handle.table.extent = static_cast<std::uint32_t>(entry->size());
+        }
+        break;
+    }
+    case field_kind::offsets: {
+        std::uint64_t index = 0;
+        handle.element = marker::invalid;
+        if (!direct::load_integer(field.type, at, field.width, index)) break;
+        if (const auto entry = source.offset_entry(field, index)) {
+            handle.element = marker::string;
+            handle.payload = reinterpret_cast<const std::byte *>(entry->data());
+            handle.table.extent = static_cast<std::uint32_t>(entry->size());
+        }
+        break;
+    }
+    case field_kind::record: handle.element = marker::object_begin; break;
+    case field_kind::array: handle.element = marker::array_begin; break;
+    }
 }
 
 /**
@@ -369,12 +453,42 @@ private:
     bool exhausted = true;
     reader current;
 
+    // Over a table: its records, one handle each; or, from a handle on a fixed run of elements
+    // in a record, those elements. The placed table is owned here, since a handle carries only
+    // its place and the schema has to be read to find anything.
+    std::unique_ptr<soa::table> layout;
+    std::uint64_t record = 0;      ///< the record handed out next
+    std::uint32_t next_field = 0;  ///< the element handed out next, walking a run
+    std::uint32_t last_field = 0;
+
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
         return this->container->source.data() + this->container->source.size();
     }
 
+    void normalise_in_table() noexcept {
+        if (this->container->table.in_table()) {
+            // Elements of a run inside a record, each at its offset from the run's bytes.
+            this->exhausted = this->next_field >= this->last_field;
+            if (this->exhausted) return;
+            const auto &element = this->layout->fields().fields[this->next_field];
+            this->current.table = this->container->table;
+            place_field(this->current, *this->layout, element, this->container->payload + element.offset);
+            return;
+        }
+        this->exhausted = this->record >= this->layout->size();
+        if (this->exhausted) {
+            this->container->note_end(this->layout->end());
+            return;
+        }
+        place_record(this->current, this->container->payload - 1, this->record);
+    }
+
     /** Settles whether the cursor stands on an element, and if so points `current` at it. */
     void normalise() noexcept {
+        if (this->layout != nullptr) {
+            this->normalise_in_table();
+            return;
+        }
         if (this->cursor == nullptr) {
             this->exhausted = true;
             return;
@@ -424,6 +538,27 @@ public:
     , remaining(info.count)
     , counted(!info.unbounded)
     , current(marker::invalid, container.source, nullptr) {
+        if (container.table.in_table() && container.element == marker::array_begin) {
+            // A fixed run of elements in a record.
+            this->layout = std::make_unique<soa::table>();
+            if (this->layout->place_at(container.source, container.table.container)) {
+                const auto &run = this->layout->fields().fields[container.table.field];
+                this->next_field = run.children;
+                this->last_field = run.next;
+            } else {
+                this->layout.reset();
+            }
+            this->exhausted = this->layout == nullptr;
+            if (!this->exhausted) this->normalise();
+            return;
+        }
+        if (info.structured()) {
+            this->layout = std::make_unique<soa::table>();
+            if (!this->layout->place(container.source, info, container.element == marker::object_begin)) this->layout.reset();
+            this->exhausted = this->layout == nullptr;
+            if (!this->exhausted) this->normalise();
+            return;
+        }
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
@@ -432,6 +567,13 @@ public:
 
     array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
+
+        if (this->layout != nullptr) {
+            if (this->container->table.in_table()) this->next_field = this->layout->fields().fields[this->next_field].next;
+            else ++this->record;
+            this->normalise();
+            return *this;
+        }
 
         if (this->element != marker::invalid) {
             const auto width = payload_width(this->element);
@@ -481,8 +623,26 @@ private:
     bool exhausted = true;
     key_value current;
 
+    // Over a record of a table: its fields in schema order, the whole record's from where the
+    // table places each, a nested record's at their offsets from its bytes.
+    std::unique_ptr<soa::table> layout;
+    std::uint32_t next_field = 0;
+    std::uint32_t last_field = 0;
+
     [[nodiscard]] constexpr const std::byte *limit() const noexcept {
         return this->container->source.data() + this->container->source.size();
+    }
+
+    void normalise_in_table() noexcept {
+        this->exhausted = this->next_field >= this->last_field;
+        if (this->exhausted) return;
+        const auto &field = this->layout->fields().fields[this->next_field];
+        this->current.key = field.name;
+        this->current.value.table = this->container->table;
+        const std::byte *at = this->container->table.is_record()
+                ? this->layout->at(field, this->container->table.record)
+                : this->container->payload + field.offset;
+        place_field(this->current.value, *this->layout, field, at);
     }
 
     /**
@@ -520,6 +680,10 @@ private:
     }
 
     void normalise() noexcept {
+        if (this->layout != nullptr) {
+            this->normalise_in_table();
+            return;
+        }
         if (this->cursor == nullptr) {
             this->exhausted = true;
             return;
@@ -549,6 +713,24 @@ public:
     , remaining(info.count)
     , counted(!info.unbounded)
     , current { {}, reader { marker::invalid, container.source, nullptr } } {
+        if (container.table.in_table() && container.element == marker::object_begin) {
+            this->layout = std::make_unique<soa::table>();
+            if (this->layout->place_at(container.source, container.table.container)) {
+                if (container.table.is_record()) {
+                    this->next_field = 0;
+                    this->last_field = this->layout->fields().count;
+                } else {
+                    const auto &record = this->layout->fields().fields[container.table.field];
+                    this->next_field = record.children;
+                    this->last_field = record.next;
+                }
+            } else {
+                this->layout.reset();
+            }
+            this->exhausted = this->layout == nullptr;
+            if (!this->exhausted) this->normalise();
+            return;
+        }
         this->exhausted = info.body == nullptr;
         this->normalise();
     }
@@ -558,6 +740,12 @@ public:
 
     member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
+
+        if (this->layout != nullptr) {
+            this->next_field = this->layout->fields().fields[this->next_field].next;
+            this->normalise();
+            return *this;
+        }
 
         // The key and the value's marker were consumed by normalise(), so resume at the value.
         if (this->element != marker::invalid) {
@@ -623,6 +811,15 @@ inline std::optional<std::size_t> reader::size_hint() const noexcept {
 }
 
 inline std::size_t reader::size() const noexcept {
+    if (this->table.in_table()) {
+        std::size_t total = 0;
+        if (this->element == marker::object_begin) {
+            for ([[maybe_unused]] const auto &entry : this->items()) ++total;
+        } else if (this->element == marker::array_begin) {
+            for ([[maybe_unused]] const auto &entry : this->array()) ++total;
+        }
+        return total;
+    }
     const auto info = this->container_header();
     if (info.body == nullptr) return 0;
     if (!info.unbounded) return static_cast<std::size_t>(info.count);
@@ -639,7 +836,16 @@ inline std::size_t reader::size() const noexcept {
 }
 
 inline reader reader::operator[](std::size_t index) const noexcept {
-    if (this->element != marker::array_begin) return {};
+    // A column-major table opens with `{` and is indexed by record like any other.
+    const bool table_here = this->table.in_table() || this->container_header().structured();
+    if (this->element != marker::array_begin && !(this->element == marker::object_begin && table_here)) return {};
+    if (table_here) {
+        std::size_t position = 0;
+        for (const auto &value : this->array()) {
+            if (position++ == index) return value.clone();
+        }
+        return {};
+    }
 
     const auto info = this->container_header();
     if (info.body == nullptr) return {};
@@ -655,7 +861,7 @@ inline reader reader::operator[](std::size_t index) const noexcept {
 
     std::size_t position = 0;
     for (const auto &value : this->array()) {
-        if (position++ == index) return reader { value.element, value.source, value.payload };
+        if (position++ == index) return value.clone();
     }
     return {};
 }
@@ -663,7 +869,7 @@ inline reader reader::operator[](std::size_t index) const noexcept {
 inline reader reader::operator[](std::string_view key) const noexcept {
     if (this->element != marker::object_begin) return {};
     for (const auto &entry : this->items()) {
-        if (entry.key == key) return reader { entry.value.element, entry.value.source, entry.value.payload };
+        if (entry.key == key) return entry.value.clone();
     }
     return {};
 }

@@ -439,13 +439,13 @@ bool read_into(const Source &source, T &value) {
                              target.clear();
                              target.emplace_back();
                          }) {
-        if (!source.is_array()) return false;
-
         // A format may offer a reader generated for this element type, which walks the document
-        // once instead of reading each element and then skipping it again to find the next.
+        // once instead of reading each element and then skipping it again to find the next -
+        // and may know a sequence by another opening than an array's, so it is asked first.
         if constexpr (requires { read_sequence(source, value); }) {
             if (const auto handled = read_sequence(source, value)) return *handled;
         }
+        if (!source.is_array()) return false;
 
         value.clear();
         // A document that states its length lets the container be sized once rather than grown.

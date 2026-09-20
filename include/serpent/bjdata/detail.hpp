@@ -272,8 +272,11 @@ struct container_prefix {
     std::uint64_t count = 0;
     bool unbounded = false;
     const std::byte *body = nullptr;
+    const std::byte *table = nullptr; ///< a Structure-of-Arrays schema's opening brace, or null
 
     [[nodiscard]] constexpr bool typed() const noexcept { return this->element != marker::invalid; }
+    /** A draft 4 table: records of one schema, with no markers of their own. */
+    [[nodiscard]] constexpr bool structured() const noexcept { return this->table != nullptr; }
 };
 
 /** That, plus the shape an array may declare. */
@@ -289,6 +292,9 @@ struct header : container_prefix {
  * Reading an object into the prefix alone is worth having: the full header carries an array of
  * extents that is zeroed on construction and copied on return, and an object never has any.
  */
+/** Steps over a table's schema, whose `{` the cursor has passed; defined with the schema reader. */
+void skip_schema(cursor &source) noexcept;
+
 template<typename Result>
 [[nodiscard]] inline Result parse_header_as(cursor &source, bool object) noexcept {
     Result result;
@@ -301,12 +307,21 @@ template<typename Result>
 
         const auto *at = source.position;
         if (!source.need(1)) return result;
-        result.element = to_marker(source.peek());
-        if (!is_strong_type(result.element)) {
-            source.fail(errc::invalid_strong_type, at);
-            return result;
+        if (source.peek_marker() == marker::object_begin) {
+            // A schema in the strong type's place: a Structure-of-Arrays table. Stepped over
+            // here, and read into a descriptor by whoever reads the records.
+            result.table = source.position;
+            source.advance(1);
+            skip_schema(source);
+            if (!source.ok()) return result;
+        } else {
+            result.element = to_marker(source.peek());
+            if (!is_strong_type(result.element)) {
+                source.fail(errc::invalid_strong_type, at);
+                return result;
+            }
+            source.advance(1);
         }
-        source.advance(1);
 
         if (!source.need(1)) return result;
         if (source.peek_marker() != marker::count) {
@@ -326,8 +341,14 @@ template<typename Result>
     const auto shape = read_count(source);
     if (!source.ok()) return result;
 
-    if (object && shape.rank != 0) {
+    if (object && shape.rank != 0 && result.table == nullptr) {
         source.fail(errc::object_dimension_count, at);
+        return result;
+    }
+    // A table says which way round it is with its own marker, so the wrapped dimension form
+    // that means column-major has no place on one.
+    if (result.table != nullptr && shape.column_major) {
+        source.fail(errc::invalid_dimensions, at);
         return result;
     }
 
@@ -353,6 +374,9 @@ template<typename Result>
 }
 
 void skip_value(cursor &source, marker kind, int depth) noexcept;
+
+/** Steps over a table's records and the tables after them; defined with the schema reader. */
+void skip_structured(cursor &source, const container_prefix &info) noexcept;
 
 inline void skip_container(cursor &source, bool object, int depth) noexcept {
     const auto info = parse_header(source, object);
@@ -400,6 +424,11 @@ inline void skip_container(cursor &source, bool object, int depth) noexcept {
             }
             skip_element();
         }
+        return;
+    }
+
+    if (info.structured()) {
+        skip_structured(source, info);
         return;
     }
 
@@ -461,3 +490,5 @@ inline void skip_value(cursor &source, marker kind, int depth) noexcept {
 } // namespace detail
 
 } // namespace serpent::bjdata
+
+#include <serpent/bjdata/soa.hpp>

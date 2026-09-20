@@ -296,6 +296,197 @@ bool read_object_body(detail::cursor &scan, const std::span<const std::byte> buf
     return filler.succeeded();
 }
 
+template<typename T>
+class table_filler;
+
+/**
+ * Reads one field of a table into a member, given where the field's bytes for this record are.
+ *
+ * What a member can take is decided by its type against the field's kind: numbers from a
+ * scalar or a boolean byte, text from any of the three text forms, a nested described type from
+ * a record, a fixed or growable sequence from an array, an optional from any of those or from
+ * a field that is always null. False where the two cannot be reconciled or the value does not
+ * fit, as anywhere else.
+ */
+template<typename T>
+bool read_table_field(const soa::table &source, const soa::field &field, const std::byte *at, T &into) {
+    using namespace soa;
+    if constexpr (serpent::detail::optional_like<T>) {
+        if (field.kind == field_kind::null) {
+            into.reset();
+            return true;
+        }
+        return read_table_field(source, field, at, into.emplace());
+    } else if constexpr (std::same_as<T, bool>) {
+        if (field.kind == field_kind::boolean) {
+            const auto byte = to_marker(*at);
+            if (byte != marker::boolean_true && byte != marker::boolean_false) return false;
+            into = byte == marker::boolean_true;
+            return true;
+        }
+        return false;
+    } else if constexpr (std::integral<T> || std::floating_point<T>) {
+        if (field.kind != field_kind::scalar) return false;
+        if constexpr (std::integral<T>) {
+            if (field.type == marker::character) {
+                std::uint8_t byte = 0;
+                if (!direct::load_stored<std::uint8_t>(at, field.width, byte)) return false;
+                if (!std::in_range<T>(byte)) return false;
+                into = static_cast<T>(byte);
+                return true;
+            }
+            return direct::load_integer(field.type, at, field.width, into).has_value();
+        } else {
+            return direct::load_real(field.type, at, field.width, into).has_value();
+        }
+    } else if constexpr (serpent::detail::string_like<T> && requires(T &text, std::string_view view) { text.assign(view); }) {
+        std::optional<std::string_view> text;
+        switch (field.kind) {
+        case field_kind::text: text = table::fixed_text(field, at); break;
+        case field_kind::dictionary: {
+            std::uint64_t index = 0;
+            if (!direct::load_integer(field.type, at, field.width, index)) return false;
+            text = source.dictionary_entry(field, index);
+            break;
+        }
+        case field_kind::offsets: {
+            std::uint64_t index = 0;
+            if (!direct::load_integer(field.type, at, field.width, index)) return false;
+            text = source.offset_entry(field, index);
+            break;
+        }
+        case field_kind::scalar:
+            if (field.type == marker::character) text = std::string_view { reinterpret_cast<const char *>(at), 1 };
+            break;
+        default: break;
+        }
+        if (!text) return false;
+        into.assign(*text);
+        return true;
+    } else if constexpr (reflected_type<T>) {
+        if (field.kind != field_kind::record) return false;
+        return table_filler<T> { source, field }.fill(at, into);
+    } else if constexpr (serpent::detail::fixed_sequence<T> || serpent::detail::back_insertable<T>) {
+        if (field.kind != field_kind::array) return false;
+        const auto &layout = source.fields();
+        if constexpr (serpent::detail::back_insertable<T>) into.clear();
+        auto slot = std::ranges::begin(into);
+        for (std::uint32_t index = field.children; index < field.next; index = layout.fields[index].next) {
+            const auto &element = layout.fields[index];
+            if constexpr (serpent::detail::back_insertable<T>) {
+                if (!read_table_field(source, element, at + element.offset, into.emplace_back())) return false;
+            } else {
+                if (slot == std::ranges::end(into)) return false;
+                if (!read_table_field(source, element, at + element.offset, *slot)) return false;
+                ++slot;
+            }
+        }
+        if constexpr (serpent::detail::fixed_sequence<T>) return slot == std::ranges::end(into);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/**
+ * Fills a described type from records of a table: the schema's fields are matched to the
+ * type's members by name once, and then each record is a run of loads at fixed offsets.
+ */
+template<typename T>
+class table_filler {
+    static constexpr auto members = std::define_static_array(serpent::detail::members_including_bases<T>());
+    static_assert(members.size() <= 64, "a type with more than 64 members needs a wider seen mask");
+
+    const soa::table &source;
+    const soa::field *record; ///< the nested record field these members are in, or null at the top
+    std::array<const soa::field *, members.size()> located {};
+    std::uint64_t seen = 0;
+
+    static constexpr std::uint64_t required = [] {
+        std::uint64_t mask = 0;
+        std::size_t position = 0;
+        template for (constexpr auto member : members) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member) && serpent::detail::member_is_required<T, member>())
+                mask |= std::uint64_t { 1 } << position;
+            ++position;
+        }
+        return mask;
+    }();
+
+public:
+    table_filler(const soa::table &source, const soa::field *record = nullptr) noexcept : source(source), record(record) {
+        const auto &layout = source.fields();
+        const std::uint32_t first = record == nullptr ? 0 : record->children;
+        const std::uint32_t last = record == nullptr ? layout.count : record->next;
+        std::size_t position = 0;
+        template for (constexpr auto member : members) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
+                static constexpr std::string_view name = serpent::detail::field_key<T, member>();
+                for (std::uint32_t index = first; index < last; index = layout.fields[index].next) {
+                    if (layout.fields[index].name == name) {
+                        this->located[position] = &layout.fields[index];
+                        this->seen |= std::uint64_t { 1 } << position;
+                        break;
+                    }
+                }
+            }
+            ++position;
+        }
+    }
+
+    table_filler(const soa::table &source, const soa::field &record) noexcept : table_filler(source, &record) {}
+
+    /** Whether every member the type insists on has a field. */
+    [[nodiscard]] bool complete() const noexcept { return (this->seen & required) == required; }
+
+    /** Fills `value` from the record whose bytes begin at `at`. */
+    [[nodiscard]] bool fill(const std::byte *at, T &value) const {
+        std::size_t position = 0;
+        bool converted = true;
+        template for (constexpr auto member : members) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
+                if (const auto *field = this->located[position]; field != nullptr) {
+                    if (!read_table_field(this->source, *field, at + field->offset, value.[:member:])) converted = false;
+                }
+            }
+            ++position;
+        }
+        return converted;
+    }
+
+    /** Fills `value` from record `index` of a table whose records these members are. */
+    [[nodiscard]] bool fill_record(std::uint64_t index, T &value) const {
+        // At the top, a member's field is a top-level field, placed by the table; the record's
+        // own bytes are where the first field is, less its offset.
+        std::size_t position = 0;
+        bool converted = true;
+        template for (constexpr auto member : members) {
+            if constexpr (!serpent::detail::has_annotation<skip>(member)) {
+                if (const auto *field = this->located[position]; field != nullptr) {
+                    if (!read_table_field(this->source, *field, this->source.at(*field, index), value.[:member:])) converted = false;
+                }
+            }
+            ++position;
+        }
+        return converted;
+    }
+};
+
+/** Fills a container of described types from a table. */
+template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
+bool read_table(std::span<const std::byte> buffer, const detail::container_prefix &prefix, bool column_major, C &out) {
+    soa::table source;
+    if (!source.place(buffer, prefix, column_major)) return false;
+    const table_filler<T> filler { source };
+    if (!filler.complete()) return false;
+    out.clear();
+    out.reserve(static_cast<std::size_t>(source.size()));
+    for (std::uint64_t index = 0; index < source.size(); ++index) {
+        if (!filler.fill_record(index, out.emplace_back())) return false;
+    }
+    return true;
+}
+
 } // namespace detail
 
 /**
@@ -308,6 +499,19 @@ template<typename T>
     requires reflected_type<T>
 bool read_reflected(const reader &source, T &value) {
     if (!source.is_object()) return false;
+    if (const auto &place = source.place_in_table(); place.in_table()) {
+        // A record of a table, or a nested record in one: its members are at fixed offsets.
+        soa::table layout;
+        if (!layout.place_at(source.buffer(), place.container)) return false;
+        if (place.is_record()) {
+            const detail::table_filler<T> filler { layout };
+            return filler.complete() && filler.fill_record(place.record, value);
+        }
+        const auto &field = layout.fields().fields[place.field];
+        if (field.kind != soa::field_kind::record) return false;
+        const detail::table_filler<T> filler { layout, field };
+        return filler.complete() && filler.fill(source.data(), value);
+    }
     detail::cursor scanner { source.buffer(), source.data() };
     return detail::read_object_body(scanner, source.buffer(), value);
 }
@@ -325,10 +529,14 @@ template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
         out.emplace_back();
     }
 std::optional<bool> read_sequence(const reader &source, C &out) {
+    // A table - opening with `[`, or with `{` when laid out column by column, which type()
+    // reports as an array either way - has its records placed by its schema rather than marked
+    // one by one.
     if (!source.is_array()) return std::nullopt;
 
     const auto info = source.container_header();
     if (info.body == nullptr) return std::nullopt;
+    if (info.structured()) return detail::read_table(source.buffer(), info, source.type_marker() == marker::object_begin, out);
     // A typed array of anything but objects is not a sequence of these.
     if (info.typed() && info.element != marker::object_begin) return std::nullopt;
 

@@ -86,4 +86,16 @@ rules. `E` is rejected rather than skipped.
     is what keeps every typed container O(1) to index and skip. Some libraries write arrays of
     strings as `[$S#…`, so reading its output needs a leniency mode this does not yet have.
 
-Draft 4 Structure-of-Arrays is not implemented in either direction.
+## Structure-of-Arrays tables
+
+A draft 4 table — `[${` schema `}#count` and the records back to back, or `{${` with every
+record's first field before any record's second — is read every way a document is: stepped
+over by `validate`, into a `std::vector<T>` of a described type record by record at fixed
+offsets, into a `value` as an array of objects, and through reader handles, where a table
+is an array whose elements are objects with the schema's fields. Every schema field type is
+understood: fixed-width scalars, the `T` boolean byte, `Z`, padded `S`/`H` text, dictionaries,
+offset-table text, nested records and fixed runs. A member of the type that the schema has no
+field for keeps its value unless the type insists on it; a field the type has no member for is
+skipped. A table with more than one dimension is read flat, in record order.
+
+Writing tables is not implemented yet; a `std::vector<T>` is written as an array of objects.
