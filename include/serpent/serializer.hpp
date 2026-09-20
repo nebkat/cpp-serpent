@@ -528,10 +528,16 @@ bool read_into(const Source &source, T &value) {
         }
         return true;
     } else if constexpr (std::is_arithmetic_v<T> || detail::string_like<T>) {
-        auto found = source.template as<T>();
-        if (!found) return false;
-        value = std::move(*found);
-        return true;
+        // A format may read a scalar where it stands, into the value itself - found by lookup
+        // on the source, as read_reflected is. Otherwise it is asked for and moved in.
+        if constexpr (requires { { read_scalar(source, value) } -> std::same_as<bool>; }) {
+            return read_scalar(source, value);
+        } else {
+            auto found = source.template as<T>();
+            if (!found) return false;
+            value = std::move(*found);
+            return true;
+        }
     } else {
         // A described or converted type is filled where it stands, as the top level is, so
         // that a member read again keeps the capacity its containers already have.

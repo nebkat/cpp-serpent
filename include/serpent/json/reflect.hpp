@@ -340,6 +340,19 @@ template<bool Terminated, typename T>
 }
 
 /**
+ * Reads a scalar into the value itself where the reader stands, rather than into a value made
+ * for it and then moved: the top of a document that is one scalar, or an element of a range.
+ */
+template<bool Terminated, typename T>
+    requires direct::readable<T>
+bool read_scalar(const basic_reader<Terminated> &source, T &into) {
+    scanner::basic_cursor<Terminated> scan { source.document(), source.data() };
+    if (!direct::read(scan, into)) return false;
+    source.note_end(scan.position);
+    return true;
+}
+
+/**
  * Fills a container from a JSON array with one cursor carried from element to element.
  *
  * Without this each element is reached through the array iterator: a handle is made for it, the
