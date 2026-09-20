@@ -29,8 +29,8 @@
 
 namespace serpent::json {
 
-namespace detail {
-
+// Not in a detail namespace of its own: a serpent::json::detail would hide serpent::detail from
+// every unqualified use of it in this namespace, depending on which header came first.
 template<bool Terminated>
 class tree_builder {
     scanner::basic_cursor<Terminated> &scan;
@@ -187,8 +187,6 @@ private:
     }
 };
 
-} // namespace detail
-
 /**
  * Fills a value tree from the JSON value a reader stands on, reading the document once.
  *
@@ -198,7 +196,7 @@ private:
 template<bool Terminated>
 bool read_tree(const basic_reader<Terminated> &source, serpent::value &into) {
     scanner::basic_cursor<Terminated> scan { source.document(), source.data() };
-    detail::tree_builder<Terminated> builder { scan };
+    tree_builder<Terminated> builder { scan };
     if (!builder.build(into, 0)) return false;
     source.note_end(scan.position);
     return true;
