@@ -36,18 +36,18 @@ void write_value(basic_writer<Preference> &out, const reader &source) noexcept {
  * What is preferred is a template argument: bjdata::write<prefer::speed>(sink, value).
  */
 template<prefer Preference = prefer::size, sink S, typename T>
-std::expected<std::size_t, error> write(S &out, const T &value) {
-    basic_writer<Preference> target { out };
+std::expected<std::size_t, error> write(S &out, const T &value, writer_options options = {}) {
+    basic_writer<Preference> target { out, options };
     target.value(value);
     return target.finish();
 }
 
 /** Encodes a value into a fresh buffer. The allocating convenience over write(). */
 template<prefer Preference = prefer::size, typename T>
-[[nodiscard]] std::vector<std::byte> encode(const T &value) {
+[[nodiscard]] std::vector<std::byte> encode(const T &value, writer_options options = {}) {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
-    basic_writer<Preference> target { out };
+    basic_writer<Preference> target { out, options };
     target.value(value);
     if (!target.finish()) buffer.clear();
     return buffer;
@@ -86,9 +86,9 @@ template<typename T>
 
 /** The exact byte length a value would occupy, with no allocation. */
 template<prefer Preference = prefer::size, typename T>
-[[nodiscard]] std::size_t measure(const T &value) {
+[[nodiscard]] std::size_t measure(const T &value, writer_options options = {}) {
     counting_sink counter;
-    basic_writer<Preference> target { counter };
+    basic_writer<Preference> target { counter, options };
     target.value(value);
     // finish() both hands over the last batch and reports the total, so the sink is only there
     // to have somewhere for the bytes to go.

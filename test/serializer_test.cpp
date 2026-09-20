@@ -738,9 +738,11 @@ void containers_need_no_customization() {
  * once instead of growing it. Where size is, it does not: the count costs bytes.
  */
 void counted_containers() {
+    // Written as arrays of objects: two or more records of a type a schema can say are a table
+    // otherwise, which states its length its own way.
     const std::vector<point> three { { 1, 2 }, { 3, 4 }, { 5, 6 } };
-    const auto fast = encode<prefer::speed>(three);
-    const auto small = encode<prefer::size>(three);
+    const auto fast = encode<prefer::speed>(three, { .tables = false });
+    const auto small = encode<prefer::size>(three, { .tables = false });
 
     check(hex(fast).find("5b23") == 0, "preferring speed, an array states its length");
     check(hex(small).find("5b7b") == 0, "preferring size, it does not");
@@ -756,6 +758,15 @@ void counted_containers() {
     check(hint && *hint == 3, "a counted array states its length");
     check(!reader::over(small).size_hint(), "an unbounded one does not, rather than counting");
     check(reader::over(small).size() == 3, "though size() will still walk it");
+
+    // As a table, the count is in the header whichever is preferred.
+    const auto table = encode(three);
+    const auto table_hint = reader::over(table).size_hint();
+    check(table_hint && *table_hint == 3, "a table states its length");
+    // Not the smallest here: a table stores an int at its declared width, where an array of
+    // objects narrows each small value to a byte. The table wins once records are many or
+    // values are wide, which is what it is for.
+    check(table.size() > small.size(), "and stores every number at its declared width");
 
     // An array of numbers is typed whichever is preferred, and so always carries a count.
     const auto typed = encode(std::vector<std::uint16_t> { 900, 901, 902, 903, 904 });

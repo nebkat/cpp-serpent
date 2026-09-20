@@ -30,6 +30,7 @@
 #include <span>
 #include <string_view>
 #include <tuple>
+#include <vector>
 
 namespace serpent::bjdata::soa {
 
@@ -396,15 +397,33 @@ public:
         return this->body + record * this->layout.record_bytes + top.offset;
     }
 
-    /** The text a dictionary field's index names, or nothing for an index past the entries. */
+    /**
+     * The text a dictionary field's index names, or nothing for an index past the entries.
+     *
+     * The entries are walked once, the first time a field's dictionary is asked, into a list
+     * of where each begins; after that a lookup is a load.
+     */
     [[nodiscard]] std::optional<std::string_view> dictionary_entry(const field &field, std::uint64_t index) const noexcept {
         if (index >= field.entries) return std::nullopt;
-        bjdata::detail::cursor source { this->body, field.detail, this->limit };
-        for (std::uint64_t skipped = 0; skipped < index; ++skipped) bjdata::detail::skip_key(source);
-        const auto text = bjdata::detail::read_key(source);
-        if (!source.ok()) return std::nullopt;
-        return text;
+        const auto &entries = this->dictionary_of(field);
+        if (entries.size() != field.entries) return std::nullopt;
+        return entries[static_cast<std::size_t>(index)];
     }
+
+private:
+    mutable std::array<std::vector<std::string_view>, max_fields> dictionaries {};
+
+    [[nodiscard]] const std::vector<std::string_view> &dictionary_of(const field &field) const noexcept {
+        auto &entries = this->dictionaries[static_cast<std::size_t>(&field - this->layout.fields.data())];
+        if (!entries.empty()) return entries;
+        entries.reserve(field.entries);
+        bjdata::detail::cursor source { this->body, field.detail, this->limit };
+        for (std::uint32_t index = 0; index < field.entries && source.ok(); ++index) entries.push_back(bjdata::detail::read_key(source));
+        if (!source.ok()) entries.clear();
+        return entries;
+    }
+
+public:
 
     /** The text an offset field's index names, or nothing for an index past the table. */
     [[nodiscard]] std::optional<std::string_view> offset_entry(const field &field, std::uint64_t index) const noexcept {

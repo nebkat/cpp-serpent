@@ -20,6 +20,21 @@
  * table of them, and is somewhat slower: 36 KB of code rather than 67 KB, built for arm64. Left undefined, Żmij chooses that for itself
  * when the compiler is optimising for size. The CMake option of the same name sets it.
  */
+/**
+ * Whether the compiler has C++26 reflection with expansion statements, which the described-type
+ * paths need. <meta> is includable whether or not reflection is enabled, but only defines
+ * __cpp_lib_reflection when it is, which makes it the gate rather than __cpp_reflection. Settled
+ * here so that every header agrees, whatever order they are included in.
+ */
+#if __has_include(<meta>) && defined(__cpp_expansion_statements)
+#include <meta>
+#endif
+#if defined(__cpp_lib_reflection) && defined(__cpp_expansion_statements)
+#define SERPENT_HAS_REFLECTION 1
+#else
+#define SERPENT_HAS_REFLECTION 0
+#endif
+
 #ifndef SERPENT_USE_ZMIJ
 #define SERPENT_USE_ZMIJ 0
 #endif

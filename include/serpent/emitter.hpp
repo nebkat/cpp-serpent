@@ -342,6 +342,27 @@ public:
         return reinterpret_cast<char *>(this->room + this->room_used);
     }
 
+    /**
+     * Room for exactly `bytes`, which will all be written: demanded of a sink that lends, so
+     * that a fixed buffer without it latches its overflow as it does for a write it refuses.
+     * Null, and this emitter failed, where the room cannot be had in one piece.
+     */
+    [[gnu::noinline]] char *demand_room_for(std::size_t bytes) noexcept {
+        if (!this->ok()) return nullptr;
+        if (bytes <= this->room_size - this->room_used) return reinterpret_cast<char *>(this->room + this->room_used);
+        if (this->lend_room != nullptr) {
+            if (!this->renew_room(bytes, bytes)) return nullptr;
+        } else if (bytes > buffer_capacity || !this->flush()) {
+            this->fail(errc::sink_failed);
+            return nullptr;
+        }
+        if (bytes > this->room_size - this->room_used) {
+            this->fail(errc::sink_failed);
+            return nullptr;
+        }
+        return reinterpret_cast<char *>(this->room + this->room_used);
+    }
+
     /** Everything put() is not: a flush, an oversized write, or a sink that has failed. */
     [[gnu::noinline]] void put_overflowing(std::span<const std::byte> bytes) noexcept {
         if (!this->ok()) return;

@@ -228,7 +228,12 @@ public:
     [[nodiscard]] std::optional<T> as() const noexcept {
         if constexpr (std::same_as<T, bool>)
             return this->read_bool();
-        else if constexpr (std::same_as<T, std::string_view>)
+        else if constexpr (std::same_as<T, char>) {
+            // A character is the byte under a C marker, not a one-byte number.
+            const auto text = this->read_text();
+            if (!text || text->size() != 1 || this->element != marker::character) return std::nullopt;
+            return text->front();
+        } else if constexpr (std::same_as<T, std::string_view>)
             return this->read_text();
         else if constexpr (std::same_as<T, std::span<const std::byte>>)
             return this->read_binary();

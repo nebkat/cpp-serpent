@@ -70,10 +70,38 @@ template<typename T>
 } // namespace detail
 
 /** @brief Emits BJData into a sink, holding no buffer of its own. */
+/**
+ * What a writer may do beyond the draft 3 grammar. A consumer that reads draft 3 only needs
+ * every option off.
+ */
+struct writer_options {
+    /**
+     * Whether a range of two or more records of one described type - every member a number, a
+     * boolean, a character, text, a mapped enumeration, or a nested record or fixed run of such
+     * - is written as a draft 4 Structure-of-Arrays table rather than an array of objects.
+     */
+    bool tables = true;
+};
+
 template<prefer Preference = prefer::size>
+class basic_writer;
+
+#if SERPENT_HAS_REFLECTION
+namespace soa {
+template<typename T>
+consteval bool is_table_record();
+template<prefer Preference, std::ranges::forward_range R>
+    requires (is_table_record<std::remove_cvref_t<std::ranges::range_value_t<R>>>())
+void write_table(basic_writer<Preference> &out, const R &items) noexcept;
+} // namespace soa
+#endif
+
+template<prefer Preference>
 class basic_writer : public byte_emitter {
     friend class array_scope<Preference>;
     friend class object_scope<Preference>;
+
+    writer_options options {};
 
     void begin_array() noexcept {
         if (!this->push(false)) return;
@@ -103,7 +131,7 @@ class basic_writer : public byte_emitter {
 
 public:
     template<sink S>
-    explicit basic_writer(S &out) noexcept : byte_emitter(out) {}
+    explicit basic_writer(S &out, writer_options options = {}) noexcept : byte_emitter(out), options(options) {}
 
     template<typename F>
         requires (!sink<F> && std::invocable<F &, std::span<const std::byte>>)
@@ -213,6 +241,20 @@ public:
      * that much room in one piece, and nothing has been written: the members are then written
      * the usual way, one at a time.
      */
+    /**
+     * Writes one record of a table into room claimed once: the bytes of its fields, which
+     * carry no markers and no keys. A record is not a value the grammar knows, so nothing
+     * about the open container changes; a destination without that much room in one piece
+     * fails the write, since a record cannot be put in parts.
+     */
+    template<typename Write>
+    [[nodiscard]] bool compose_record(std::size_t bytes, Write write) noexcept {
+        char *const to = this->demand_room_for(bytes);
+        if (to == nullptr) return false;
+        this->used(write(to));
+        return this->ok();
+    }
+
     template<typename Write>
     [[nodiscard]] bool compose_members(std::size_t at_most, Write write) noexcept {
         if (!this->inside_object()) return false;
@@ -457,6 +499,18 @@ void basic_writer<Preference>::range(const R &items) noexcept {
     constexpr bool numbers = std::ranges::forward_range<R>
             && ((std::integral<element> && !std::same_as<element, bool> && !std::same_as<element, char>)
                     || std::floating_point<element>);
+    // A range of records every member of which a schema can say is a table, given two or more:
+    // one that opens with `[` as an array does. Declared after this writer, so named through
+    // its namespace, and only where the range's element is a record.
+#if SERPENT_HAS_REFLECTION
+    if constexpr (std::ranges::forward_range<R> && requires { soa::write_table(*this, items); }) {
+        if (this->options.tables && std::ranges::distance(items) >= 2) {
+            soa::write_table(*this, items);
+            return;
+        }
+    }
+#endif
+
     if constexpr (numbers) {
         this->typed_header(detail::own_marker<element>(), static_cast<std::uint64_t>(std::ranges::distance(items)));
         if constexpr (std::ranges::contiguous_range<R>) {

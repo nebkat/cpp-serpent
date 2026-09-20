@@ -101,8 +101,16 @@ SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(detail::cursor &, marker ki
     return true;
 }
 
+/** A character: the byte under a C marker, which the writer produces for a char. */
+SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(detail::cursor &scan, marker kind, char &into) noexcept {
+    if (kind != marker::character || scan.remaining() < 1) return false;
+    into = static_cast<char>(*scan.position);
+    scan.advance(1);
+    return true;
+}
+
 template<std::integral T>
-    requires (!std::same_as<T, bool>)
+    requires (!std::same_as<T, bool> && !std::same_as<T, char>)
 SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(detail::cursor &scan, marker kind, T &into) noexcept {
     const auto taken = load_integer(kind, scan.position, scan.remaining(), into);
     if (taken) scan.advance(*taken);

@@ -15,6 +15,7 @@
 #include <serpent/bjdata/direct.hpp>
 #include <serpent/bjdata/reader.hpp>
 #include <serpent/bjdata/writer.hpp>
+#include <serpent/bjdata/soa_write.hpp>
 #include <serpent/config.hpp>
 #include <serpent/member_runs.hpp>
 #include <serpent/reflect.hpp>
@@ -175,7 +176,7 @@ private:
     /** A number that is not a boolean: under the marker of its own type its payload is itself. */
     template<typename Field>
     static constexpr bool fixed_width =
-            (std::integral<Field> && !std::same_as<Field, bool>) || std::floating_point<Field>;
+            (std::integral<Field> && !std::same_as<Field, bool> && !std::same_as<Field, char>) || std::floating_point<Field>;
 
     /** A key as this library writes it, and the markers that follow it. */
     template<const std::string_view &Name, marker... Markers>
@@ -325,6 +326,11 @@ bool read_table_field(const soa::table &source, const soa::field &field, const s
             return true;
         }
         return false;
+    } else if constexpr (std::same_as<T, char>) {
+        // A character member is a C field, or a one-byte number's bits.
+        if (field.kind != field_kind::scalar || field.width != 1) return false;
+        into = static_cast<char>(*at);
+        return true;
     } else if constexpr (std::integral<T> || std::floating_point<T>) {
         if (field.kind != field_kind::scalar) return false;
         if constexpr (std::integral<T>) {
@@ -339,6 +345,57 @@ bool read_table_field(const soa::table &source, const soa::field &field, const s
         } else {
             return direct::load_real(field.type, at, field.width, into).has_value();
         }
+    } else if constexpr (mapped_enum<T>) {
+        // Text forms come from a dictionary, fixed text or a character; number forms from a
+        // scalar. A value that is no form takes the fallback, as anywhere else.
+        constexpr auto forms = enum_wire_forms<T>();
+        std::optional<std::string_view> text;
+        std::optional<std::int64_t> number;
+        switch (field.kind) {
+        case field_kind::dictionary: {
+            std::uint64_t index = 0;
+            if (!direct::load_integer(field.type, at, field.width, index)) return false;
+            text = source.dictionary_entry(field, index);
+            break;
+        }
+        case field_kind::offsets: {
+            std::uint64_t index = 0;
+            if (!direct::load_integer(field.type, at, field.width, index)) return false;
+            text = source.offset_entry(field, index);
+            break;
+        }
+        case field_kind::text: text = table::fixed_text(field, at); break;
+        case field_kind::scalar:
+            if (field.type == marker::character) {
+                text = std::string_view { reinterpret_cast<const char *>(at), 1 };
+            } else {
+                std::int64_t whole = 0;
+                if (!direct::load_integer(field.type, at, field.width, whole)) return false;
+                number = whole;
+            }
+            break;
+        default: return false;
+        }
+        for (const auto &form : forms) {
+            const bool matches = (text && form.wire.held == as::kind::text && form.wire.text() == *text)
+                    || (number && form.wire.held == as::kind::integer && form.wire.whole == *number);
+            if (matches) {
+                into = form.value;
+                return true;
+            }
+        }
+        for (const auto &form : forms) {
+            if (form.is_fallback) {
+                into = form.value;
+                return true;
+            }
+        }
+        return false;
+    } else if constexpr (std::is_enum_v<T>) {
+        std::underlying_type_t<T> underlying {};
+        if (field.kind != field_kind::scalar || !direct::load_integer(field.type, at, field.width, underlying)) return false;
+        into = static_cast<T>(underlying);
+        return true;
     } else if constexpr (serpent::detail::string_like<T> && requires(T &text, std::string_view view) { text.assign(view); }) {
         std::optional<std::string_view> text;
         switch (field.kind) {

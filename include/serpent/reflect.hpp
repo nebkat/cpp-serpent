@@ -18,19 +18,13 @@
 #include <variant>
 #include <vector>
 
+#include <serpent/config.hpp>
+
 #include <cstddef>
 
-// <meta> is includable whether or not reflection is enabled, but only defines
-// __cpp_lib_reflection when it is, which makes it the gate rather than __cpp_reflection.
-#if __has_include(<meta>) && defined(__cpp_expansion_statements)
+#if SERPENT_HAS_REFLECTION
 #include <meta>
 #include <tuple>
-#endif
-
-#if defined(__cpp_lib_reflection) && defined(__cpp_expansion_statements)
-#define SERPENT_HAS_REFLECTION 1
-#else
-#define SERPENT_HAS_REFLECTION 0
 #endif
 
 namespace serpent {
@@ -1321,6 +1315,57 @@ bool emit_mapped_enum(Emitter &out, E value) {
         return detail::emit_annotated_enum(out, value);
     } else {
         return false;
+    }
+}
+
+/**
+ * Every value a mapped enumeration can be on the wire, in declaration order, with the
+ * enumerator each stands for - the one list behind both ways an enumeration is mapped, for a
+ * format that wants to lay the forms out once rather than write one at a time. Skipped and
+ * excluded enumerators are not in it; whether an entry is the fallback is.
+ */
+template<typename E>
+struct enum_form {
+    E value {};
+    as wire { nullptr };
+    bool is_fallback = false;
+};
+
+template<typename E>
+    requires mapped_enum<E>
+consteval auto enum_wire_forms() {
+    if constexpr (detail::tabulated_enum<E>) {
+        constexpr std::size_t count = [] {
+            std::size_t total = 0;
+            for (const auto &entry : describe<E>::values)
+                if (!entry.is_excluded) ++total;
+            return total;
+        }();
+        std::array<enum_form<E>, count> forms {};
+        std::size_t at = 0;
+        for (const auto &entry : describe<E>::values)
+            if (!entry.is_excluded) forms[at++] = { entry.value, entry.wire, entry.is_fallback };
+        return forms;
+    } else {
+#if SERPENT_HAS_REFLECTION
+        constexpr std::size_t count = [] {
+            std::size_t total = 0;
+            template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E)))
+                if constexpr (!detail::has_annotation<skip>(enumerator)) ++total;
+            return total;
+        }();
+        std::array<enum_form<E>, count> forms {};
+        std::size_t at = 0;
+        template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+            if constexpr (!detail::has_annotation<skip>(enumerator)) {
+                forms[at++] = { std::meta::extract<E>(enumerator), detail::wire_form<E, enumerator>(),
+                    detail::has_annotation<fallback>(enumerator) };
+            }
+        }
+        return forms;
+#else
+        return std::array<enum_form<E>, 0> {};
+#endif
     }
 }
 

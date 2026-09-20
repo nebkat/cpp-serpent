@@ -98,4 +98,18 @@ offset-table text, nested records and fixed runs. A member of the type that the 
 field for keeps its value unless the type insists on it; a field the type has no member for is
 skipped. A table with more than one dimension is read flat, in record order.
 
-Writing tables is not implemented yet; a `std::vector<T>` is written as an array of objects.
+Writing goes the other way from the type: a range of two or more records of a described type
+whose every member a schema can say — a number, a boolean, a character, text, a mapped
+enumeration, or a nested record or fixed run of those — is written as a table. The schema comes
+from the type, so it is the same for every document the type produces: numbers at their declared
+width, a mapped enumeration as a dictionary of its names (or the narrowest integer that holds its
+numbers), a plain enumeration as its underlying number. Text is the one thing decided from the
+data, per column: single characters as `C`, up to 255 distinct values as a dictionary, more as an
+offset table. Each record is then one piece, its members back to back with no keys and no
+markers, which is why a table of ten thousand numeric records writes in a third of the time of
+the array of objects and in a fraction of the bytes.
+
+A type with an optional, a variant, a growable container or a `value` member is not a record;
+neither is a single element or an empty range. Those write as arrays of objects, as does anything
+when the writer is told `{ .tables = false }` — for a consumer that reads draft 3 only, such as
+the DOM library. A table of more than one dimension is not written.

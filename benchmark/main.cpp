@@ -373,9 +373,11 @@ static void check_results(const std::vector<reading> &values, const std::string 
         agree("our JSON parses as glaze's", read && glazed.size() == values.size() ? glazed.at(9999).station : "",
                 values.at(9999).station);
     }
+    // The DOM library reads draft 3, so it is shown the array-of-objects form; the table the
+    // records would be by default is draft 4.
     agree("our BJData reads as nlohmann's",
             other::from_bjdata(std::vector<std::uint8_t>(
-                                       std::from_range, bjdata::encode(values) | std::views::transform([](std::byte b) {
+                                       std::from_range, bjdata::encode(values, { .tables = false }) | std::views::transform([](std::byte b) {
                                            return static_cast<std::uint8_t>(b);
                                        })))
                     .get<std::vector<reading>>()
@@ -461,8 +463,13 @@ static void check_results(const std::vector<reading> &values, const std::string 
 template<typename T>
 static void typed_workload(const std::string &workload, const std::vector<T> &values) {
     const std::string text = json::encode(values);
-    const auto fast = bjdata::encode<bjdata::prefer::speed>(values);
-    const auto small = bjdata::encode<bjdata::prefer::size>(values);
+    // Binary is each library's own format: BJData as an array of objects, written for speed or
+    // for size, and - where the record type allows - as a draft 4 table, which is what the
+    // library writes for such records unless told not to.
+    const auto fast = bjdata::encode<bjdata::prefer::speed>(values, { .tables = false });
+    const auto small = bjdata::encode<bjdata::prefer::size>(values, { .tables = false });
+    const auto table = bjdata::encode(values);
+    const bool tabled = table.size() > 2 && table[1] == std::byte { '$' };
     std::string beve, glaze_cbor;
     std::ignore = glz::write_beve(values, beve);
     std::ignore = glz::write_cbor(values, glaze_cbor);
@@ -504,9 +511,13 @@ static void typed_workload(const std::string &workload, const std::vector<T> &va
             [&] { return other::parse(text).get<std::vector<T>>().size(); });
 
     bench::measure(workload, "binary encode", "serpent", fast.size(),
-            [&] { return bjdata::encode<bjdata::prefer::speed>(values).size(); });
+            [&] { return bjdata::encode<bjdata::prefer::speed>(values, { .tables = false }).size(); });
     bench::measure(workload, "binary encode", "serpent (for size)", small.size(),
-            [&] { return bjdata::encode<bjdata::prefer::size>(values).size(); });
+            [&] { return bjdata::encode<bjdata::prefer::size>(values, { .tables = false }).size(); });
+    if (tabled) {
+        bench::measure(workload, "binary encode", "serpent (table)", table.size(),
+                [&] { return bjdata::encode(values).size(); });
+    }
     bench::measure(workload, "binary encode", "glaze", beve.size(), [&] {
         std::string buffer;
         std::ignore = glz::write_beve(values, buffer);
@@ -524,6 +535,10 @@ static void typed_workload(const std::string &workload, const std::vector<T> &va
             [&] { return bjdata::decode<std::vector<T>>(fast)->size(); });
     bench::measure(workload, "binary decode", "serpent (for size)", small.size(),
             [&] { return bjdata::decode<std::vector<T>>(small)->size(); });
+    if (tabled) {
+        bench::measure(workload, "binary decode", "serpent (table)", table.size(),
+                [&] { return bjdata::decode<std::vector<T>>(table)->size(); });
+    }
     bench::measure(workload, "binary decode", "glaze", beve.size(), [&] {
         std::vector<T> out;
         return glz::read_beve(out, beve) ? 0 : out.size();
@@ -689,7 +704,7 @@ int main(int argc, char **argv) {
 
     if (!bench::chosen.list_only) check_results(readings, canada, citm, twitter);
 
-    bench::row_order = { "serpent", "serpent (bounded)", "serpent (for size)", "serpent (indexed)", "glaze", "glaze (bounded)", "glaze (CBOR)",
+    bench::row_order = { "serpent", "serpent (bounded)", "serpent (for size)", "serpent (table)", "serpent (indexed)", "glaze", "glaze (bounded)", "glaze (CBOR)",
         "glaze (size build)", "simdjson", "yyjson", "rapidjson", "nlohmann" };
     std::printf("\nmeasuring ");
     your_own_types(readings);
