@@ -49,9 +49,12 @@ class byte_emitter {
      * inlined and a three-byte write costs about what a hundred-byte one does. Writers emit at
      * token granularity - a brace, a key, a separator - so without this the plumbing costs more
      * than the encoding.
+     *
+     * Not zeroed: nothing reads a byte of it that has not been written, and zeroing it would
+     * cost every writer, including one over a sink that lends its own room and never uses it.
      */
     static constexpr std::size_t buffer_capacity = 256;
-    std::byte buffer[buffer_capacity] {};
+    std::byte buffer[buffer_capacity];
 
     /**
      * Where writes actually land.
