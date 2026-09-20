@@ -122,17 +122,31 @@ public:
      * `text` between quotes with its escapes, stored at `to`, returning where it ends. For room
      * already claimed: at most six bytes per character, which is what \u00XX takes.
      */
-    static char *quote_into(char *to, std::string_view text) noexcept {
+    SERPENT_ALWAYS_INLINE static char *quote_into(char *to, std::string_view text) noexcept {
         *to++ = '"';
         const char *run = text.data();
         const char *const end = run + text.size();
-        while (true) {
-            const char *const stop = scanner::end_of_plain_text(run, end);
-            std::memcpy(to, run, static_cast<std::size_t>(stop - run));
-            to += stop - run;
-            if (stop == end) break;
-            to = escape_into(to, *stop);
-            run = stop + 1;
+        // Eight bytes are copied and then looked at, so that copying and checking are one pass
+        // over the text: a word with nothing to escape in it is already in place. One that has
+        // is written again from the byte that needs it. The room a caller claimed allows for the
+        // copy running up to seven bytes past a byte that stops it.
+#if SERPENT_WIDE_STRING_SCAN
+        while (end - run >= 8) {
+            std::uint64_t word;
+            std::memcpy(&word, run, sizeof word);
+            std::memcpy(to, &word, sizeof word);
+            if (scanner::holds_byte_to_escape(word)) break;
+            run += 8;
+            to += 8;
+        }
+#endif
+        while (run != end) {
+            const char value = *run++;
+            if ((scanner::character_class[static_cast<unsigned char>(value)] & scanner::class_string_body) != 0) {
+                *to++ = value;
+            } else {
+                to = escape_into(to, value);
+            }
         }
         *to++ = '"';
         return to;

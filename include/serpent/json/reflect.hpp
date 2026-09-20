@@ -485,7 +485,13 @@ private:
             if constexpr (runs::within(member, First, Last) && runs::text[runs::position_of(member)]) {
                 const std::string_view text { this->value.[:member:] };
                 const bool plain = scanner::end_of_plain_text(text.data(), text.data() + text.size()) == text.data() + text.size();
+#if SERPENT_WIDE_STRING_SCAN
+                // Seven more for a plain string: quote_into copies a word at a time and may lay
+                // down that much past a byte it then rewrites.
+                bound += plain ? text.size() + 7 : text.size() * 6;
+#else
                 bound += plain ? text.size() : text.size() * 6;
+#endif
             }
         }
         if (bound > composed_at_most) return std::nullopt;
