@@ -43,6 +43,11 @@ namespace serpent {
  * code that started it has gone. That ownership is the whole point of it, and the reason it is
  * not what the rest of the library does.
  */
+class value;
+
+/** One member of an object: its name, and what is under it. */
+struct member;
+
 namespace detail {
 
 /**
@@ -177,26 +182,44 @@ public:
      * person, and the order the fields were written in is the order they were meant in. Neither
      * format ascribes meaning to key order, so nothing downstream depends on the choice.
      */
+    /**
+     * The members of an object, in the order they were added.
+     *
+     * Insertion order rather than sorted, because a document built by hand is usually read by a
+     * person, and the order the fields were written in is the order they were meant in. Neither
+     * format ascribes meaning to key order, so nothing downstream depends on the choice.
+     *
+     * One allocation, like an array: the members sit in a run, and a name is a value like any
+     * other - inline where it is short, which nearly every name is, and borrowed from an arena
+     * where a document owns it. That a name is a value is what lets one span describe the
+     * members of an owned object and of one inside a document.
+     */
     class object {
-    public:
-        using entry = std::pair<std::string, value>;
-
-    private:
-        std::vector<entry> entries;
+        detail::run<member> *entries = nullptr;
 
     public:
+        using entry = member;
+
         object() = default;
-        object(std::initializer_list<std::pair<const std::string_view, value>> members) {
-            this->entries.reserve(members.size());
-            for (const auto &[name, held] : members) this->entries.emplace_back(std::string { name }, held);
+        object(std::initializer_list<std::pair<const std::string_view, value>> members);
+        ~object();
+        object(const object &other);
+        object(object &&other) noexcept : entries(std::exchange(other.entries, nullptr)) {}
+        object &operator=(const object &other);
+        object &operator=(object &&other) noexcept {
+            if (this != &other) { this->clear(); this->entries = std::exchange(other.entries, nullptr); }
+            return *this;
         }
 
-        [[nodiscard]] auto begin() const noexcept { return this->entries.begin(); }
-        [[nodiscard]] auto end() const noexcept { return this->entries.end(); }
-        [[nodiscard]] auto begin() noexcept { return this->entries.begin(); }
-        [[nodiscard]] auto end() noexcept { return this->entries.end(); }
-        [[nodiscard]] std::size_t size() const noexcept { return this->entries.size(); }
-        [[nodiscard]] bool empty() const noexcept { return this->entries.empty(); }
+        [[nodiscard]] const member *begin() const noexcept;
+        [[nodiscard]] const member *end() const noexcept;
+        [[nodiscard]] member *begin() noexcept;
+        [[nodiscard]] member *end() noexcept;
+        [[nodiscard]] std::size_t size() const noexcept;
+        [[nodiscard]] bool empty() const noexcept { return this->size() == 0; }
+        [[nodiscard]] std::span<const member> members() const noexcept;
+
+        void clear() noexcept;
 
         [[nodiscard]] const value *find(std::string_view name) const noexcept;
         [[nodiscard]] value *find(std::string_view name) noexcept;
@@ -210,18 +233,10 @@ public:
          * members one after another and calls coalesce_duplicates() once: looking on every
          * addition costs an object of N members N-squared comparisons.
          */
-        void append(std::string name, value item) { this->entries.emplace_back(std::move(name), std::move(item)); }
+        void append(std::string_view name, value item);
 
-        /**
-         * Takes the members gathered in `from`, sized exactly to them, and leaves `from` empty
-         * with its capacity - for a builder that gathers into the one vector object after
-         * object, so that no object's members are grown into place.
-         */
-        void take(std::vector<entry> &from) {
-            this->entries.reserve(from.size());
-            for (auto &member : from) this->entries.push_back(std::move(member));
-            from.clear();
-        }
+        /** Room for as many members, so a builder that knows the count grows the run once. */
+        void reserve(std::size_t members);
 
         /** Leaves one member per name - the last one added under it, where the first was. */
         void coalesce_duplicates();
@@ -737,33 +752,113 @@ private:
     }
 };
 
+/**
+ * One member of an object.
+ *
+ * The name is a value rather than a std::string so that the same member serves an object that
+ * owns its names and one inside a document that borrows them - and so that a short name, which
+ * nearly every name is, costs no allocation at all.
+ */
+struct member {
+    value key;
+    value held;
+
+    [[nodiscard]] std::string_view name() const noexcept {
+        return this->key.as<std::string_view>().value_or(std::string_view {});
+    }
+
+    friend bool operator==(const member &left, const member &right) noexcept {
+        return left.key == right.key && left.held == right.held;
+    }
+};
+
+using member_run = detail::run<member>;
+
+inline value::object::object(std::initializer_list<std::pair<const std::string_view, value>> members) {
+    this->entries = member_run::reserved(static_cast<std::uint32_t>(members.size()));
+    for (const auto &[name, held] : members)
+        this->entries = member_run::appended(this->entries, member { value { name }, held });
+}
+
+inline value::object::~object() { member_run::release(this->entries); }
+
+inline value::object::object(const object &other) : entries(member_run::copy_of(other.entries)) {}
+
+inline value::object &value::object::operator=(const object &other) {
+    if (this != &other) {
+        auto *copy = member_run::copy_of(other.entries);
+        member_run::release(this->entries);
+        this->entries = copy;
+    }
+    return *this;
+}
+
+inline void value::object::clear() noexcept {
+    member_run::release(this->entries);
+    this->entries = nullptr;
+}
+
+inline const member *value::object::begin() const noexcept {
+    return this->entries == nullptr ? nullptr : this->entries->begin();
+}
+inline const member *value::object::end() const noexcept {
+    return this->entries == nullptr ? nullptr : this->entries->end();
+}
+inline member *value::object::begin() noexcept {
+    return this->entries == nullptr ? nullptr : this->entries->begin();
+}
+inline member *value::object::end() noexcept {
+    return this->entries == nullptr ? nullptr : this->entries->end();
+}
+inline std::size_t value::object::size() const noexcept {
+    return this->entries == nullptr ? 0 : this->entries->size();
+}
+inline std::span<const member> value::object::members() const noexcept {
+    if (this->entries == nullptr) return {};
+    const auto *first = static_cast<const detail::run<member> *>(this->entries)->data();
+    return { first, this->entries->size() };
+}
+
+inline void value::object::append(std::string_view name, value item) {
+    this->entries = member_run::appended(this->entries, member { value { name }, std::move(item) });
+}
+
+inline void value::object::reserve(std::size_t members) {
+    if (this->entries != nullptr || members == 0) return;
+    this->entries = member_run::reserved(static_cast<std::uint32_t>(members));
+}
+
 inline const value *value::object::find(std::string_view name) const noexcept {
-    const auto found = std::ranges::find(this->entries, name, [](const auto &entry) {
-        return std::string_view { entry.first };
-    });
-    return found != this->entries.end() ? &found->second : nullptr;
+    for (const auto &entry : this->members())
+        if (entry.name() == name) return &entry.held;
+    return nullptr;
 }
 
 inline value *value::object::find(std::string_view name) noexcept {
-    const auto found = std::ranges::find(this->entries, name, [](const auto &entry) {
-        return std::string_view { entry.first };
-    });
-    return found != this->entries.end() ? &found->second : nullptr;
+    for (auto *entry = this->begin(); entry != this->end(); ++entry)
+        if (entry->name() == name) return &entry->held;
+    return nullptr;
 }
 
 inline value &value::object::operator[](std::string_view name) {
     if (auto *found = this->find(name)) return *found;
-    return this->entries.emplace_back(std::string { name }, value {}).second;
+    this->append(name, value {});
+    return this->entries->data()[this->entries->size() - 1].held;
 }
 
 inline void value::object::coalesce_duplicates() {
-    // Few enough members that a hash table would cost more than it saves, or none at all.
-    if (this->entries.size() < 16) {
-        for (std::size_t index = 0; index < this->entries.size(); ++index) {
-            for (std::size_t later = index + 1; later < this->entries.size();) {
-                if (this->entries[later].first == this->entries[index].first) {
-                    this->entries[index].second = std::move(this->entries[later].second);
-                    this->entries.erase(this->entries.begin() + static_cast<std::ptrdiff_t>(later));
+    const std::size_t count = this->size();
+    if (count < 2) return;
+
+    // Few enough members that a hash table would cost more than it saves.
+    if (count < 16) {
+        auto *entries = this->entries->data();
+        for (std::size_t index = 0; index < this->size(); ++index) {
+            for (std::size_t later = index + 1; later < this->size();) {
+                if (entries[later].name() == entries[index].name()) {
+                    entries[index].held = std::move(entries[later].held);
+                    member_run::erase_at(this->entries, later);
+                    entries = this->entries->data();
                 } else {
                     ++later;
                 }
@@ -775,7 +870,7 @@ inline void value::object::coalesce_duplicates() {
     // A flat table of entry indices, open-addressed, at least twice the size it needs: on the
     // stack for any object of ordinary size, so that checking costs no allocation at all.
     std::size_t slots = 32;
-    while (slots < this->entries.size() * 2) slots *= 2;
+    while (slots < count * 2) slots *= 2;
     std::array<std::uint32_t, 256> near {};
     std::vector<std::uint32_t> far;
     std::uint32_t *table = near.data();
@@ -783,9 +878,10 @@ inline void value::object::coalesce_duplicates() {
         far.assign(slots, 0);
         table = far.data();
     }
-    // Enough hash to spread names that differ in length or anywhere in their first or last
-    // eight bytes, which is nearly all of them - mixed so that every byte reaches the low bits
-    // the table is indexed by. A collision only costs the comparison that decides anyway.
+
+    // Both ends of the name and its length, so that names alike at the front - which keys of a
+    // document usually are - still land in different slots. Not a hash anybody should rely on:
+    // the table is indexed by it. A collision only costs the comparison that decides anyway.
     const auto hash_of = [](std::string_view name) noexcept {
         std::uint64_t head = 0;
         std::uint64_t tail = 0;
@@ -798,43 +894,46 @@ inline void value::object::coalesce_duplicates() {
         mixed ^= mixed >> 32;
         return mixed;
     };
-    std::size_t kept = 0;
-    for (std::size_t index = 0; index < this->entries.size(); ++index) {
-        const std::string_view name = this->entries[index].first;
+
+    auto *entries = this->entries->data();
+    std::uint32_t kept = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        const std::string_view name = entries[index].name();
         std::size_t slot = hash_of(name) & (slots - 1);
         while (true) {
             if (table[slot] == 0) {
-                table[slot] = static_cast<std::uint32_t>(kept + 1);
-                if (kept != index) this->entries[kept] = std::move(this->entries[index]);
+                table[slot] = kept + 1;
+                if (kept != index) entries[kept] = std::move(entries[index]);
                 ++kept;
                 break;
             }
-            auto &earlier = this->entries[table[slot] - 1];
-            if (earlier.first == name) {
-                earlier.second = std::move(this->entries[index].second);
+            auto &earlier = entries[table[slot] - 1];
+            if (earlier.name() == name) {
+                earlier.held = std::move(entries[index].held);
                 break;
             }
             slot = (slot + 1) & (slots - 1);
         }
     }
-    this->entries.resize(kept);
+    member_run::shrink_to(this->entries, kept);
 }
 
 inline bool operator==(const value::object &left, const value::object &right) noexcept {
     if (left.size() != right.size()) return false;
-    return std::ranges::all_of(left, [&right](const auto &entry) {
-        const auto *other = right.find(entry.first);
-        return other != nullptr && *other == entry.second;
+    return std::ranges::all_of(left.members(), [&right](const member &entry) {
+        const auto *other = right.find(entry.name());
+        return other != nullptr && *other == entry.held;
     });
 }
 
 inline bool value::object::erase(std::string_view name) {
-    const auto found = std::ranges::find(this->entries, name, [](const auto &entry) {
-        return std::string_view { entry.first };
-    });
-    if (found == this->entries.end()) return false;
-    this->entries.erase(found);
-    return true;
+    for (std::size_t index = 0; index < this->size(); ++index) {
+        if (this->entries->data()[index].name() == name) {
+            member_run::erase_at(this->entries, index);
+            return true;
+        }
+    }
+    return false;
 }
 
 class value_array_scope;
@@ -1099,7 +1198,7 @@ public:
     };
 
     class member_iterator {
-        using held = std::pair<std::string, value>;
+        using held = member;
         const held *position = nullptr;
 
     public:
@@ -1192,8 +1291,9 @@ struct value_reader::key_value {
 };
 
 inline value_reader::key_value value_reader::member_iterator::operator*() const noexcept {
-    return key_value { this->position->first, value_reader { this->position->second } };
+    return key_value { this->position->name(), value_reader { this->position->held } };
 }
+
 
 /** Reads a typed value straight out of a tree, as decode() does out of bytes. */
 template<typename T>
@@ -1224,9 +1324,9 @@ struct serializer<value, void> {
             return;
         case kind::object: {
             const auto scope = out.object();
-            for (const auto &[name, member] : *item.as_object()) {
-                out.key(name);
-                out.value(member);
+            for (const auto &entry : item.as_object()->members()) {
+                out.key(entry.name());
+                out.value(entry.held);
             }
             return;
         }

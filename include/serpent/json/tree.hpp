@@ -44,7 +44,7 @@ class tree_builder {
     // container is gathered while the one above it still is; each keeps its capacity from one
     // container to the next. One for every depth there can be, never grown: a container holds
     // a reference to its own while those below it are gathered.
-    std::array<std::vector<serpent::value::object::entry>, max_depth + 1> members_at {};
+    std::array<std::vector<serpent::member>, max_depth + 1> members_at {};
     std::array<std::vector<serpent::value>, max_depth + 1> elements_at {};
 
 public:
@@ -182,10 +182,14 @@ private:
         do {
             scanner::skip_whitespace(this->scan);
             auto &[name, held] = gathered.emplace_back();
-            if (!direct::read(this->scan, name)) {
+            // A name is a value like any other now, so it decodes into the scratch buffer and
+            // lands inline where it is short - which nearly every name is.
+            this->scratch.clear();
+            if (!direct::read(this->scan, this->scratch)) {
                 if (this->scan.ok()) this->scan.fail(errc::unexpected_character);
                 return false;
             }
+            name.assign(this->scratch);
             scanner::skip_whitespace(this->scan);
             if (!this->scan.need(1)) return false;
             if (this->scan.take() != ':') {
@@ -195,7 +199,9 @@ private:
             if (!this->build(held, depth + 1)) return false;
         } while (!this->closed('}') && this->scan.ok());
         if (!this->scan.ok()) return false;
-        members.take(gathered);
+        members.reserve(gathered.size());
+        for (auto &entry : gathered) members.append(entry.name(), std::move(entry.held));
+        gathered.clear();
         members.coalesce_duplicates();
         return true;
     }
