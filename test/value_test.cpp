@@ -312,5 +312,33 @@ int main() {
                 "whitespace everywhere it may be");
     }
 
+    {
+        // Slack from growing, given back through the whole tree.
+        value tree;
+        for (int index = 0; index < 5; ++index) tree.push_back(value { index });
+        tree.push_back(value::of({ { "a", 1 }, { "b", 2 } }));
+        value &nested = tree.as_writable_array()[5];
+        for (int index = 0; index < 3; ++index) nested["c"].push_back(value { index });
+
+        check(tree.capacity() > tree.size(), "a grown array holds more than it needs");
+        const value before = tree;
+        tree.shrink_to_fit();
+        check_equal(tree.capacity(), tree.size(), "and gives it back");
+        const value &object = tree.at(5);
+        check_equal(object.capacity(), object.size(), "as does an object beneath it");
+        check_equal(object.at("c").capacity(), object.at("c").size(), "and an array beneath that");
+        check(tree == before, "with everything it held still there");
+
+        tree.shrink_to_fit();
+        check(tree == before && tree.capacity() == tree.size(), "and again changes nothing");
+
+        value empty;
+        empty.shrink_to_fit();
+        check(empty.is_null(), "a null value shrinks to nothing");
+        value scalar { 7 };
+        scalar.shrink_to_fit();
+        check(scalar.as<std::int64_t>() == 7, "and a scalar is left alone");
+    }
+
     return report("value");
 }

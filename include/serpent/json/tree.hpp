@@ -24,7 +24,6 @@
 #include <array>
 #include <cstdint>
 #include <string>
-#include <concepts>
 #include <utility>
 #include <vector>
 
@@ -32,12 +31,9 @@ namespace serpent::json {
 
 // Not in a detail namespace of its own: a serpent::json::detail would hide serpent::detail from
 // every unqualified use of it in this namespace, depending on which header came first.
-template<bool Terminated, typename Store = serpent::owning_store>
+template<bool Terminated>
 class tree_builder {
     scanner::basic_cursor<Terminated> &scan;
-    // Where text and containers come from: the heap for a tree that owns itself, a document's
-    // arena for one that borrows. Everything else about the walk is the same either way.
-    [[no_unique_address]] Store store;
     // One buffer for every string in the document: a value holds its text itself, so the decode
     // needs somewhere to land and nothing needs to keep it afterwards.
     std::string scratch;
@@ -52,12 +48,7 @@ class tree_builder {
     std::array<std::vector<serpent::value>, max_depth + 1> elements_at {};
 
 public:
-    explicit tree_builder(scanner::basic_cursor<Terminated> &scan) noexcept
-        requires std::default_initializable<Store>
-            : scan(scan) {}
-
-    tree_builder(scanner::basic_cursor<Terminated> &scan, Store store) noexcept
-            : scan(scan), store(std::move(store)) {}
+    explicit tree_builder(scanner::basic_cursor<Terminated> &scan) noexcept : scan(scan) {}
 
     /** The value at the cursor, whatever it is, into `into`. False leaves the cursor failed. */
     bool build(serpent::value &into, int depth) {
@@ -76,11 +67,11 @@ public:
             this->scan.advance(1);
             return this->elements(into, depth);
         case '"': {
-            // Handed to the store as the scan found it: a string with no escape in it is a view
-            // of the text, and a store that can borrow never copies it at all.
+            // Taken as the scan found it: a string with no escape in it needs no decoding, so
+            // it goes straight into the node from the text rather than through the scratch.
             const auto span = scanner::scan_string(this->scan);
             if (!this->scan.ok()) return false;
-            into = this->store.scanned_text(span, this->scratch);
+            into = this->scanned_text(span);
             return true;
         }
         case 't':
@@ -100,6 +91,22 @@ public:
     }
 
 private:
+    /**
+     * A string as the scan left it: taken whole where nothing between the quotes needs decoding,
+     * which is most strings, and decoded through the one scratch buffer where something does.
+     */
+    [[nodiscard]] serpent::value scanned_text(const scanner::string_span &span) {
+        serpent::value held;
+        if (!span.escaped) {
+            held.assign(span.contents);
+            return held;
+        }
+        this->scratch.clear();
+        scanner::decode_string(span, this->scratch);
+        held.assign(this->scratch);
+        return held;
+    }
+
     /**
      * An integer stays an integer, as the widest of its signedness; anything else is a double.
      * Which it is shows at the first character past the digits, and looking there first saves
@@ -158,7 +165,7 @@ private:
         }
         if (this->scan.peek() == ']') {
             this->scan.advance(1);
-            into = this->store.array_of({});
+            into = serpent::value { static_cast<serpent::value::array *>(nullptr) };
             return true;
         }
         // Gathered at this depth first, so a failure part-way leaves nothing half-built in the
@@ -172,8 +179,10 @@ private:
         if (!this->scan.ok()) return false;
 
         // Sized once from what was gathered, so the run is allocated exactly and never grown.
-        into = this->store.array_of(gathered);
+        auto *block = serpent::value::array::reserved(static_cast<std::uint32_t>(gathered.size()));
+        serpent::value::array::place_all(block, gathered);
         gathered.clear();
+        into = serpent::value { block };
         return true;
     }
 
@@ -185,7 +194,7 @@ private:
         }
         if (this->scan.peek() == '}') {
             this->scan.advance(1);
-            into = this->store.object_of({});
+            into = serpent::value::empty_object();
             return true;
         }
         auto &gathered = this->members_at[static_cast<std::size_t>(depth)];
@@ -201,7 +210,7 @@ private:
             }
             const auto span = scanner::scan_string(this->scan);
             if (!this->scan.ok()) return false;
-            name = this->store.scanned_text(span, this->scratch);
+            name = this->scanned_text(span);
             scanner::skip_whitespace(this->scan);
             if (!this->scan.need(1)) return false;
             if (this->scan.take() != ':') {
@@ -211,8 +220,11 @@ private:
             if (!this->build(held, depth + 1)) return false;
         } while (!this->closed('}') && this->scan.ok());
         if (!this->scan.ok()) return false;
-        into = this->store.object_of(gathered);
+        auto *block = serpent::member_run::reserved(static_cast<std::uint32_t>(gathered.size()));
+        serpent::member_run::place_all(block, gathered);
         gathered.clear();
+        serpent::detail::coalesce_run(block);
+        into = serpent::value { block };
         return true;
     }
 };

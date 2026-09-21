@@ -113,7 +113,7 @@ allocation and memory figures above, and at first it cost 16–22% of build time
 the node's size but its destructor: a forty-byte node held a variant whose destructor inlined
 away for a scalar, where the new node called `release()` out of line for every value the builder
 assigned or destroyed — enough to make it the top symbol in a profile of building a tree. Only
-four of the fourteen shapes own anything and they are contiguous in the tag nibble, so that test
+four of the ten shapes own anything and they are contiguous in the tag nibble, so that test
 is a subtract and a compare, settled inline, and only an owning node calls out to free. Measured
 against the tree this library had before (forty bytes, a vector per container, a string per
 name), same binaries alternating, best of three:

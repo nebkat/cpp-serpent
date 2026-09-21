@@ -128,8 +128,7 @@ for (const serpent::value &item : tree.at("ids").as_array())
 A `member` is a `std::pair<value, value>`, so `.first` is the name and `.second` is what is under
 it, structured bindings unpack it, and `std::get` and comparison come along for free. A name is a
 `value` rather than a `std::string` so that a short one — which nearly every name is — costs no
-allocation, and so that the same member serves an object that owns its names and one that borrows
-them. `name_of(entry)` reads the name as text, empty when the name is not text at all:
+allocation. `name_of(entry)` reads the name as text, empty when the name is not text at all:
 
 ```cpp
 for (const auto &[name, held] : tree.as_object())
@@ -156,11 +155,24 @@ elements, and the value holds nothing but the pointer to that block. An object i
 of `member`s. So a tree of *n* containers costs *n* allocations plus one per long string — a
 `std::vector` per container would have cost a second allocation each for its own object.
 
-Four of the fourteen shapes are borrowed ones: a node that points at text, bytes, or a run that
-something else owns. A borrowed node is laid out exactly like the owned one it mirrors, so only
-destruction and copying care which it is and every reader treats them alike; copying one gives
-back a node that owns its storage. Asking for `as_writable_array()` or `as_writable_object()` on
-a borrowed node is the one place that copy happens, and the only place it costs anything.
+Every node owns what it holds — there is no borrowed node and no shared block, so a value can be
+returned, stored and added to with no promise about what is still alive around it. The four
+shapes that own a block sit last and contiguous in the tag's nibble, which makes "owns anything"
+a subtract and a compare: the common node settles its own destruction inline and only a node
+with a block calls out to free one.
+
+## Giving back the room
+
+A container grown an element at a time doubles as it goes, so a tree just built can hold half
+again as much memory as it needs. `shrink_to_fit()` gives that back, through the whole tree
+rather than just the node it is called on, and `capacity()` says how much a container is holding:
+
+```cpp
+tree.shrink_to_fit();       // every array and object beneath it, too
+```
+
+It is worth it for a tree that is built once and then kept, and pointless for one still being
+added to. As with `std::vector`, it invalidates every reference into the tree.
 
 ## Everywhere else a type goes
 

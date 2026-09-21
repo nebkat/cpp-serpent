@@ -51,7 +51,7 @@ class value;
  * A std::pair, so that .first and .second mean here what they mean everywhere else and
  * structured bindings, std::get and comparison all come with it. The name is a value rather
  * than a std::string so that the same member serves an object that owns its names and one
- * inside a document that borrows them - and so a short name costs no allocation at all.
+ * than a std::string so that a short name, which nearly every name is, costs no allocation.
  *
  * It cannot be called .value: a member of that name in this namespace changes the meaning of
  * serpent::value, which the compiler refuses.
@@ -88,6 +88,7 @@ public:
 
     [[nodiscard]] std::uint32_t size() const noexcept { return this->used; }
     [[nodiscard]] bool empty() const noexcept { return this->used == 0; }
+    [[nodiscard]] std::uint32_t room_for() const noexcept { return this->room; }
 
     [[nodiscard]] T *data() noexcept {
         return reinterpret_cast<T *>(reinterpret_cast<std::byte *>(this) + origin);
@@ -103,25 +104,6 @@ public:
 
     [[nodiscard]] T &operator[](std::size_t index) noexcept { return this->data()[index]; }
     [[nodiscard]] const T &operator[](std::size_t index) const noexcept { return this->data()[index]; }
-
-    /// What a run with that much room occupies, for a caller providing the memory itself.
-    [[nodiscard]] static std::size_t footprint(std::uint32_t room) noexcept { return bytes_for(room); }
-
-    static constexpr std::size_t alignment =
-            alignof(T) > alignof(std::uint32_t) ? alignof(T) : alignof(std::uint32_t);
-
-    /**
-     * An empty run laid out in memory something else owns - an arena's, for a borrowed run.
-     *
-     * Nothing frees it and nothing destroys its elements, so every element must be one that
-     * owns nothing itself, which inside a document every value is.
-     */
-    [[nodiscard]] static run *placed(void *memory, std::uint32_t room) noexcept {
-        auto *block = static_cast<run *>(memory);
-        block->used = 0;
-        block->room = room;
-        return block;
-    }
 
     /**
      * Moves a whole span in at once, leaving the span's elements empty.
@@ -211,6 +193,22 @@ public:
         --block->used;
     }
 
+    /**
+     * The same block with no room to spare, or the same pointer when it already had none.
+     *
+     * Appending doubles, so a run built one element at a time carries up to half again as much
+     * as it holds. Nothing needs that room once the building is over.
+     */
+    [[nodiscard]] static run *tightened(run *block) {
+        if (block == nullptr || block->used == block->room) return block;
+        if (block->used == 0) { release(block); return nullptr; }
+        auto *exact = reserved(block->used);
+        std::uninitialized_move_n(block->data(), block->used, exact->data());
+        exact->used = block->used;
+        release(block);
+        return exact;
+    }
+
     /// Forgets everything past a count, for a caller that has moved them away itself.
     static void shrink_to(run *block, std::uint32_t kept) noexcept {
         if (block == nullptr || kept >= block->used) return;
@@ -241,7 +239,7 @@ public:
      * format ascribes meaning to key order, so nothing downstream depends on the choice.
      *
      * One allocation, like an array: the members sit in a run, and a name is a value like any
-     * other - inline where it is short, which nearly every name is, and borrowed from an arena
+     * other - inline where it is short, which nearly every name is, and in a block of its own
      * where a document owns it. That a name is a value is what lets one span describe the
      * members of an owned object and of one inside a document.
      */
@@ -318,29 +316,15 @@ public:
     // values is made of.
 private:
     /**
-     * Ten shapes for a value that owns what it holds, four more for one that does not - a node
-     * inside an arena, where the arena owns the bytes and freeing them here would be wrong.
+     * The ten things a value can hold, in the low nibble of the tag.
      *
-     * Fourteen codes in a nibble that holds sixteen, so borrowing costs no space at all: not a
-     * byte, and not one of the fifteen characters a short string keeps inline. A borrowed shape
-     * has the same layout as the owned one it mirrors, so only destruction and copying care
-     * which it is; every reader treats them alike.
+     * The four that own a block are last and contiguous, so "owns something" is one subtract and
+     * one compare - which is what release() tests before it calls out to free anything.
      */
     enum class shape : std::uint8_t {
         empty = 0, truth, whole_signed, whole_unsigned, number, text_inline,
         text_block, binary_block, array_block, object_block,
-        text_view,  binary_view,  array_view,  object_view,
     };
-
-    static constexpr std::uint8_t view_offset =
-            static_cast<std::uint8_t>(shape::text_view) - static_cast<std::uint8_t>(shape::text_block);
-
-    static constexpr bool borrowed(shape what) noexcept { return what >= shape::text_view; }
-
-    /// The owned shape a borrowed one mirrors, so every reader has one case to answer.
-    static constexpr shape owned(shape what) noexcept {
-        return borrowed(what) ? static_cast<shape>(static_cast<std::uint8_t>(what) - view_offset) : what;
-    }
 
     static constexpr std::size_t inline_capacity = 15;
 
@@ -352,7 +336,7 @@ private:
         double        number;
         const char      *text;
         const std::byte *bytes;
-        array         *items;    ///< owned: a run this value frees. borrowed: the document's
+        array         *items;
         detail::run<member> *members;
         char          head[8];
     };
@@ -362,8 +346,6 @@ private:
     std::uint8_t tag {};       ///< shape in the low nibble, inline length in the high one
 
     [[nodiscard]] shape held() const noexcept { return static_cast<shape>(this->tag & 0x0F); }
-    /// What it holds, with borrowing already answered.
-    [[nodiscard]] shape form() const noexcept { return owned(this->held()); }
     void set_shape(shape what) noexcept { this->tag = static_cast<std::uint8_t>(what); }
 
     /// The fifteen inline bytes are the payload and the bytes after it, which are contiguous.
@@ -489,35 +471,6 @@ public:
     /// Replaces whatever this held with text, without a temporary the caller has to keep.
     void assign(std::string_view text) { this->release(); this->assign_text(text); }
 
-    // ---------------- borrowed, for a document that owns the storage ----------------
-    //
-    // The caller keeps the bytes alive for as long as the value is used, the same promise
-    // as<std::string_view>() and every reader in this library already make. Copying one of
-    // these gives a node that owns its own storage and is free of that promise.
-
-    [[nodiscard]] static value borrowing(std::string_view text) noexcept {
-        value held;
-        held.slot.text = text.data();
-        held.set_block_size(text.size());
-        held.set_shape(shape::text_view);
-        return held;
-    }
-
-    [[nodiscard]] static value borrowing(std::span<const std::byte> bytes) noexcept {
-        value held;
-        held.slot.bytes = bytes.data();
-        held.set_block_size(bytes.size());
-        held.set_shape(shape::binary_view);
-        return held;
-    }
-
-    [[nodiscard]] static value borrowing(array &items) noexcept {
-        value held;
-        held.slot.items = &items;
-        held.set_shape(shape::array_view);
-        return held;
-    }
-
     /// A value holding an object with no members yet, for a builder to append to.
     [[nodiscard]] static value empty_object() noexcept {
         value held;
@@ -525,19 +478,6 @@ public:
         held.set_shape(shape::object_block);
         return held;
     }
-
-    [[nodiscard]] static value borrowing(detail::run<member> *members) noexcept {
-        value held;
-        held.slot.members = members;
-        held.set_shape(shape::object_view);
-        return held;
-    }
-
-    /// Whether this points at storage something else owns.
-    [[nodiscard]] bool is_borrowed() const noexcept { return borrowed(this->held()); }
-
-    /// The longest text a node keeps in itself. Longer than this needs storage somewhere.
-    static constexpr std::size_t inline_text_limit = inline_capacity;
 
     /** An object written out at its call site: the braces a nested document is built with. */
     static value of(std::initializer_list<std::pair<const std::string_view, value>> members);
@@ -552,7 +492,7 @@ public:
     // ---------------- what it is ----------------
 
     [[nodiscard]] kind type() const noexcept {
-        switch (this->form()) {
+        switch (this->held()) {
         case shape::empty:          return kind::null;
         case shape::truth:          return kind::boolean;
         case shape::whole_signed:
@@ -570,14 +510,14 @@ public:
     [[nodiscard]] bool is_null() const noexcept { return this->held() == shape::empty; }
     [[nodiscard]] bool is_boolean() const noexcept { return this->held() == shape::truth; }
     [[nodiscard]] bool is_integer() const noexcept { return this->type() == kind::integer; }
-    [[nodiscard]] bool is_real() const noexcept { return this->form() == shape::number; }
+    [[nodiscard]] bool is_real() const noexcept { return this->held() == shape::number; }
     [[nodiscard]] bool is_number() const noexcept { return this->is_integer() || this->is_real(); }
     [[nodiscard]] bool is_string() const noexcept {
-        return this->form() == shape::text_inline || this->form() == shape::text_block;
+        return this->held() == shape::text_inline || this->held() == shape::text_block;
     }
-    [[nodiscard]] bool is_binary() const noexcept { return this->form() == shape::binary_block; }
-    [[nodiscard]] bool is_array() const noexcept { return this->form() == shape::array_block; }
-    [[nodiscard]] bool is_object() const noexcept { return this->form() == shape::object_block; }
+    [[nodiscard]] bool is_binary() const noexcept { return this->held() == shape::binary_block; }
+    [[nodiscard]] bool is_array() const noexcept { return this->held() == shape::array_block; }
+    [[nodiscard]] bool is_object() const noexcept { return this->held() == shape::object_block; }
 
     // ---------------- reading it back ----------------
 
@@ -604,40 +544,30 @@ public:
             return this->read_integer<T>();
     }
 
-    /** The elements, of an owned array or a borrowed one alike; empty when it is neither. */
+    /** The elements; empty when this holds no array at all. */
     [[nodiscard]] std::span<const value> as_array() const noexcept {
-        if (this->form() != shape::array_block || this->slot.items == nullptr) return {};
+        if (this->held() != shape::array_block || this->slot.items == nullptr) return {};
         return { this->slot.items->data(), this->slot.items->size() };
     }
-    /** The members, of an owned object or a borrowed one alike; empty when it is neither. */
+    /** The members; empty when this holds no object at all. */
     [[nodiscard]] std::span<const member> as_object() const noexcept;
 
     /**
      * The elements to change rather than to read.
      *
-     * A borrowed run belongs to a document and may be shared, so it is copied into a block of
-     * this value's own first - the one place a read-only array becomes an editable one. The
-     * span may be written through but not grown: growing may move the block, so push_back()
-     * on the value does that.
+     * Writable but not growable: growing may move the block, so push_back() on the value does
+     * that and hands back a reference into wherever the block now is.
      */
-    [[nodiscard]] std::span<value> as_writable_array() {
-        if (this->form() != shape::array_block) return {};
-        if (this->is_borrowed()) {
-            auto *copy = array::copy_of(this->slot.items);
-            this->release();
-            this->slot.items = copy;
-            this->set_shape(shape::array_block);
-        }
-        if (this->slot.items == nullptr) return {};
+    [[nodiscard]] std::span<value> as_writable_array() noexcept {
+        if (this->held() != shape::array_block || this->slot.items == nullptr) return {};
         return { this->slot.items->data(), this->slot.items->size() };
     }
 
     /**
-     * The members to change rather than to read. A borrowed run belongs to a document, so it
-     * is copied into one of this value's own first. Writable but not growable: growing may
-     * move the run, so operator[] on the value does that.
+     * The members to change rather than to read. Writable but not growable: growing may move
+     * the run, so operator[] on the value does that.
      */
-    [[nodiscard]] std::span<member> as_writable_object();
+    [[nodiscard]] std::span<member> as_writable_object() noexcept;
 
     /// Adds a member without looking for one of that name first - what a builder does.
     void append_member(std::string_view name, value item);
@@ -681,35 +611,60 @@ public:
         return items[index];
     }
 
+    /**
+     * Gives back the room a container asked for and did not use, through the whole tree.
+     *
+     * An array or an object grown a member at a time doubles as it goes, so a tree just built
+     * can be holding half again as much memory as it needs. This is std::vector's
+     * shrink_to_fit, applied to every container beneath this one as well as to this one: worth
+     * it for a tree that is built once and then kept, pointless for one still being added to.
+     *
+     * Every reference into any container in the tree is invalidated, as with a vector.
+     */
+    void shrink_to_fit() {
+        if (this->held() == shape::array_block) {
+            this->slot.items = array::tightened(this->slot.items);
+            for (value &item : this->as_writable_array()) item.shrink_to_fit();
+        } else if (this->held() == shape::object_block) {
+            this->slot.members = detail::run<member>::tightened(this->slot.members);
+            for (member &entry : this->as_writable_object()) entry.second.shrink_to_fit();
+        }
+    }
+
+    /** How much room this container has, counting only itself. Its size when it has no slack. */
+    [[nodiscard]] std::size_t capacity() const noexcept {
+        if (this->held() == shape::array_block) return this->slot.items == nullptr ? 0 : this->slot.items->room_for();
+        if (this->held() == shape::object_block) return this->slot.members == nullptr ? 0 : this->slot.members->room_for();
+        return this->size();
+    }
+
     /** Appends, turning a null value into an array first, as operator[] does for objects. */
     value &push_back(value item) {
         if (this->is_null()) { this->slot.items = nullptr; this->set_shape(shape::array_block); }
         if (!this->is_array()) raise(errc::type_mismatch, 0);
-        if (this->is_borrowed()) (void) this->as_writable_array();
         this->slot.items = array::appended(this->slot.items, std::move(item));
         return (*this->slot.items)[this->slot.items->size() - 1];
     }
 
     /**
      * By what it holds, not by how it is held: a short string and a long one compare as their
-     * text, a signed and an unsigned node may hold the same number, and a borrowed node equals
-     * the owned copy taken from it.
+     * text, and a signed and an unsigned node may hold the same number.
      */
     friend bool operator==(const value &left, const value &right) noexcept;
 
 private:
     [[nodiscard]] std::optional<bool> read_bool() const noexcept {
-        if (this->form() == shape::truth) return this->slot.truth;
+        if (this->held() == shape::truth) return this->slot.truth;
         return std::nullopt;
     }
 
     template<std::integral T>
     [[nodiscard]] std::optional<T> read_integer() const noexcept {
-        if (this->form() == shape::whole_signed) {
+        if (this->held() == shape::whole_signed) {
             const auto whole = this->slot.whole_signed;
             return std::in_range<T>(whole) ? std::optional<T> { static_cast<T>(whole) } : std::nullopt;
         }
-        if (this->form() == shape::whole_unsigned) {
+        if (this->held() == shape::whole_unsigned) {
             const auto whole = this->slot.whole_unsigned;
             return std::in_range<T>(whole) ? std::optional<T> { static_cast<T>(whole) } : std::nullopt;
         }
@@ -718,22 +673,22 @@ private:
 
     template<std::floating_point T>
     [[nodiscard]] std::optional<T> read_real() const noexcept {
-        if (this->form() == shape::number) return static_cast<T>(this->slot.number);
+        if (this->held() == shape::number) return static_cast<T>(this->slot.number);
         if (const auto whole = this->read_integer<std::int64_t>()) return static_cast<T>(*whole);
         if (const auto whole = this->read_integer<std::uint64_t>()) return static_cast<T>(*whole);
         return std::nullopt;
     }
 
     [[nodiscard]] std::optional<std::string_view> read_text() const noexcept {
-        if (this->form() == shape::text_inline)
+        if (this->held() == shape::text_inline)
             return std::string_view { this->inline_data(), this->inline_size() };
-        if (this->form() == shape::text_block)
+        if (this->held() == shape::text_block)
             return std::string_view { this->slot.text, this->block_size() };
         return std::nullopt;
     }
 
     [[nodiscard]] std::optional<std::span<const std::byte>> read_binary() const noexcept {
-        if (this->form() == shape::binary_block)
+        if (this->held() == shape::binary_block)
             return std::span<const std::byte> { this->slot.bytes, this->block_size() };
         return std::nullopt;
     }
@@ -801,7 +756,7 @@ inline void value::release_block() noexcept {
 }
 
 inline void value::copy_from(const value &other) {
-    switch (other.form()) {
+    switch (other.held()) {
     case shape::text_inline:
     case shape::empty: case shape::truth: case shape::whole_signed:
     case shape::whole_unsigned: case shape::number:
@@ -826,7 +781,6 @@ inline void value::copy_from(const value &other) {
 inline value &value::operator[](std::string_view name) {
     if (this->is_null()) { this->slot.members = nullptr; this->set_shape(shape::object_block); }
     if (!this->is_object()) raise(errc::type_mismatch, 0, name);
-    if (this->is_borrowed()) (void) this->as_writable_object();
     for (auto &entry : this->as_writable_object())
         if (name_of(entry) == name) return entry.second;
     this->slot.members = detail::run<member>::appended(
@@ -903,7 +857,6 @@ inline const value &value::at(std::string_view name) const {
 /// Adds a member without looking for one of that name first - what a builder does.
 inline void value::append_member(std::string_view name, value item) {
     if (this->is_null()) { this->slot.members = nullptr; this->set_shape(shape::object_block); }
-    if (this->is_borrowed()) (void) this->as_writable_object();
     this->slot.members = detail::run<member>::appended(
             this->slot.members, member { value { name }, std::move(item) });
 }
@@ -920,20 +873,13 @@ inline bool value::erase_member(std::string_view name) {
 }
 
 inline std::span<const member> value::as_object() const noexcept {
-    if (this->form() != shape::object_block || this->slot.members == nullptr) return {};
+    if (this->held() != shape::object_block || this->slot.members == nullptr) return {};
     const auto *first = static_cast<const detail::run<member> *>(this->slot.members)->data();
     return { first, this->slot.members->size() };
 }
 
-inline std::span<member> value::as_writable_object() {
-    if (this->form() != shape::object_block) return {};
-    if (this->is_borrowed()) {
-        auto *copy = detail::run<member>::copy_of(this->slot.members);
-        this->release();
-        this->slot.members = copy;
-        this->set_shape(shape::object_block);
-    }
-    if (this->slot.members == nullptr) return {};
+inline std::span<member> value::as_writable_object() noexcept {
+    if (this->held() != shape::object_block || this->slot.members == nullptr) return {};
     return { this->slot.members->data(), this->slot.members->size() };
 }
 
@@ -1051,9 +997,7 @@ inline void coalesce_run(run<member> *&entries_run) {
 inline void value::object::coalesce_duplicates() { detail::coalesce_run(this->entries); }
 
 inline void value::coalesce_members() {
-    if (this->form() != shape::object_block) return;
-    // Promotes a borrowed run to an owned one first, as any write does.
-    std::ignore = this->as_writable_object();
+    if (this->held() != shape::object_block) return;
     detail::coalesce_run(this->slot.members);
 }
 
@@ -1534,43 +1478,6 @@ struct serializer<value, void> {
         }
         }
         return false;
-    }
-};
-
-/**
- * Where a tree's blocks come from when every node owns what it holds.
- *
- * A builder asks the store for text and for containers rather than making them itself, so the
- * same builder fills a tree of owned nodes or a document's arena depending on which it is
- * handed. This is the owning one: new for each block, freed with the node that holds it.
- */
-struct owning_store {
-    [[nodiscard]] value text(std::string_view from) const {
-        value held;
-        held.assign(from);
-        return held;
-    }
-
-    /// A string as the scan left it: taken whole when nothing needs decoding.
-    template<typename Span>
-    [[nodiscard]] value scanned_text(const Span &span, std::string &scratch) const {
-        if (!span.escaped) return this->text(span.contents);
-        scratch.clear();
-        decode_string(span, scratch);
-        return this->text(scratch);
-    }
-
-    [[nodiscard]] value array_of(std::span<value> items) const {
-        auto *block = value::array::reserved(static_cast<std::uint32_t>(items.size()));
-        value::array::place_all(block, items);
-        return value { block };
-    }
-
-    [[nodiscard]] value object_of(std::span<member> members) const {
-        auto *block = detail::run<member>::reserved(static_cast<std::uint32_t>(members.size()));
-        detail::run<member>::place_all(block, members);
-        detail::coalesce_run(block);
-        return value { block };
     }
 };
 
