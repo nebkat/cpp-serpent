@@ -221,7 +221,8 @@ public:
 
 class value {
 public:
-    using array = detail::run<value>;
+    using array_type = detail::run<value>;
+    using object_type = detail::run<member>;
     using binary = std::vector<std::byte>;
 
     /**
@@ -265,8 +266,8 @@ private:
         double        number;
         const char      *text;
         const std::byte *bytes;
-        array         *items;
-        detail::run<member> *members;
+        array_type    *items;
+        object_type   *members;
         char          head[8];
     };
 
@@ -389,8 +390,8 @@ public:
     value(const std::string &text) { this->assign_text(text); }
     value(std::span<const std::byte> bytes) { this->assign_bytes(bytes); }
     value(binary bytes) { this->assign_bytes(bytes); }
-    value(array *items) noexcept { this->slot.items = items; this->set_shape(shape::array_block); }
-    value(detail::run<member> *members) noexcept { this->slot.members = members; this->set_shape(shape::object_block); }
+    value(array_type *items) noexcept { this->slot.items = items; this->set_shape(shape::array_block); }
+    value(object_type *members) noexcept { this->slot.members = members; this->set_shape(shape::object_block); }
 
     /**
      * Makes this value hold a T built from the arguments, in place - for a builder that fills
@@ -401,7 +402,7 @@ public:
     void assign(std::string_view text) { this->release(); this->assign_text(text); }
 
     /// A value holding an array with no elements yet, for a builder to append to.
-    [[nodiscard]] static value empty_array() noexcept {
+    [[nodiscard]] static value array() noexcept {
         value held;
         held.slot.items = nullptr;
         held.set_shape(shape::array_block);
@@ -409,7 +410,7 @@ public:
     }
 
     /// A value holding an object with no members yet, for a builder to append to.
-    [[nodiscard]] static value empty_object() noexcept {
+    [[nodiscard]] static value object() noexcept {
         value held;
         held.slot.members = nullptr;
         held.set_shape(shape::object_block);
@@ -421,8 +422,8 @@ public:
 
     /** An array written out at its call site. */
     static value of(std::initializer_list<value> items) {
-        array *block = nullptr;
-        for (const auto &item : items) block = array::appended(block, item);
+        array_type *block = nullptr;
+        for (const auto &item : items) block = array_type::appended(block, item);
         return value { block };
     }
 
@@ -560,10 +561,10 @@ public:
      */
     void shrink_to_fit() {
         if (this->held() == shape::array_block) {
-            this->slot.items = array::tightened(this->slot.items);
+            this->slot.items = array_type::tightened(this->slot.items);
             for (value &item : this->as_writable_array()) item.shrink_to_fit();
         } else if (this->held() == shape::object_block) {
-            this->slot.members = detail::run<member>::tightened(this->slot.members);
+            this->slot.members = object_type::tightened(this->slot.members);
             for (member &entry : this->as_writable_object()) entry.second.shrink_to_fit();
         }
     }
@@ -579,7 +580,7 @@ public:
     value &push_back(value item) {
         if (this->is_null()) { this->slot.items = nullptr; this->set_shape(shape::array_block); }
         if (!this->is_array()) raise(errc::type_mismatch, 0);
-        this->slot.items = array::appended(this->slot.items, std::move(item));
+        this->slot.items = array_type::appended(this->slot.items, std::move(item));
         return (*this->slot.items)[this->slot.items->size() - 1];
     }
 
@@ -641,14 +642,14 @@ static_assert(alignof(value) == 8);
     return entry.first.as<std::string_view>().value_or(std::string_view {});
 }
 
-using member_run = detail::run<member>;
+using member_run = value::object_type;
 
 inline void value::release_block() noexcept {
     switch (this->held()) {
     case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
     case shape::binary_block: delete[] const_cast<std::byte *>(this->slot.bytes); break;
-    case shape::array_block:  array::release(this->slot.items); break;
-    case shape::object_block: detail::run<member>::release(this->slot.members); break;
+    case shape::array_block:  array_type::release(this->slot.items); break;
+    case shape::object_block: object_type::release(this->slot.members); break;
     default: break;
     }
 }
@@ -665,11 +666,11 @@ inline void value::copy_from(const value &other) {
     case shape::text_block:   this->assign_text({ other.slot.text, other.block_size() }); break;
     case shape::binary_block: this->assign_bytes({ other.slot.bytes, other.block_size() }); break;
     case shape::array_block:
-        this->slot.items = array::copy_of(other.slot.items);
+        this->slot.items = array_type::copy_of(other.slot.items);
         this->set_shape(shape::array_block);
         break;
     case shape::object_block:
-        this->slot.members = detail::run<member>::copy_of(other.slot.members);
+        this->slot.members = object_type::copy_of(other.slot.members);
         this->set_shape(shape::object_block);
         break;
     default: break;
@@ -681,15 +682,15 @@ inline value &value::operator[](std::string_view name) {
     if (!this->is_object()) raise(errc::type_mismatch, 0, name);
     for (auto &entry : this->as_writable_object())
         if (name_of(entry) == name) return entry.second;
-    this->slot.members = detail::run<member>::appended(
+    this->slot.members = object_type::appended(
             this->slot.members, member { value { name }, value {} });
     return (*this->slot.members)[this->slot.members->size() - 1].second;
 }
 
 inline value value::of(std::initializer_list<std::pair<const std::string_view, value>> members) {
-    auto *run = detail::run<member>::reserved(static_cast<std::uint32_t>(members.size()));
+    auto *run = object_type::reserved(static_cast<std::uint32_t>(members.size()));
     for (const auto &[name, held] : members)
-        run = detail::run<member>::appended(run, member { value { name }, held });
+        run = object_type::appended(run, member { value { name }, held });
     return value { run };
 }
 
@@ -755,7 +756,7 @@ inline const value &value::at(std::string_view name) const {
 /// Adds a member without looking for one of that name first - what a builder does.
 inline void value::append_member(std::string_view name, value item) {
     if (this->is_null()) { this->slot.members = nullptr; this->set_shape(shape::object_block); }
-    this->slot.members = detail::run<member>::appended(
+    this->slot.members = object_type::appended(
             this->slot.members, member { value { name }, std::move(item) });
 }
 
@@ -763,7 +764,7 @@ inline bool value::erase_member(std::string_view name) {
     const auto members = this->as_writable_object();
     for (std::size_t index = 0; index < members.size(); ++index) {
         if (name_of(members[index]) == name) {
-            detail::run<member>::erase_at(this->slot.members, index);
+            object_type::erase_at(this->slot.members, index);
             return true;
         }
     }
@@ -951,8 +952,8 @@ public:
     template<std::ranges::input_range R>
     void range(const R &items);
 
-    void begin_array() { this->open.push_back(frame { serpent::value { static_cast<serpent::value::array *>(nullptr) }, {}, false }); }
-    void begin_object() { this->open.push_back(frame { serpent::value::empty_object(), {}, true }); }
+    void begin_array() { this->open.push_back(frame { serpent::value { static_cast<serpent::value::array_type *>(nullptr) }, {}, false }); }
+    void begin_object() { this->open.push_back(frame { serpent::value::object(), {}, true }); }
 
     void end_container() {
         auto closing = std::move(this->open.back().held);
@@ -1296,21 +1297,21 @@ struct serializer<value, void> {
                     return true;
                 }
             }
-            value::array *items = nullptr;
+            value::array_type *items = nullptr;
             if constexpr (requires { source.size_hint(); }) {
                 if (const auto hint = source.size_hint())
-                    items = value::array::reserved(static_cast<std::uint32_t>(*hint));
+                    items = value::array_type::reserved(static_cast<std::uint32_t>(*hint));
             }
             for (const auto &element : source.array()) {
                 value element_value;
-                if (!read(element, element_value)) { value::array::release(items); return false; }
-                items = value::array::appended(items, std::move(element_value));
+                if (!read(element, element_value)) { value::array_type::release(items); return false; }
+                items = value::array_type::appended(items, std::move(element_value));
             }
             item = value { std::move(items) };
             return true;
         }
         case kind::object: {
-            value built = value::empty_object();
+            value built = value::object();
             for (const auto &entry : source.items()) {
                 // key_string() rather than the key itself, which a text format leaves encoded.
                 value held;

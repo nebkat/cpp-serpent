@@ -49,6 +49,7 @@ not using.
 | `value { 3 }`, `value { 1.5 }`, `value { true }`, `value { "text" }` | the scalars |
 | `value::of({ { "x", 1 }, { "y", 2 } })` | an object, written out |
 | `value::of({ 1, 2, 3 })` | an array, written out |
+| `value::array()`, `value::object()` | an empty one, for a builder to fill |
 | `document["key"]` | the member, added as null if it was not there |
 | `document.push_back(item)` | appends, making an array of a null value |
 

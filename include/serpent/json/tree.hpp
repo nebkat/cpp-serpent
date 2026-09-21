@@ -165,7 +165,7 @@ private:
         }
         if (this->scan.peek() == ']') {
             this->scan.advance(1);
-            into = serpent::value { static_cast<serpent::value::array *>(nullptr) };
+            into = serpent::value { static_cast<serpent::value::array_type *>(nullptr) };
             return true;
         }
         // Gathered at this depth first, so a failure part-way leaves nothing half-built in the
@@ -179,8 +179,8 @@ private:
         if (!this->scan.ok()) return false;
 
         // Sized once from what was gathered, so the run is allocated exactly and never grown.
-        auto *block = serpent::value::array::reserved(static_cast<std::uint32_t>(gathered.size()));
-        serpent::value::array::place_all(block, gathered);
+        auto *block = serpent::value::array_type::reserved(static_cast<std::uint32_t>(gathered.size()));
+        serpent::value::array_type::place_all(block, gathered);
         gathered.clear();
         into = serpent::value { block };
         return true;
@@ -194,7 +194,7 @@ private:
         }
         if (this->scan.peek() == '}') {
             this->scan.advance(1);
-            into = serpent::value::empty_object();
+            into = serpent::value::object();
             return true;
         }
         auto &gathered = this->members_at[static_cast<std::size_t>(depth)];
@@ -220,8 +220,8 @@ private:
             if (!this->build(held, depth + 1)) return false;
         } while (!this->closed('}') && this->scan.ok());
         if (!this->scan.ok()) return false;
-        auto *block = serpent::member_run::reserved(static_cast<std::uint32_t>(gathered.size()));
-        serpent::member_run::place_all(block, gathered);
+        auto *block = serpent::value::object_type::reserved(static_cast<std::uint32_t>(gathered.size()));
+        serpent::value::object_type::place_all(block, gathered);
         gathered.clear();
         serpent::detail::coalesce_run(block);
         into = serpent::value { block };
