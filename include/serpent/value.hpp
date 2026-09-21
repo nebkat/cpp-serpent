@@ -104,6 +104,31 @@ public:
     [[nodiscard]] T &operator[](std::size_t index) noexcept { return this->data()[index]; }
     [[nodiscard]] const T &operator[](std::size_t index) const noexcept { return this->data()[index]; }
 
+    /// What a run with that much room occupies, for a caller providing the memory itself.
+    [[nodiscard]] static std::size_t footprint(std::uint32_t room) noexcept { return bytes_for(room); }
+
+    static constexpr std::size_t alignment =
+            alignof(T) > alignof(std::uint32_t) ? alignof(T) : alignof(std::uint32_t);
+
+    /**
+     * An empty run laid out in memory something else owns - an arena's, for a borrowed run.
+     *
+     * Nothing frees it and nothing destroys its elements, so every element must be one that
+     * owns nothing itself, which inside a document every value is.
+     */
+    [[nodiscard]] static run *placed(void *memory, std::uint32_t room) noexcept {
+        auto *block = static_cast<run *>(memory);
+        block->used = 0;
+        block->room = room;
+        return block;
+    }
+
+    /// Adds one where the room is known to be there, so the block can never move.
+    static void place_back(run *block, T item) noexcept {
+        std::construct_at(block->data() + block->used, std::move(item));
+        ++block->used;
+    }
+
     /// An empty run with room for as many, or nullptr for none at all.
     [[nodiscard]] static run *reserved(std::uint32_t room) {
         if (room == 0) return nullptr;
@@ -303,6 +328,7 @@ private:
 
     static constexpr std::size_t inline_capacity = 15;
 
+
     union payload {
         bool          truth;
         std::int64_t  whole_signed;
@@ -493,6 +519,9 @@ public:
 
     /// Whether this points at storage something else owns.
     [[nodiscard]] bool is_borrowed() const noexcept { return borrowed(this->held()); }
+
+    /// The longest text a node keeps in itself. Longer than this needs storage somewhere.
+    static constexpr std::size_t inline_text_limit = inline_capacity;
 
     /** An object written out at its call site: the braces a nested document is built with. */
     static value of(std::initializer_list<std::pair<const std::string_view, value>> members);
@@ -1489,6 +1518,34 @@ struct serializer<value, void> {
         }
         }
         return false;
+    }
+};
+
+/**
+ * Where a tree's blocks come from when every node owns what it holds.
+ *
+ * A builder asks the store for text and for containers rather than making them itself, so the
+ * same builder fills a tree of owned nodes or a document's arena depending on which it is
+ * handed. This is the owning one: new for each block, freed with the node that holds it.
+ */
+struct owning_store {
+    [[nodiscard]] value text(std::string_view from) const {
+        value held;
+        held.assign(from);
+        return held;
+    }
+
+    [[nodiscard]] value array_of(std::span<value> items) const {
+        auto *block = value::array::reserved(static_cast<std::uint32_t>(items.size()));
+        for (value &item : items) value::array::place_back(block, std::move(item));
+        return value { block };
+    }
+
+    [[nodiscard]] value object_of(std::span<member> members) const {
+        auto *block = detail::run<member>::reserved(static_cast<std::uint32_t>(members.size()));
+        for (member &entry : members) detail::run<member>::place_back(block, std::move(entry));
+        detail::coalesce_run(block);
+        return value { block };
     }
 };
 

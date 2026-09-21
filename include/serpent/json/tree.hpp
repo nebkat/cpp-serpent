@@ -24,6 +24,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <concepts>
 #include <utility>
 #include <vector>
 
@@ -31,9 +32,12 @@ namespace serpent::json {
 
 // Not in a detail namespace of its own: a serpent::json::detail would hide serpent::detail from
 // every unqualified use of it in this namespace, depending on which header came first.
-template<bool Terminated>
+template<bool Terminated, typename Store = serpent::owning_store>
 class tree_builder {
     scanner::basic_cursor<Terminated> &scan;
+    // Where text and containers come from: the heap for a tree that owns itself, a document's
+    // arena for one that borrows. Everything else about the walk is the same either way.
+    [[no_unique_address]] Store store;
     // One buffer for every string in the document: a value holds its text itself, so the decode
     // needs somewhere to land and nothing needs to keep it afterwards.
     std::string scratch;
@@ -48,7 +52,12 @@ class tree_builder {
     std::array<std::vector<serpent::value>, max_depth + 1> elements_at {};
 
 public:
-    explicit tree_builder(scanner::basic_cursor<Terminated> &scan) noexcept : scan(scan) {}
+    explicit tree_builder(scanner::basic_cursor<Terminated> &scan) noexcept
+        requires std::default_initializable<Store>
+            : scan(scan) {}
+
+    tree_builder(scanner::basic_cursor<Terminated> &scan, Store store) noexcept
+            : scan(scan), store(std::move(store)) {}
 
     /** The value at the cursor, whatever it is, into `into`. False leaves the cursor failed. */
     bool build(serpent::value &into, int depth) {
@@ -69,7 +78,7 @@ public:
         case '"':
             this->scratch.clear();
             if (!direct::read(this->scan, this->scratch)) return false;
-            into.assign(this->scratch);
+            into = this->store.text(this->scratch);
             return true;
         case 't':
             scanner::scan_literal(this->scan, "true");
@@ -146,7 +155,7 @@ private:
         }
         if (this->scan.peek() == ']') {
             this->scan.advance(1);
-            into = serpent::value { static_cast<serpent::value::array *>(nullptr) };
+            into = this->store.array_of({});
             return true;
         }
         // Gathered at this depth first, so a failure part-way leaves nothing half-built in the
@@ -160,10 +169,8 @@ private:
         if (!this->scan.ok()) return false;
 
         // Sized once from what was gathered, so the run is allocated exactly and never grown.
-        auto *block = serpent::value::array::reserved(static_cast<std::uint32_t>(gathered.size()));
-        for (auto &element : gathered) block = serpent::value::array::appended(block, std::move(element));
+        into = this->store.array_of(gathered);
         gathered.clear();
-        into = serpent::value { block };
         return true;
     }
 
@@ -175,7 +182,7 @@ private:
         }
         if (this->scan.peek() == '}') {
             this->scan.advance(1);
-            into = serpent::value::empty_object();
+            into = this->store.object_of({});
             return true;
         }
         auto &gathered = this->members_at[static_cast<std::size_t>(depth)];
@@ -190,7 +197,7 @@ private:
                 if (this->scan.ok()) this->scan.fail(errc::unexpected_character);
                 return false;
             }
-            name.assign(this->scratch);
+            name = this->store.text(this->scratch);
             scanner::skip_whitespace(this->scan);
             if (!this->scan.need(1)) return false;
             if (this->scan.take() != ':') {
@@ -200,12 +207,8 @@ private:
             if (!this->build(held, depth + 1)) return false;
         } while (!this->closed('}') && this->scan.ok());
         if (!this->scan.ok()) return false;
-        auto *run = serpent::detail::run<serpent::member>::reserved(static_cast<std::uint32_t>(gathered.size()));
-        for (auto &entry : gathered)
-            run = serpent::detail::run<serpent::member>::appended(run, std::move(entry));
+        into = this->store.object_of(gathered);
         gathered.clear();
-        into = serpent::value { run };
-        into.coalesce_members();
         return true;
     }
 };

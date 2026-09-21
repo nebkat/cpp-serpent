@@ -21,7 +21,8 @@ set(TESTS
     bjdata_walking
     fixture
     manual
-    value)
+    value
+    document)
 
 # Suites that define types the way types are meant to be defined, by annotation.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
