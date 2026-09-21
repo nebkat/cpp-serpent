@@ -543,7 +543,6 @@ public:
             return this->read_integer<T>();
     }
 
-    /** The array or object contents, or nullptr when it is neither. */
     /** The elements, of an owned array or a borrowed one alike; empty when it is neither. */
     [[nodiscard]] std::span<const value> as_array() const noexcept {
         if (this->form() != shape::array_block || this->slot.items == nullptr) return {};
@@ -552,14 +551,6 @@ public:
     /** The members, of an owned object or a borrowed one alike; empty when it is neither. */
     [[nodiscard]] std::span<const member> as_object() const noexcept;
 
-    /**
-     * The same, to change rather than to read.
-     *
-     * A borrowed node points into storage a document owns and several values may share, so it
-     * is copied into storage of this value's own before anything may write to it - the one
-     * place a read-only node becomes an editable one, and the only place it costs anything.
-     * Still nullptr when this is not an array or an object at all.
-     */
     /**
      * The elements to change rather than to read.
      *
@@ -617,14 +608,12 @@ public:
     /** The member, or a null value when there is none. Never adds. */
     [[nodiscard]] const value &operator[](std::string_view name) const noexcept;
 
-
     [[nodiscard]] bool contains(std::string_view name) const noexcept;
-
 
     /** The member, or an error naming the key. */
     [[nodiscard]] const value &at(std::string_view name) const;
 
-
+    /** The element, or an error when there is no such index. */
     [[nodiscard]] const value &at(std::size_t index) const {
         const auto items = this->as_array();
         if (index >= items.size()) raise(errc::out_of_range, 0);
@@ -688,6 +677,11 @@ private:
         return std::nullopt;
     }
 };
+
+// A pointer's worth of payload, seven bytes of tail and the tag byte: a node the size of two
+// pointers on every target, which is what lets a run hold its elements rather than point at them.
+static_assert(sizeof(value) == 16);
+static_assert(alignof(value) == 8);
 
 /// The name of a member, as text; empty when the name is not text at all.
 [[nodiscard]] inline std::string_view name_of(const member &entry) noexcept {

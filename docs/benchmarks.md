@@ -104,5 +104,5 @@ allocates; walking a whole document it is 2-4x behind parsers that index or buil
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
 | convert your own types | level on JSON decode and binary decode, ahead on binary encode, 1.4x behind on JSON encode |
 | traverse whole documents repeatedly | an indexing parser is 2-4x quicker |
-| want a mutable document object | serpent has none |
+| want a mutable document object | [`serpent::value`](value.md), a sixteen-byte node and one allocation per container |
 | need BJData and JSON from one definition, or cannot allocate while reading | serpent |

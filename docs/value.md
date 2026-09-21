@@ -114,6 +114,54 @@ Objects remember the order their members were added, because a document built by
 read by a person. Neither format ascribes meaning to key order, and two objects with the same
 members compare equal whatever order they were built in.
 
+### Arrays and objects
+
+`as_array()` and `as_object()` hand back a span over what the node holds — `std::span<const
+value>` and `std::span<const member>` — empty when it holds something else, so neither has to be
+asked what the node is first:
+
+```cpp
+for (const serpent::value &item : tree.at("ids").as_array())
+    total += item.as<std::int64_t>().value_or(0);
+```
+
+A `member` is a `std::pair<value, value>`, so `.first` is the name and `.second` is what is under
+it, structured bindings unpack it, and `std::get` and comparison come along for free. A name is a
+`value` rather than a `std::string` so that a short one — which nearly every name is — costs no
+allocation, and so that the same member serves an object that owns its names and one that borrows
+them. `name_of(entry)` reads the name as text, empty when the name is not text at all:
+
+```cpp
+for (const auto &[name, held] : tree.as_object())
+    log(name.as<std::string_view>().value_or("?"), held.type());
+```
+
+To write rather than to read, ask for `as_writable_array()` or `as_writable_object()`. They give
+a mutable span over the same elements; what they cannot do is grow it, since growing may move the
+block — `push_back` and `operator[]` on the value itself do that.
+
+## How a node is held
+
+A `serpent::value` is sixteen bytes: eight of payload, seven bytes that alignment would otherwise
+have wasted, and a tag byte. The tag carries the shape in its low nibble and, for a string, the
+inline length in its high one, so a string of up to **fifteen** characters lives in the node
+itself — the same threshold `std::string` gives you, in an object half the size. A longer string
+or a binary blob points at its bytes and keeps its length in the spare seven.
+
+Two pointers wide is not an aesthetic target. The node is what an array of values is *made of*,
+so every byte of it is paid for once per element of every array in the document.
+
+An array is one allocation, not one per element: a count and a capacity sit in front of the
+elements, and the value holds nothing but the pointer to that block. An object is the same block
+of `member`s. So a tree of *n* containers costs *n* allocations plus one per long string — a
+`std::vector` per container would have cost a second allocation each for its own object.
+
+Four of the fourteen shapes are borrowed ones: a node that points at text, bytes, or a run that
+something else owns. A borrowed node is laid out exactly like the owned one it mirrors, so only
+destruction and copying care which it is and every reader treats them alike; copying one gives
+back a node that owns its storage. Asking for `as_writable_array()` or `as_writable_object()` on
+a borrowed node is the one place that copy happens, and the only place it costs anything.
+
 ## Everywhere else a type goes
 
 `value` is an ordinary serializable type: a member of a struct, an element of a container, or the
@@ -130,9 +178,7 @@ Binary stays binary in BJData, which has a type for it, and travels as an array 
 JSON, which does not — the same rule as `std::vector<std::byte>` anywhere else.
 
 From JSON text a tree is built in one pass, the way a reader generated for a type reads: each
-byte looked at once, each value converted straight into the place the tree keeps it. It is still
-a tree of `std::string`s and `std::vector`s — an allocation per container and per name — so
-building one runs at roughly the speed of any library's owning DOM, not of a parser that lays
-its nodes out in an arena. Where a document is only to be looked up in, not held or changed, a
-[structural index](reading.md#an-index-for-a-document-read-more-than-once) is built several times faster and answers the
-same questions.
+byte looked at once, each value converted straight into the place the tree keeps it. Where a
+document is only to be looked up in, not held or changed, reading the bytes in place is still
+cheaper again, and a [structural index](reading.md#an-index-for-a-document-read-more-than-once)
+answers the same questions over a document read more than once.
