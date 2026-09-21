@@ -231,77 +231,6 @@ public:
      * person, and the order the fields were written in is the order they were meant in. Neither
      * format ascribes meaning to key order, so nothing downstream depends on the choice.
      */
-    /**
-     * The members of an object, in the order they were added.
-     *
-     * Insertion order rather than sorted, because a document built by hand is usually read by a
-     * person, and the order the fields were written in is the order they were meant in. Neither
-     * format ascribes meaning to key order, so nothing downstream depends on the choice.
-     *
-     * One allocation, like an array: the members sit in a run, and a name is a value like any
-     * other - inline where it is short, which nearly every name is, and in a block of its own
-     * where a document owns it. That a name is a value is what lets one span describe the
-     * members of an owned object and of one inside a document.
-     */
-    class object {
-        detail::run<member> *entries = nullptr;
-
-    public:
-        using entry = member;
-
-        object() = default;
-        object(std::initializer_list<std::pair<const std::string_view, value>> members);
-        ~object();
-        object(const object &other);
-        object(object &&other) noexcept : entries(std::exchange(other.entries, nullptr)) {}
-        object &operator=(const object &other);
-        object &operator=(object &&other) noexcept {
-            if (this != &other) { this->clear(); this->entries = std::exchange(other.entries, nullptr); }
-            return *this;
-        }
-
-        [[nodiscard]] const member *begin() const noexcept;
-        [[nodiscard]] const member *end() const noexcept;
-        [[nodiscard]] member *begin() noexcept;
-        [[nodiscard]] member *end() noexcept;
-        [[nodiscard]] std::size_t size() const noexcept;
-        [[nodiscard]] bool empty() const noexcept { return this->size() == 0; }
-        [[nodiscard]] std::span<const member> members() const noexcept;
-
-        void clear() noexcept;
-
-        [[nodiscard]] const value *find(std::string_view name) const noexcept;
-        [[nodiscard]] value *find(std::string_view name) noexcept;
-        [[nodiscard]] bool contains(std::string_view name) const noexcept { return this->find(name) != nullptr; }
-
-        /** The member, adding it as null if it was not there. */
-        value &operator[](std::string_view name);
-
-        /**
-         * Adds a member without looking for one of that name first, for a builder that adds
-         * members one after another and calls coalesce_duplicates() once: looking on every
-         * addition costs an object of N members N-squared comparisons.
-         */
-        void append(std::string_view name, value item);
-
-        /** Room for as many members, so a builder that knows the count grows the run once. */
-        void reserve(std::size_t members);
-
-        /** Leaves one member per name - the last one added under it, where the first was. */
-        void coalesce_duplicates();
-
-        /** Removes a member, saying whether there was one. */
-        bool erase(std::string_view name);
-
-        /**
-         * The same members with the same values, whatever order they were added in.
-         *
-         * Spelled out rather than defaulted, both because neither format ascribes meaning to
-         * key order and because a defaulted one would not be found at all: without it, two
-         * objects compare by converting each to a value, which compares its object again.
-         */
-        friend bool operator==(const object &left, const object &right) noexcept;
-    };
 
     // ---------------- how one is held ----------------
     //
@@ -714,45 +643,6 @@ static_assert(alignof(value) == 8);
 
 using member_run = detail::run<member>;
 
-inline value::object::object(std::initializer_list<std::pair<const std::string_view, value>> members) {
-    this->entries = member_run::reserved(static_cast<std::uint32_t>(members.size()));
-    for (const auto &[name, held] : members)
-        this->entries = member_run::appended(this->entries, member { value { name }, held });
-}
-
-inline value::object::~object() { member_run::release(this->entries); }
-
-inline value::object::object(const object &other) : entries(member_run::copy_of(other.entries)) {}
-
-inline value::object &value::object::operator=(const object &other) {
-    if (this != &other) {
-        auto *copy = member_run::copy_of(other.entries);
-        member_run::release(this->entries);
-        this->entries = copy;
-    }
-    return *this;
-}
-
-inline void value::object::clear() noexcept {
-    member_run::release(this->entries);
-    this->entries = nullptr;
-}
-
-inline const member *value::object::begin() const noexcept {
-    return this->entries == nullptr ? nullptr : this->entries->begin();
-}
-inline const member *value::object::end() const noexcept {
-    return this->entries == nullptr ? nullptr : this->entries->end();
-}
-inline member *value::object::begin() noexcept {
-    return this->entries == nullptr ? nullptr : this->entries->begin();
-}
-inline member *value::object::end() noexcept {
-    return this->entries == nullptr ? nullptr : this->entries->end();
-}
-inline std::size_t value::object::size() const noexcept {
-    return this->entries == nullptr ? 0 : this->entries->size();
-}
 inline void value::release_block() noexcept {
     switch (this->held()) {
     case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
@@ -891,39 +781,6 @@ inline std::span<member> value::as_writable_object() noexcept {
     return { this->slot.members->data(), this->slot.members->size() };
 }
 
-inline std::span<const member> value::object::members() const noexcept {
-    if (this->entries == nullptr) return {};
-    const auto *first = static_cast<const detail::run<member> *>(this->entries)->data();
-    return { first, this->entries->size() };
-}
-
-inline void value::object::append(std::string_view name, value item) {
-    this->entries = member_run::appended(this->entries, member { value { name }, std::move(item) });
-}
-
-inline void value::object::reserve(std::size_t members) {
-    if (this->entries != nullptr || members == 0) return;
-    this->entries = member_run::reserved(static_cast<std::uint32_t>(members));
-}
-
-inline const value *value::object::find(std::string_view name) const noexcept {
-    for (const auto &entry : this->members())
-        if (name_of(entry) == name) return &entry.second;
-    return nullptr;
-}
-
-inline value *value::object::find(std::string_view name) noexcept {
-    for (auto *entry = this->begin(); entry != this->end(); ++entry)
-        if (name_of(*entry) == name) return &entry->second;
-    return nullptr;
-}
-
-inline value &value::object::operator[](std::string_view name) {
-    if (auto *found = this->find(name)) return *found;
-    this->append(name, value {});
-    return this->entries->data()[this->entries->size() - 1].second;
-}
-
 namespace detail {
 
 /** Leaves one member per name in a run - the last added under it, where the first was. */
@@ -1002,29 +859,9 @@ inline void coalesce_run(run<member> *&entries_run) {
 
 } // namespace detail
 
-inline void value::object::coalesce_duplicates() { detail::coalesce_run(this->entries); }
-
 inline void value::coalesce_members() {
     if (this->held() != shape::object_block) return;
     detail::coalesce_run(this->slot.members);
-}
-
-inline bool operator==(const value::object &left, const value::object &right) noexcept {
-    if (left.size() != right.size()) return false;
-    return std::ranges::all_of(left.members(), [&right](const member &entry) {
-        const auto *other = right.find(name_of(entry));
-        return other != nullptr && *other == entry.second;
-    });
-}
-
-inline bool value::object::erase(std::string_view name) {
-    for (std::size_t index = 0; index < this->size(); ++index) {
-        if (name_of(this->entries->data()[index]) == name) {
-            member_run::erase_at(this->entries, index);
-            return true;
-        }
-    }
-    return false;
 }
 
 class value_array_scope;
