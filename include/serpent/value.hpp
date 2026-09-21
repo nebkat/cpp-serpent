@@ -430,14 +430,28 @@ public:
     [[nodiscard]] const array *as_array() const noexcept {
         return this->form() == shape::array_block ? this->slot.items : nullptr;
     }
-    [[nodiscard]] array *as_array() noexcept {
-        return this->form() == shape::array_block ? this->slot.items : nullptr;
-    }
     [[nodiscard]] const object *as_object() const noexcept {
         return this->form() == shape::object_block ? this->slot.members : nullptr;
     }
-    [[nodiscard]] object *as_object() noexcept {
-        return this->form() == shape::object_block ? this->slot.members : nullptr;
+
+    /**
+     * The same, to change rather than to read.
+     *
+     * A borrowed node points into storage a document owns and several values may share, so it
+     * is copied into storage of this value's own before anything may write to it - the one
+     * place a read-only node becomes an editable one, and the only place it costs anything.
+     * Still nullptr when this is not an array or an object at all.
+     */
+    [[nodiscard]] array *as_writable_array() {
+        if (this->form() != shape::array_block) return nullptr;
+        if (this->is_borrowed()) *this = value { *this->slot.items };
+        return this->slot.items;
+    }
+
+    [[nodiscard]] object *as_writable_object() {
+        if (this->form() != shape::object_block) return nullptr;
+        if (this->is_borrowed()) *this = value { *this->slot.members };
+        return this->slot.members;
     }
 
     /** How many members or elements, counting a scalar as one and null as none. */
@@ -458,7 +472,7 @@ public:
      */
     value &operator[](std::string_view name) {
         if (this->is_null()) this->emplace<object>();
-        auto *members = this->as_object();
+        auto *members = this->as_writable_object();
         if (members == nullptr) raise(errc::type_mismatch, 0, name);
         return (*members)[name];
     }
@@ -494,7 +508,7 @@ public:
     /** Appends, turning a null value into an array first, as operator[] does for objects. */
     value &push_back(value item) {
         if (this->is_null()) this->emplace<array>();
-        auto *items = this->as_array();
+        auto *items = this->as_writable_array();
         if (items == nullptr) raise(errc::type_mismatch, 0);
         return items->emplace_back(std::move(item));
     }
@@ -707,7 +721,7 @@ class value_writer {
         }
         auto &top = this->open.back();
         if (top.is_object) {
-            top.held.as_object()->append(std::move(top.pending_key), std::move(item));
+            top.held.as_writable_object()->append(std::move(top.pending_key), std::move(item));
             top.pending_key.clear();
         } else {
             top.held.push_back(std::move(item));
@@ -770,7 +784,7 @@ public:
 
     void end_container() {
         auto closing = std::move(this->open.back().held);
-        if (this->open.back().is_object) closing.as_object()->coalesce_duplicates();
+        if (this->open.back().is_object) closing.as_writable_object()->coalesce_duplicates();
         this->open.pop_back();
         this->place(std::move(closing));
     }
