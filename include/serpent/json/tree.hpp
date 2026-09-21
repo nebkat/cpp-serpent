@@ -62,7 +62,7 @@ public:
         switch (this->scan.peek()) {
         case '{':
             this->scan.advance(1);
-            return this->members(into.emplace<serpent::value::object>(), depth);
+            return this->members(into, depth);
         case '[':
             this->scan.advance(1);
             return this->elements(into, depth);
@@ -167,7 +167,7 @@ private:
         return true;
     }
 
-    bool members(serpent::value::object &members, int depth) {
+    bool members(serpent::value &into, int depth) {
         scanner::skip_whitespace(this->scan);
         if (!this->scan.available(1)) {
             this->scan.fail(errc::unterminated_container);
@@ -175,6 +175,7 @@ private:
         }
         if (this->scan.peek() == '}') {
             this->scan.advance(1);
+            into = serpent::value::empty_object();
             return true;
         }
         auto &gathered = this->members_at[static_cast<std::size_t>(depth)];
@@ -199,10 +200,12 @@ private:
             if (!this->build(held, depth + 1)) return false;
         } while (!this->closed('}') && this->scan.ok());
         if (!this->scan.ok()) return false;
-        members.reserve(gathered.size());
-        for (auto &entry : gathered) members.append(entry.name(), std::move(entry.held));
+        auto *run = serpent::detail::run<serpent::member>::reserved(static_cast<std::uint32_t>(gathered.size()));
+        for (auto &entry : gathered)
+            run = serpent::detail::run<serpent::member>::appended(run, std::move(entry));
         gathered.clear();
-        members.coalesce_duplicates();
+        into = serpent::value { run };
+        into.coalesce_members();
         return true;
     }
 };

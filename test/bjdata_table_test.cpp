@@ -224,7 +224,7 @@ int main() {
     check(bjdata::decode<std::vector<table_row>>(written) == rows_out, "and reads back as the records");
     const auto ours = bjdata::decode<value>(written);
     auto theirs = bjdata::decode<value>(rows);
-    for (auto &row : theirs->as_writable_array()) row.as_writable_object()->erase("nothing");
+    for (auto &row : theirs->as_writable_array()) row.erase_member("nothing");
     check(ours && *ours == *theirs, "and as the same tree as dart-bjdata's, less the null column");
     check(written.size() < bjdata::encode(rows_out, { .tables = false }).size() / 2, "at less than half the size of the array of objects");
     check(bjdata::measure(rows_out) == written.size(), "measure() agrees");

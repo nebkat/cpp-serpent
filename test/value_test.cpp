@@ -260,8 +260,8 @@ int main() {
                         && large->at("k0").as<int>() == 0,
                 "and so does an object with many members");
         std::size_t position = 0;
-        for (const auto &[name, held] : *large->as_object()) {
-            if (name == "k7") check_equal(position, std::size_t { 7 }, "which stays where its first occurrence was");
+        for (const auto &[name, held] : large->as_object()) {
+            if (name.as<std::string_view>() == "k7") check_equal(position, std::size_t { 7 }, "which stays where its first occurrence was");
             ++position;
         }
     }

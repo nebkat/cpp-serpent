@@ -300,8 +300,8 @@ private:
         double        number;
         const char      *text;
         const std::byte *bytes;
-        array        *items;      ///< owned: a block this value frees. borrowed: the arena's
-        object       *members;
+        array         *items;    ///< owned: a run this value frees. borrowed: the document's
+        detail::run<member> *members;
         char          head[8];
     };
 
@@ -353,36 +353,8 @@ private:
         this->set_shape(shape::binary_block);
     }
 
-    void release() noexcept {
-        // A borrowed node points into storage something else owns, so there is nothing to free.
-        switch (this->borrowed(this->held()) ? shape::empty : this->held()) {
-        case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
-        case shape::binary_block: delete[] const_cast<std::byte *>(this->slot.bytes); break;
-        case shape::array_block:  array::release(this->slot.items); break;
-        case shape::object_block: delete this->slot.members; break;
-        default: break;
-        }
-        this->slot.whole_signed = 0;
-        this->tag = 0;
-    }
-
-    // Always into storage of our own: a copy of a borrowed node outlives the arena it came
-    // from, which is what makes taking one out of a document safe.
-    void copy_from(const value &other) {
-        switch (other.form()) {
-        case shape::text_inline:
-        case shape::empty: case shape::truth: case shape::whole_signed:
-        case shape::whole_unsigned: case shape::number:
-            this->slot = other.slot;
-            std::memcpy(this->tail, other.tail, sizeof(this->tail));
-            this->tag = other.tag;
-            break;
-        case shape::text_block:   this->assign_text({ other.slot.text, other.block_size() }); break;
-        case shape::binary_block: this->assign_bytes({ other.slot.bytes, other.block_size() }); break;
-        case shape::array_block:  this->slot.items = array::copy_of(other.slot.items); this->set_shape(shape::array_block); break;
-        case shape::object_block: this->slot.members = new object(*other.slot.members); this->set_shape(shape::object_block); break;
-        }
-    }
+    void release() noexcept;
+    void copy_from(const value &other);
 
 public:
     value() = default;
@@ -439,26 +411,12 @@ public:
     value(std::span<const std::byte> bytes) { this->assign_bytes(bytes); }
     value(binary bytes) { this->assign_bytes(bytes); }
     value(array *items) noexcept { this->slot.items = items; this->set_shape(shape::array_block); }
-    value(object members) { this->slot.members = new object(std::move(members)); this->set_shape(shape::object_block); }
+    value(detail::run<member> *members) noexcept { this->slot.members = members; this->set_shape(shape::object_block); }
 
     /**
      * Makes this value hold a T built from the arguments, in place - for a builder that fills
      * a tree where it stands rather than assigning a value made elsewhere.
      */
-    template<typename T, typename... Arguments>
-        requires (std::same_as<T, array> || std::same_as<T, object>) && std::constructible_from<T, Arguments &&...>
-    T &emplace(Arguments &&...arguments) {
-        this->release();
-        if constexpr (std::same_as<T, array>) {
-            this->slot.items = new array(std::forward<Arguments>(arguments)...);
-            this->set_shape(shape::array_block);
-            return *this->slot.items;
-        } else {
-            this->slot.members = new object(std::forward<Arguments>(arguments)...);
-            this->set_shape(shape::object_block);
-            return *this->slot.members;
-        }
-    }
 
     /// Replaces whatever this held with text, without a temporary the caller has to keep.
     void assign(std::string_view text) { this->release(); this->assign_text(text); }
@@ -492,9 +450,17 @@ public:
         return held;
     }
 
-    [[nodiscard]] static value borrowing(object &members) noexcept {
+    /// A value holding an object with no members yet, for a builder to append to.
+    [[nodiscard]] static value empty_object() noexcept {
         value held;
-        held.slot.members = &members;
+        held.slot.members = nullptr;
+        held.set_shape(shape::object_block);
+        return held;
+    }
+
+    [[nodiscard]] static value borrowing(detail::run<member> *members) noexcept {
+        value held;
+        held.slot.members = members;
         held.set_shape(shape::object_view);
         return held;
     }
@@ -503,9 +469,7 @@ public:
     [[nodiscard]] bool is_borrowed() const noexcept { return borrowed(this->held()); }
 
     /** An object written out at its call site: the braces a nested document is built with. */
-    static value of(std::initializer_list<std::pair<const std::string_view, value>> members) {
-        return value { object { members } };
-    }
+    static value of(std::initializer_list<std::pair<const std::string_view, value>> members);
 
     /** An array written out at its call site. */
     static value of(std::initializer_list<value> items) {
@@ -575,9 +539,8 @@ public:
         if (this->form() != shape::array_block || this->slot.items == nullptr) return {};
         return { this->slot.items->data(), this->slot.items->size() };
     }
-    [[nodiscard]] const object *as_object() const noexcept {
-        return this->form() == shape::object_block ? this->slot.members : nullptr;
-    }
+    /** The members, of an owned object or a borrowed one alike; empty when it is neither. */
+    [[nodiscard]] std::span<const member> as_object() const noexcept;
 
     /**
      * The same, to change rather than to read.
@@ -607,16 +570,26 @@ public:
         return { this->slot.items->data(), this->slot.items->size() };
     }
 
-    [[nodiscard]] object *as_writable_object() {
-        if (this->form() != shape::object_block) return nullptr;
-        if (this->is_borrowed()) *this = value { *this->slot.members };
-        return this->slot.members;
-    }
+    /**
+     * The members to change rather than to read. A borrowed run belongs to a document, so it
+     * is copied into one of this value's own first. Writable but not growable: growing may
+     * move the run, so operator[] on the value does that.
+     */
+    [[nodiscard]] std::span<member> as_writable_object();
+
+    /// Adds a member without looking for one of that name first - what a builder does.
+    void append_member(std::string_view name, value item);
+
+    /// Leaves one member per name - the last added under it, where the first was.
+    void coalesce_members();
+
+    /// Removes a member by name, saying whether there was one.
+    bool erase_member(std::string_view name);
 
     /** How many members or elements, counting a scalar as one and null as none. */
     [[nodiscard]] std::size_t size() const noexcept {
         if (this->is_array()) return this->as_array().size();
-        if (const auto *members = this->as_object()) return members->size();
+        if (this->is_object()) return this->as_object().size();
         return this->is_null() ? 0 : 1;
     }
 
@@ -629,34 +602,18 @@ public:
      * one branch at a time. Anything else already holding a value is a programming error and
      * says so - it would otherwise silently discard what was there.
      */
-    value &operator[](std::string_view name) {
-        if (this->is_null()) this->emplace<object>();
-        auto *members = this->as_writable_object();
-        if (members == nullptr) raise(errc::type_mismatch, 0, name);
-        return (*members)[name];
-    }
+    value &operator[](std::string_view name);
 
     /** The member, or a null value when there is none. Never adds. */
-    [[nodiscard]] const value &operator[](std::string_view name) const noexcept {
-        static const value nothing {};
-        const auto *members = this->as_object();
-        if (members == nullptr) return nothing;
-        const auto *found = members->find(name);
-        return found != nullptr ? *found : nothing;
-    }
+    [[nodiscard]] const value &operator[](std::string_view name) const noexcept;
 
-    [[nodiscard]] bool contains(std::string_view name) const noexcept {
-        const auto *members = this->as_object();
-        return members != nullptr && members->contains(name);
-    }
+
+    [[nodiscard]] bool contains(std::string_view name) const noexcept;
+
 
     /** The member, or an error naming the key. */
-    [[nodiscard]] const value &at(std::string_view name) const {
-        const auto *members = this->as_object();
-        const auto *found = members != nullptr ? members->find(name) : nullptr;
-        if (found == nullptr) raise(errc::missing_key, 0, name);
-        return *found;
-    }
+    [[nodiscard]] const value &at(std::string_view name) const;
+
 
     [[nodiscard]] const value &at(std::size_t index) const {
         const auto items = this->as_array();
@@ -676,39 +633,9 @@ public:
     /**
      * By what it holds, not by how it is held: a short string and a long one compare as their
      * text, a signed and an unsigned node may hold the same number, and a borrowed node equals
-     * the owned copy taken from it. Defaulting this would compare the payload union and the
-     * tag, which says the opposite of all three.
+     * the owned copy taken from it.
      */
-    friend bool operator==(const value &left, const value &right) noexcept {
-        const auto what = left.type();
-        if (what != right.type()) return false;
-        switch (what) {
-        case kind::null:    return true;
-        case kind::boolean: return left.slot.truth == right.slot.truth;
-        case kind::real:    return left.slot.number == right.slot.number;
-        case kind::string:  return left.read_text() == right.read_text();
-        case kind::integer:
-            if (const auto a = left.read_integer<std::int64_t>()) {
-                const auto b = right.read_integer<std::int64_t>();
-                return b && *a == *b;
-            }
-            {
-                const auto a = left.read_integer<std::uint64_t>();
-                const auto b = right.read_integer<std::uint64_t>();
-                return a && b && *a == *b;
-            }
-        case kind::array: {
-            // One kind covers both, so a binary never equals a list of numbers that spells it.
-            const auto left_bytes = left.read_binary();
-            const auto right_bytes = right.read_binary();
-            if (left_bytes.has_value() != right_bytes.has_value()) return false;
-            if (left_bytes) return std::ranges::equal(*left_bytes, *right_bytes);
-            return std::ranges::equal(left.as_array(), right.as_array());
-        }
-        case kind::object:  return *left.as_object() == *right.as_object();
-        default:            return false;
-        }
-    }
+    friend bool operator==(const value &left, const value &right) noexcept;
 
 private:
     [[nodiscard]] std::optional<bool> read_bool() const noexcept {
@@ -813,6 +740,176 @@ inline member *value::object::end() noexcept {
 inline std::size_t value::object::size() const noexcept {
     return this->entries == nullptr ? 0 : this->entries->size();
 }
+inline void value::release() noexcept {
+    switch (this->borrowed(this->held()) ? shape::empty : this->held()) {
+    case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
+    case shape::binary_block: delete[] const_cast<std::byte *>(this->slot.bytes); break;
+    case shape::array_block:  array::release(this->slot.items); break;
+    case shape::object_block: detail::run<member>::release(this->slot.members); break;
+    default: break;
+    }
+    this->slot.whole_signed = 0;
+    this->tag = 0;
+}
+
+inline void value::copy_from(const value &other) {
+    switch (other.form()) {
+    case shape::text_inline:
+    case shape::empty: case shape::truth: case shape::whole_signed:
+    case shape::whole_unsigned: case shape::number:
+        this->slot = other.slot;
+        std::memcpy(this->tail, other.tail, sizeof(this->tail));
+        this->tag = other.tag;
+        break;
+    case shape::text_block:   this->assign_text({ other.slot.text, other.block_size() }); break;
+    case shape::binary_block: this->assign_bytes({ other.slot.bytes, other.block_size() }); break;
+    case shape::array_block:
+        this->slot.items = array::copy_of(other.slot.items);
+        this->set_shape(shape::array_block);
+        break;
+    case shape::object_block:
+        this->slot.members = detail::run<member>::copy_of(other.slot.members);
+        this->set_shape(shape::object_block);
+        break;
+    default: break;
+    }
+}
+
+inline value &value::operator[](std::string_view name) {
+    if (this->is_null()) { this->slot.members = nullptr; this->set_shape(shape::object_block); }
+    if (!this->is_object()) raise(errc::type_mismatch, 0, name);
+    if (this->is_borrowed()) (void) this->as_writable_object();
+    for (auto &entry : this->as_writable_object())
+        if (entry.name() == name) return entry.held;
+    this->slot.members = detail::run<member>::appended(
+            this->slot.members, member { value { name }, value {} });
+    return (*this->slot.members)[this->slot.members->size() - 1].held;
+}
+
+inline value value::of(std::initializer_list<std::pair<const std::string_view, value>> members) {
+    auto *run = detail::run<member>::reserved(static_cast<std::uint32_t>(members.size()));
+    for (const auto &[name, held] : members)
+        run = detail::run<member>::appended(run, member { value { name }, held });
+    return value { run };
+}
+
+inline bool operator==(const value &left, const value &right) noexcept {
+    const auto what = left.type();
+    if (what != right.type()) return false;
+    switch (what) {
+    case kind::null:    return true;
+    case kind::boolean: return left.slot.truth == right.slot.truth;
+    case kind::real:    return left.slot.number == right.slot.number;
+    case kind::string:  return left.read_text() == right.read_text();
+    case kind::integer:
+        if (const auto a = left.read_integer<std::int64_t>()) {
+            const auto b = right.read_integer<std::int64_t>();
+            return b && *a == *b;
+        }
+        {
+            const auto a = left.read_integer<std::uint64_t>();
+            const auto b = right.read_integer<std::uint64_t>();
+            return a && b && *a == *b;
+        }
+    case kind::array: {
+        // One kind covers both, so a binary never equals a list of numbers that spells it.
+        const auto left_bytes = left.read_binary();
+        const auto right_bytes = right.read_binary();
+        if (left_bytes.has_value() != right_bytes.has_value()) return false;
+        if (left_bytes) return std::ranges::equal(*left_bytes, *right_bytes);
+        return std::ranges::equal(left.as_array(), right.as_array());
+    }
+    case kind::object: {
+        const auto ours = left.as_object();
+        if (ours.size() != right.as_object().size()) return false;
+        // By name rather than in order: neither format ascribes meaning to key order.
+        for (const auto &entry : ours) {
+            const value &other = right[entry.name()];
+            if (!(other == entry.held)) return false;
+        }
+        return true;
+    }
+    default:            return false;
+    }
+}
+
+inline const value &value::operator[](std::string_view name) const noexcept {
+    static const value nothing {};
+    for (const auto &entry : this->as_object())
+        if (entry.name() == name) return entry.held;
+    return nothing;
+}
+
+inline bool value::contains(std::string_view name) const noexcept {
+    for (const auto &entry : this->as_object())
+        if (entry.name() == name) return true;
+    return false;
+}
+
+inline const value &value::at(std::string_view name) const {
+    for (const auto &entry : this->as_object())
+        if (entry.name() == name) return entry.held;
+    raise(errc::missing_key, 0, name);
+}
+
+/// Adds a member without looking for one of that name first - what a builder does.
+inline void value::append_member(std::string_view name, value item) {
+    if (this->is_null()) { this->slot.members = nullptr; this->set_shape(shape::object_block); }
+    if (this->is_borrowed()) (void) this->as_writable_object();
+    this->slot.members = detail::run<member>::appended(
+            this->slot.members, member { value { name }, std::move(item) });
+}
+
+/// Leaves one member per name - the last added under it, where the first was.
+inline void value::coalesce_members() {
+    const auto members = this->as_writable_object();
+    if (members.size() < 2) return;
+    std::uint32_t kept = 0;
+    for (std::size_t index = 0; index < members.size(); ++index) {
+        bool merged = false;
+        for (std::uint32_t earlier = 0; earlier < kept; ++earlier) {
+            if (members[earlier].name() == members[index].name()) {
+                members[earlier].held = std::move(members[index].held);
+                merged = true;
+                break;
+            }
+        }
+        if (merged) continue;
+        if (kept != index) members[kept] = std::move(members[index]);
+        ++kept;
+    }
+    detail::run<member>::shrink_to(this->slot.members, kept);
+}
+
+inline bool value::erase_member(std::string_view name) {
+    const auto members = this->as_writable_object();
+    for (std::size_t index = 0; index < members.size(); ++index) {
+        if (members[index].name() == name) {
+            detail::run<member>::erase_at(this->slot.members, index);
+            return true;
+        }
+    }
+    return false;
+}
+
+inline std::span<const member> value::as_object() const noexcept {
+    if (this->form() != shape::object_block || this->slot.members == nullptr) return {};
+    const auto *first = static_cast<const detail::run<member> *>(this->slot.members)->data();
+    return { first, this->slot.members->size() };
+}
+
+inline std::span<member> value::as_writable_object() {
+    if (this->form() != shape::object_block) return {};
+    if (this->is_borrowed()) {
+        auto *copy = detail::run<member>::copy_of(this->slot.members);
+        this->release();
+        this->slot.members = copy;
+        this->set_shape(shape::object_block);
+    }
+    if (this->slot.members == nullptr) return {};
+    return { this->slot.members->data(), this->slot.members->size() };
+}
+
 inline std::span<const member> value::object::members() const noexcept {
     if (this->entries == nullptr) return {};
     const auto *first = static_cast<const detail::run<member> *>(this->entries)->data();
@@ -965,7 +1062,7 @@ class value_writer {
         }
         auto &top = this->open.back();
         if (top.is_object) {
-            top.held.as_writable_object()->append(std::move(top.pending_key), std::move(item));
+            top.held.append_member(top.pending_key, std::move(item));
             top.pending_key.clear();
         } else {
             top.held.push_back(std::move(item));
@@ -1024,11 +1121,11 @@ public:
     void range(const R &items);
 
     void begin_array() { this->open.push_back(frame { serpent::value { static_cast<serpent::value::array *>(nullptr) }, {}, false }); }
-    void begin_object() { this->open.push_back(frame { serpent::value { serpent::value::object {} }, {}, true }); }
+    void begin_object() { this->open.push_back(frame { serpent::value::empty_object(), {}, true }); }
 
     void end_container() {
         auto closing = std::move(this->open.back().held);
-        if (this->open.back().is_object) closing.as_writable_object()->coalesce_duplicates();
+        if (this->open.back().is_object) closing.coalesce_members();
         this->open.pop_back();
         this->place(std::move(closing));
     }
@@ -1156,10 +1253,9 @@ public:
 
     [[nodiscard]] value_reader operator[](std::string_view name) const noexcept {
         if (this->target == nullptr) return {};
-        const auto *members = this->target->as_object();
-        if (members == nullptr) return {};
-        const auto *found = members->find(name);
-        return found != nullptr ? value_reader { *found } : value_reader {};
+        for (const auto &entry : this->target->as_object())
+            if (entry.name() == name) return value_reader { entry.held };
+        return {};
     }
 
     [[nodiscard]] value_reader operator[](std::size_t index) const noexcept {
@@ -1236,15 +1332,13 @@ public:
     };
 
     class member_range {
-        const value::object *members = nullptr;
+        std::span<const member> members {};
 
     public:
-        constexpr explicit member_range(const value::object *members) noexcept : members(members) {}
-        [[nodiscard]] member_iterator begin() const noexcept {
-            return member_iterator { this->members == nullptr ? nullptr : &*this->members->begin() };
-        }
+        constexpr explicit member_range(std::span<const member> members) noexcept : members(members) {}
+        [[nodiscard]] member_iterator begin() const noexcept { return member_iterator { this->members.data() }; }
         [[nodiscard]] member_iterator end() const noexcept {
-            return member_iterator { this->members == nullptr ? nullptr : &*this->members->begin() + this->members->size() };
+            return member_iterator { this->members.data() + this->members.size() };
         }
     };
 
@@ -1253,7 +1347,7 @@ public:
     }
 
     [[nodiscard]] member_range items() const noexcept {
-        return member_range { this->target == nullptr ? nullptr : this->target->as_object() };
+        return member_range { this->target == nullptr ? std::span<const member> {} : this->target->as_object() };
     }
 
     /**
@@ -1324,7 +1418,7 @@ struct serializer<value, void> {
             return;
         case kind::object: {
             const auto scope = out.object();
-            for (const auto &entry : item.as_object()->members()) {
+            for (const auto &entry : item.as_object()) {
                 out.key(entry.name());
                 out.value(entry.held);
             }
@@ -1385,15 +1479,15 @@ struct serializer<value, void> {
             return true;
         }
         case kind::object: {
-            value::object members;
+            value built = value::empty_object();
             for (const auto &entry : source.items()) {
                 // key_string() rather than the key itself, which a text format leaves encoded.
                 value held;
                 if (!read(entry.value, held)) return false;
-                members.append(entry.key_string(), std::move(held));
+                built.append_member(entry.key_string(), std::move(held));
             }
-            members.coalesce_duplicates();
-            item = value { std::move(members) };
+            built.coalesce_members();
+            item = std::move(built);
             return true;
         }
         }
