@@ -332,6 +332,12 @@ int main() {
         tree.shrink_to_fit();
         check(tree == before && tree.capacity() == tree.size(), "and again changes nothing");
 
+        value made_empty = value::empty_array();
+        check(made_empty.is_array() && made_empty.size() == 0, "an empty array can be asked for");
+        made_empty.push_back(value { 1 });
+        check_equal(made_empty.size(), std::size_t { 1 }, "and grown from there");
+        check(value::empty_object().is_object(), "as can an empty object");
+
         value empty;
         empty.shrink_to_fit();
         check(empty.is_null(), "a null value shrinks to nothing");

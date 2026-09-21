@@ -471,6 +471,14 @@ public:
     /// Replaces whatever this held with text, without a temporary the caller has to keep.
     void assign(std::string_view text) { this->release(); this->assign_text(text); }
 
+    /// A value holding an array with no elements yet, for a builder to append to.
+    [[nodiscard]] static value empty_array() noexcept {
+        value held;
+        held.slot.items = nullptr;
+        held.set_shape(shape::array_block);
+        return held;
+    }
+
     /// A value holding an object with no members yet, for a builder to append to.
     [[nodiscard]] static value empty_object() noexcept {
         value held;
