@@ -75,11 +75,14 @@ public:
         case '[':
             this->scan.advance(1);
             return this->elements(into, depth);
-        case '"':
-            this->scratch.clear();
-            if (!direct::read(this->scan, this->scratch)) return false;
-            into = this->store.text(this->scratch);
+        case '"': {
+            // Handed to the store as the scan found it: a string with no escape in it is a view
+            // of the text, and a store that can borrow never copies it at all.
+            const auto span = scanner::scan_string(this->scan);
+            if (!this->scan.ok()) return false;
+            into = this->store.scanned_text(span, this->scratch);
             return true;
+        }
         case 't':
             scanner::scan_literal(this->scan, "true");
             into = true;
@@ -192,12 +195,13 @@ private:
             auto &[name, held] = gathered.emplace_back();
             // A name is a value like any other now, so it decodes into the scratch buffer and
             // lands inline where it is short - which nearly every name is.
-            this->scratch.clear();
-            if (!direct::read(this->scan, this->scratch)) {
+            if (!this->scan.available(1) || this->scan.peek() != '"') {
                 if (this->scan.ok()) this->scan.fail(errc::unexpected_character);
                 return false;
             }
-            name = this->store.text(this->scratch);
+            const auto span = scanner::scan_string(this->scan);
+            if (!this->scan.ok()) return false;
+            name = this->store.scanned_text(span, this->scratch);
             scanner::skip_whitespace(this->scan);
             if (!this->scan.need(1)) return false;
             if (this->scan.take() != ':') {

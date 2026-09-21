@@ -123,6 +123,22 @@ public:
         return block;
     }
 
+    /**
+     * Moves a whole span in at once, leaving the span's elements empty.
+     *
+     * A value and a member hold nothing that points back at them, so relocating one is copying
+     * its bytes; a builder gathers a container's contents and then hands the lot over, which is
+     * one copy and one clear rather than a move constructor per element. The clear is what makes
+     * the gathered side safe to destroy afterwards: all-zero is a null value, which owns nothing.
+     */
+    static void place_all(run *block, std::span<T> items) noexcept {
+        static_assert(std::is_nothrow_move_constructible_v<T>, "a run relocates its elements");
+        if (items.empty()) return;
+        std::memcpy(block->data() + block->used, items.data(), items.size() * sizeof(T));
+        std::memset(items.data(), 0, items.size() * sizeof(T));
+        block->used += static_cast<std::uint32_t>(items.size());
+    }
+
     /// Adds one where the room is known to be there, so the block can never move.
     static void place_back(run *block, T item) noexcept {
         std::construct_at(block->data() + block->used, std::move(item));
@@ -1535,15 +1551,24 @@ struct owning_store {
         return held;
     }
 
+    /// A string as the scan left it: taken whole when nothing needs decoding.
+    template<typename Span>
+    [[nodiscard]] value scanned_text(const Span &span, std::string &scratch) const {
+        if (!span.escaped) return this->text(span.contents);
+        scratch.clear();
+        decode_string(span, scratch);
+        return this->text(scratch);
+    }
+
     [[nodiscard]] value array_of(std::span<value> items) const {
         auto *block = value::array::reserved(static_cast<std::uint32_t>(items.size()));
-        for (value &item : items) value::array::place_back(block, std::move(item));
+        value::array::place_all(block, items);
         return value { block };
     }
 
     [[nodiscard]] value object_of(std::span<member> members) const {
         auto *block = detail::run<member>::reserved(static_cast<std::uint32_t>(members.size()));
-        for (member &entry : members) detail::run<member>::place_back(block, std::move(entry));
+        detail::run<member>::place_all(block, members);
         detail::coalesce_run(block);
         return value { block };
     }

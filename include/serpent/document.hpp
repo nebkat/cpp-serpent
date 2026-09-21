@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace serpent {
 
@@ -50,12 +51,34 @@ public:
         return value::borrowing(std::string_view { reinterpret_cast<const char *>(bytes), from.size() });
     }
 
+    /**
+     * A string as the scan left it.
+     *
+     * The document's text is already in the arena, so a string with no escape in it is taken
+     * where it lies - no copy, no decode, nothing but a pointer and a length. Only an escaped
+     * one is decoded, and only then does it need room of its own.
+     */
+    template<typename Span>
+    [[nodiscard]] value scanned_text(const Span &span, std::string &scratch) const {
+        if (!span.escaped) {
+            if (span.contents.size() <= value::inline_text_limit) {
+                value held;
+                held.assign(span.contents);
+                return held;
+            }
+            return value::borrowing(span.contents);
+        }
+        scratch.clear();
+        decode_string(span, scratch);
+        return this->text(scratch);
+    }
+
     [[nodiscard]] value array_of(std::span<value> items) const {
         if (items.empty()) return value { static_cast<value::array *>(nullptr) };
         const auto count = static_cast<std::uint32_t>(items.size());
         void *memory = this->storage->allocate(value::array::footprint(count), value::array::alignment);
         auto *block = value::array::placed(memory, count);
-        for (value &item : items) value::array::place_back(block, std::move(item));
+        value::array::place_all(block, items);
         return value::borrowing(*block);
     }
 
@@ -65,7 +88,7 @@ public:
         const auto count = static_cast<std::uint32_t>(members.size());
         void *memory = this->storage->allocate(member_run::footprint(count), member_run::alignment);
         auto *block = member_run::placed(memory, count);
-        for (member &entry : members) member_run::place_back(block, std::move(entry));
+        member_run::place_all(block, members);
         // Coalescing only ever drops members, so it cannot move the block out of the arena.
         detail::coalesce_run(block);
         return value::borrowing(block);
@@ -117,6 +140,20 @@ public:
 
     /// For a builder filling this document: its arena, and where its root goes.
     [[nodiscard]] detail::arena &store() noexcept { return this->storage; }
+
+    /**
+     * Takes a copy of the document's text into the arena, and answers where it landed.
+     *
+     * Strings are then views of this rather than copies of their own, so the document depends on
+     * nothing the caller keeps. A zero byte is put after it, so the scan that reads it can be the
+     * one that trusts a terminator.
+     */
+    [[nodiscard]] std::string_view keep_text(std::string_view from) {
+        auto *bytes = static_cast<char *>(this->storage.allocate(from.size() + 1, 1));
+        std::memcpy(bytes, from.data(), from.size());
+        bytes[from.size()] = '\0';
+        return std::string_view { bytes, from.size() };
+    }
     void adopt(value root) noexcept { this->tree = std::move(root); }
 };
 
@@ -131,7 +168,10 @@ namespace json {
 template<bool Terminated = false>
 [[nodiscard]] std::expected<document, error> parse_document(std::string_view text) {
     document built;
-    scanner::basic_cursor<Terminated> scan { text, text.data() };
+    // The text goes into the arena once, and every string that needs no decoding is then a view
+    // of it rather than a copy - which is most strings in most documents.
+    const std::string_view kept = built.keep_text(text);
+    scanner::basic_cursor<Terminated> scan { kept, kept.data() };
     value root;
     {
         borrowing_store into { built.store() };
