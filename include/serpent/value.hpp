@@ -115,57 +115,253 @@ public:
         friend bool operator==(const object &left, const object &right) noexcept;
     };
 
-    using storage = std::variant<std::monostate,
-            bool,
-            std::int64_t,
-            std::uint64_t,
-            double,
-            std::string,
-            binary,
-            array,
-            object>;
-
+    // ---------------- how one is held ----------------
+    //
+    // Sixteen bytes: an eight-byte payload, the seven more that alignment would otherwise
+    // waste, and a tag. A string of fifteen characters or fewer lives in those first fifteen
+    // bytes and costs no allocation at all - the same inline length std::string manages in
+    // thirty-two. A longer string, and binary, keep a pointer in the payload and their length
+    // in the wasted bytes beside it. An array or an object is a pointer to one.
+    //
+    // This was a std::variant, which is as wide as its widest alternative plus a discriminator:
+    // a std::string alternative made every node forty bytes, and the node is what an array of
+    // values is made of.
 private:
-    storage held {};
+    /**
+     * Ten shapes for a value that owns what it holds, four more for one that does not - a node
+     * inside an arena, where the arena owns the bytes and freeing them here would be wrong.
+     *
+     * Fourteen codes in a nibble that holds sixteen, so borrowing costs no space at all: not a
+     * byte, and not one of the fifteen characters a short string keeps inline. A borrowed shape
+     * has the same layout as the owned one it mirrors, so only destruction and copying care
+     * which it is; every reader treats them alike.
+     */
+    enum class shape : std::uint8_t {
+        empty = 0, truth, whole_signed, whole_unsigned, number, text_inline,
+        text_block, binary_block, array_block, object_block,
+        text_view,  binary_view,  array_view,  object_view,
+    };
+
+    static constexpr std::uint8_t view_offset =
+            static_cast<std::uint8_t>(shape::text_view) - static_cast<std::uint8_t>(shape::text_block);
+
+    static constexpr bool borrowed(shape what) noexcept { return what >= shape::text_view; }
+
+    /// The owned shape a borrowed one mirrors, so every reader has one case to answer.
+    static constexpr shape owned(shape what) noexcept {
+        return borrowed(what) ? static_cast<shape>(static_cast<std::uint8_t>(what) - view_offset) : what;
+    }
+
+    static constexpr std::size_t inline_capacity = 15;
+
+    union payload {
+        bool          truth;
+        std::int64_t  whole_signed;
+        std::uint64_t whole_unsigned;
+        double        number;
+        const char      *text;
+        const std::byte *bytes;
+        array        *items;
+        object       *members;
+        char          head[8];
+    };
+
+    payload      slot { .whole_signed = 0 };
+    char         tail[7] {};   ///< a short string's remainder, or a block's length
+    std::uint8_t tag {};       ///< shape in the low nibble, inline length in the high one
+
+    [[nodiscard]] shape held() const noexcept { return static_cast<shape>(this->tag & 0x0F); }
+    /// What it holds, with borrowing already answered.
+    [[nodiscard]] shape form() const noexcept { return owned(this->held()); }
+    void set_shape(shape what) noexcept { this->tag = static_cast<std::uint8_t>(what); }
+
+    /// The fifteen inline bytes are the payload and the bytes after it, which are contiguous.
+    [[nodiscard]] const char *inline_data() const noexcept { return this->slot.head; }
+    [[nodiscard]] char *inline_data() noexcept { return this->slot.head; }
+    [[nodiscard]] std::size_t inline_size() const noexcept { return std::size_t(this->tag >> 4); }
+
+    /// A block's length rides in the bytes alignment would have wasted. Four of them, so the
+    /// longest string or binary is as long as anything else this library will hold.
+    [[nodiscard]] std::uint32_t block_size() const noexcept {
+        std::uint32_t length = 0;
+        std::memcpy(&length, this->tail, sizeof(length));
+        return length;
+    }
+    void set_block_size(std::size_t length) noexcept {
+        const auto narrowed = static_cast<std::uint32_t>(length);
+        std::memcpy(this->tail, &narrowed, sizeof(narrowed));
+    }
+
+    void assign_text(std::string_view text) {
+        if (text.size() <= inline_capacity) {
+            std::memcpy(this->inline_data(), text.data(), text.size());
+            this->tag = static_cast<std::uint8_t>((text.size() << 4) | std::uint8_t(shape::text_inline));
+            return;
+        }
+        auto *block = new char[text.size()];
+        std::memcpy(block, text.data(), text.size());
+        this->slot.text = block;
+        this->set_block_size(text.size());
+        this->set_shape(shape::text_block);
+    }
+
+    void assign_bytes(std::span<const std::byte> source) {
+        if (source.empty()) { this->slot.bytes = nullptr; this->set_block_size(0); this->set_shape(shape::binary_block); return; }
+        auto *block = new std::byte[source.size()];
+        std::memcpy(block, source.data(), source.size());
+        this->slot.bytes = block;
+        this->set_block_size(source.size());
+        this->set_shape(shape::binary_block);
+    }
+
+    void release() noexcept {
+        // A borrowed node points into storage something else owns, so there is nothing to free.
+        switch (this->borrowed(this->held()) ? shape::empty : this->held()) {
+        case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
+        case shape::binary_block: delete[] const_cast<std::byte *>(this->slot.bytes); break;
+        case shape::array_block:  delete this->slot.items; break;
+        case shape::object_block: delete this->slot.members; break;
+        default: break;
+        }
+        this->slot.whole_signed = 0;
+        this->tag = 0;
+    }
+
+    // Always into storage of our own: a copy of a borrowed node outlives the arena it came
+    // from, which is what makes taking one out of a document safe.
+    void copy_from(const value &other) {
+        switch (other.form()) {
+        case shape::text_inline:
+        case shape::empty: case shape::truth: case shape::whole_signed:
+        case shape::whole_unsigned: case shape::number:
+            this->slot = other.slot;
+            std::memcpy(this->tail, other.tail, sizeof(this->tail));
+            this->tag = other.tag;
+            break;
+        case shape::text_block:   this->assign_text({ other.slot.text, other.block_size() }); break;
+        case shape::binary_block: this->assign_bytes({ other.slot.bytes, other.block_size() }); break;
+        case shape::array_block:  this->slot.items = new array(*other.slot.items); this->set_shape(shape::array_block); break;
+        case shape::object_block: this->slot.members = new object(*other.slot.members); this->set_shape(shape::object_block); break;
+        }
+    }
 
 public:
     value() = default;
+    ~value() { this->release(); }
+
+    value(const value &other) { this->copy_from(other); }
+    value(value &&other) noexcept
+    : slot(other.slot), tag(other.tag) {
+        std::memcpy(this->tail, other.tail, sizeof(this->tail));
+        other.slot.whole_signed = 0;
+        other.tag = 0;
+    }
+    value &operator=(const value &other) {
+        if (this != &other) { this->release(); this->copy_from(other); }
+        return *this;
+    }
+    value &operator=(value &&other) noexcept {
+        if (this != &other) {
+            this->release();
+            this->slot = other.slot;
+            std::memcpy(this->tail, other.tail, sizeof(this->tail));
+            this->tag = other.tag;
+            other.slot.whole_signed = 0;
+            other.tag = 0;
+        }
+        return *this;
+    }
+
     value(std::nullptr_t) noexcept {}
-    value(bool truth) noexcept : held(truth) {}
+    value(bool truth) noexcept { this->slot.truth = truth; this->set_shape(shape::truth); }
 
     // Split by signedness so that a value above int64 range survives, and taken as the widest
     // of each: the writer narrows every integer to the smallest marker that holds it anyway, so
-    // keeping the declared width here would buy nothing but alternatives to visit.
+    // keeping the declared width here would buy nothing but shapes to switch on.
     template<std::integral T>
     requires (!std::same_as<T, bool>)
     value(T number) noexcept {
-        if constexpr (std::is_signed_v<T>)
-            this->held = static_cast<std::int64_t>(number);
-        else
-            this->held = static_cast<std::uint64_t>(number);
+        if constexpr (std::is_signed_v<T>) {
+            this->slot.whole_signed = static_cast<std::int64_t>(number);
+            this->set_shape(shape::whole_signed);
+        } else {
+            this->slot.whole_unsigned = static_cast<std::uint64_t>(number);
+            this->set_shape(shape::whole_unsigned);
+        }
     }
 
     template<std::floating_point T>
-    value(T number) noexcept : held(static_cast<double>(number)) {}
+    value(T number) noexcept { this->slot.number = static_cast<double>(number); this->set_shape(shape::number); }
 
     // Spelled out rather than left to string_view, which would lose to the bool conversion.
-    value(const char *text) : held(std::string { text }) {}
-    value(std::string_view text) : held(std::string { text }) {}
-    value(std::string text) noexcept : held(std::move(text)) {}
-    value(std::span<const std::byte> bytes) : held(binary { bytes.begin(), bytes.end() }) {}
-    value(binary bytes) noexcept : held(std::move(bytes)) {}
-    value(array items) noexcept : held(std::move(items)) {}
-    value(object members) noexcept : held(std::move(members)) {}
+    value(const char *text) { this->assign_text(text); }
+    value(std::string_view text) { this->assign_text(text); }
+    value(const std::string &text) { this->assign_text(text); }
+    value(std::span<const std::byte> bytes) { this->assign_bytes(bytes); }
+    value(binary bytes) { this->assign_bytes(bytes); }
+    value(array items) { this->slot.items = new array(std::move(items)); this->set_shape(shape::array_block); }
+    value(object members) { this->slot.members = new object(std::move(members)); this->set_shape(shape::object_block); }
 
     /**
      * Makes this value hold a T built from the arguments, in place - for a builder that fills
      * a tree where it stands rather than assigning a value made elsewhere.
      */
     template<typename T, typename... Arguments>
-        requires std::constructible_from<T, Arguments &&...> && requires(storage held) { held.template emplace<T>(); }
+        requires (std::same_as<T, array> || std::same_as<T, object>) && std::constructible_from<T, Arguments &&...>
     T &emplace(Arguments &&...arguments) {
-        return this->held.template emplace<T>(std::forward<Arguments>(arguments)...);
+        this->release();
+        if constexpr (std::same_as<T, array>) {
+            this->slot.items = new array(std::forward<Arguments>(arguments)...);
+            this->set_shape(shape::array_block);
+            return *this->slot.items;
+        } else {
+            this->slot.members = new object(std::forward<Arguments>(arguments)...);
+            this->set_shape(shape::object_block);
+            return *this->slot.members;
+        }
     }
+
+    /// Replaces whatever this held with text, without a temporary the caller has to keep.
+    void assign(std::string_view text) { this->release(); this->assign_text(text); }
+
+    // ---------------- borrowed, for a document that owns the storage ----------------
+    //
+    // The caller keeps the bytes alive for as long as the value is used, the same promise
+    // as<std::string_view>() and every reader in this library already make. Copying one of
+    // these gives a node that owns its own storage and is free of that promise.
+
+    [[nodiscard]] static value borrowing(std::string_view text) noexcept {
+        value held;
+        held.slot.text = text.data();
+        held.set_block_size(text.size());
+        held.set_shape(shape::text_view);
+        return held;
+    }
+
+    [[nodiscard]] static value borrowing(std::span<const std::byte> bytes) noexcept {
+        value held;
+        held.slot.bytes = bytes.data();
+        held.set_block_size(bytes.size());
+        held.set_shape(shape::binary_view);
+        return held;
+    }
+
+    [[nodiscard]] static value borrowing(array &items) noexcept {
+        value held;
+        held.slot.items = &items;
+        held.set_shape(shape::array_view);
+        return held;
+    }
+
+    [[nodiscard]] static value borrowing(object &members) noexcept {
+        value held;
+        held.slot.members = &members;
+        held.set_shape(shape::object_view);
+        return held;
+    }
+
+    /// Whether this points at storage something else owns.
+    [[nodiscard]] bool is_borrowed() const noexcept { return borrowed(this->held()); }
 
     /** An object written out at its call site: the braces a nested document is built with. */
     static value of(std::initializer_list<std::pair<const std::string_view, value>> members) {
@@ -178,30 +374,32 @@ public:
     // ---------------- what it is ----------------
 
     [[nodiscard]] kind type() const noexcept {
-        return std::visit(
-                []<typename T>(const T &) {
-                    if constexpr (std::same_as<T, std::monostate>) return kind::null;
-                    else if constexpr (std::same_as<T, bool>) return kind::boolean;
-                    else if constexpr (std::same_as<T, double>) return kind::real;
-                    else if constexpr (std::same_as<T, std::string>) return kind::string;
-                    else if constexpr (std::same_as<T, object>) return kind::object;
-                    else if constexpr (std::same_as<T, array> || std::same_as<T, binary>) return kind::array;
-                    else return kind::integer;
-                },
-                this->held);
+        switch (this->form()) {
+        case shape::empty:          return kind::null;
+        case shape::truth:          return kind::boolean;
+        case shape::whole_signed:
+        case shape::whole_unsigned: return kind::integer;
+        case shape::number:         return kind::real;
+        case shape::text_inline:
+        case shape::text_block:     return kind::string;
+        case shape::binary_block:
+        case shape::array_block:    return kind::array;
+        case shape::object_block:   return kind::object;
+        }
+        return kind::null;
     }
 
-    [[nodiscard]] bool is_null() const noexcept { return std::holds_alternative<std::monostate>(this->held); }
-    [[nodiscard]] bool is_boolean() const noexcept { return std::holds_alternative<bool>(this->held); }
+    [[nodiscard]] bool is_null() const noexcept { return this->held() == shape::empty; }
+    [[nodiscard]] bool is_boolean() const noexcept { return this->held() == shape::truth; }
     [[nodiscard]] bool is_integer() const noexcept { return this->type() == kind::integer; }
-    [[nodiscard]] bool is_real() const noexcept { return std::holds_alternative<double>(this->held); }
+    [[nodiscard]] bool is_real() const noexcept { return this->form() == shape::number; }
     [[nodiscard]] bool is_number() const noexcept { return this->is_integer() || this->is_real(); }
-    [[nodiscard]] bool is_string() const noexcept { return std::holds_alternative<std::string>(this->held); }
-    [[nodiscard]] bool is_binary() const noexcept { return std::holds_alternative<binary>(this->held); }
-    [[nodiscard]] bool is_array() const noexcept { return std::holds_alternative<array>(this->held); }
-    [[nodiscard]] bool is_object() const noexcept { return std::holds_alternative<object>(this->held); }
-
-    [[nodiscard]] const storage &contents() const noexcept { return this->held; }
+    [[nodiscard]] bool is_string() const noexcept {
+        return this->form() == shape::text_inline || this->form() == shape::text_block;
+    }
+    [[nodiscard]] bool is_binary() const noexcept { return this->form() == shape::binary_block; }
+    [[nodiscard]] bool is_array() const noexcept { return this->form() == shape::array_block; }
+    [[nodiscard]] bool is_object() const noexcept { return this->form() == shape::object_block; }
 
     // ---------------- reading it back ----------------
 
@@ -229,10 +427,18 @@ public:
     }
 
     /** The array or object contents, or nullptr when it is neither. */
-    [[nodiscard]] const array *as_array() const noexcept { return std::get_if<array>(&this->held); }
-    [[nodiscard]] array *as_array() noexcept { return std::get_if<array>(&this->held); }
-    [[nodiscard]] const object *as_object() const noexcept { return std::get_if<object>(&this->held); }
-    [[nodiscard]] object *as_object() noexcept { return std::get_if<object>(&this->held); }
+    [[nodiscard]] const array *as_array() const noexcept {
+        return this->form() == shape::array_block ? this->slot.items : nullptr;
+    }
+    [[nodiscard]] array *as_array() noexcept {
+        return this->form() == shape::array_block ? this->slot.items : nullptr;
+    }
+    [[nodiscard]] const object *as_object() const noexcept {
+        return this->form() == shape::object_block ? this->slot.members : nullptr;
+    }
+    [[nodiscard]] object *as_object() noexcept {
+        return this->form() == shape::object_block ? this->slot.members : nullptr;
+    }
 
     /** How many members or elements, counting a scalar as one and null as none. */
     [[nodiscard]] std::size_t size() const noexcept {
@@ -251,7 +457,7 @@ public:
      * says so - it would otherwise silently discard what was there.
      */
     value &operator[](std::string_view name) {
-        if (this->is_null()) this->held = object {};
+        if (this->is_null()) this->emplace<object>();
         auto *members = this->as_object();
         if (members == nullptr) raise(errc::type_mismatch, 0, name);
         return (*members)[name];
@@ -287,44 +493,87 @@ public:
 
     /** Appends, turning a null value into an array first, as operator[] does for objects. */
     value &push_back(value item) {
-        if (this->is_null()) this->held = array {};
+        if (this->is_null()) this->emplace<array>();
         auto *items = this->as_array();
         if (items == nullptr) raise(errc::type_mismatch, 0);
         return items->emplace_back(std::move(item));
     }
 
-    friend bool operator==(const value &left, const value &right) = default;
+    /**
+     * By what it holds, not by how it is held: a short string and a long one compare as their
+     * text, a signed and an unsigned node may hold the same number, and a borrowed node equals
+     * the owned copy taken from it. Defaulting this would compare the payload union and the
+     * tag, which says the opposite of all three.
+     */
+    friend bool operator==(const value &left, const value &right) noexcept {
+        const auto what = left.type();
+        if (what != right.type()) return false;
+        switch (what) {
+        case kind::null:    return true;
+        case kind::boolean: return left.slot.truth == right.slot.truth;
+        case kind::real:    return left.slot.number == right.slot.number;
+        case kind::string:  return left.read_text() == right.read_text();
+        case kind::integer:
+            if (const auto a = left.read_integer<std::int64_t>()) {
+                const auto b = right.read_integer<std::int64_t>();
+                return b && *a == *b;
+            }
+            {
+                const auto a = left.read_integer<std::uint64_t>();
+                const auto b = right.read_integer<std::uint64_t>();
+                return a && b && *a == *b;
+            }
+        case kind::array: {
+            // One kind covers both, so a binary never equals a list of numbers that spells it.
+            const auto left_bytes = left.read_binary();
+            const auto right_bytes = right.read_binary();
+            if (left_bytes.has_value() != right_bytes.has_value()) return false;
+            if (left_bytes) return std::ranges::equal(*left_bytes, *right_bytes);
+            return *left.as_array() == *right.as_array();
+        }
+        case kind::object:  return *left.as_object() == *right.as_object();
+        default:            return false;
+        }
+    }
 
 private:
     [[nodiscard]] std::optional<bool> read_bool() const noexcept {
-        if (const auto *truth = std::get_if<bool>(&this->held)) return *truth;
+        if (this->form() == shape::truth) return this->slot.truth;
         return std::nullopt;
     }
 
     template<std::integral T>
     [[nodiscard]] std::optional<T> read_integer() const noexcept {
-        if (const auto *whole = std::get_if<std::int64_t>(&this->held))
-            return std::in_range<T>(*whole) ? std::optional<T> { static_cast<T>(*whole) } : std::nullopt;
-        if (const auto *whole = std::get_if<std::uint64_t>(&this->held))
-            return std::in_range<T>(*whole) ? std::optional<T> { static_cast<T>(*whole) } : std::nullopt;
+        if (this->form() == shape::whole_signed) {
+            const auto whole = this->slot.whole_signed;
+            return std::in_range<T>(whole) ? std::optional<T> { static_cast<T>(whole) } : std::nullopt;
+        }
+        if (this->form() == shape::whole_unsigned) {
+            const auto whole = this->slot.whole_unsigned;
+            return std::in_range<T>(whole) ? std::optional<T> { static_cast<T>(whole) } : std::nullopt;
+        }
         return std::nullopt;
     }
 
     template<std::floating_point T>
     [[nodiscard]] std::optional<T> read_real() const noexcept {
-        if (const auto *number = std::get_if<double>(&this->held)) return static_cast<T>(*number);
+        if (this->form() == shape::number) return static_cast<T>(this->slot.number);
         if (const auto whole = this->read_integer<std::int64_t>()) return static_cast<T>(*whole);
         if (const auto whole = this->read_integer<std::uint64_t>()) return static_cast<T>(*whole);
         return std::nullopt;
     }
 
     [[nodiscard]] std::optional<std::string_view> read_text() const noexcept {
-        if (const auto *text = std::get_if<std::string>(&this->held)) return std::string_view { *text };
+        if (this->form() == shape::text_inline)
+            return std::string_view { this->inline_data(), this->inline_size() };
+        if (this->form() == shape::text_block)
+            return std::string_view { this->slot.text, this->block_size() };
         return std::nullopt;
     }
 
     [[nodiscard]] std::optional<std::span<const std::byte>> read_binary() const noexcept {
-        if (const auto *bytes = std::get_if<binary>(&this->held)) return std::span<const std::byte> { *bytes };
+        if (this->form() == shape::binary_block)
+            return std::span<const std::byte> { this->slot.bytes, this->block_size() };
         return std::nullopt;
     }
 };
@@ -803,25 +1052,29 @@ template<>
 struct serializer<value, void> {
     template<typename Writer>
     static void write(Writer &out, const value &item) {
-        std::visit(
-                [&out]<typename T>(const T &held) {
-                    if constexpr (std::same_as<T, std::monostate>) {
-                        out.null();
-                    } else if constexpr (std::same_as<T, value::binary>) {
-                        out.bytes(held);
-                    } else if constexpr (std::same_as<T, value::array>) {
-                        out.range(held);
-                    } else if constexpr (std::same_as<T, value::object>) {
-                        const auto scope = out.object();
-                        for (const auto &[name, member] : held) {
-                            out.key(name);
-                            out.value(member);
-                        }
-                    } else {
-                        out.value(held);
-                    }
-                },
-                item.contents());
+        switch (item.type()) {
+        case kind::null:    out.null(); return;
+        case kind::boolean: out.value(*item.template as<bool>()); return;
+        case kind::real:    out.value(*item.template as<double>()); return;
+        case kind::string:  out.value(*item.template as<std::string_view>()); return;
+        case kind::integer:
+            if (const auto whole = item.template as<std::int64_t>()) out.value(*whole);
+            else out.value(*item.template as<std::uint64_t>());
+            return;
+        case kind::array:
+            if (const auto bytes = item.template as<std::span<const std::byte>>()) out.bytes(*bytes);
+            else out.range(*item.as_array());
+            return;
+        case kind::object: {
+            const auto scope = out.object();
+            for (const auto &[name, member] : *item.as_object()) {
+                out.key(name);
+                out.value(member);
+            }
+            return;
+        }
+        default: out.null(); return;
+        }
     }
 
     template<typename Source>

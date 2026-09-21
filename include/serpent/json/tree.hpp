@@ -34,6 +34,9 @@ namespace serpent::json {
 template<bool Terminated>
 class tree_builder {
     scanner::basic_cursor<Terminated> &scan;
+    // One buffer for every string in the document: a value holds its text itself, so the decode
+    // needs somewhere to land and nothing needs to keep it afterwards.
+    std::string scratch;
 
     // The members and elements of a container are gathered here and moved into one sized
     // exactly to them: a vector grown into place would be reallocated and its contents moved
@@ -63,18 +66,22 @@ public:
         case '[':
             this->scan.advance(1);
             return this->elements(into.emplace<serpent::value::array>(), depth);
-        case '"': return direct::read(this->scan, into.emplace<std::string>());
+        case '"':
+            this->scratch.clear();
+            if (!direct::read(this->scan, this->scratch)) return false;
+            into.assign(this->scratch);
+            return true;
         case 't':
             scanner::scan_literal(this->scan, "true");
-            into.emplace<bool>(true);
+            into = true;
             return this->scan.ok();
         case 'f':
             scanner::scan_literal(this->scan, "false");
-            into.emplace<bool>(false);
+            into = false;
             return this->scan.ok();
         case 'n':
             scanner::scan_literal(this->scan, "null");
-            into.emplace<std::monostate>();
+            into = serpent::value {};
             return this->scan.ok();
         default: return this->number(into);
         }
@@ -99,18 +106,18 @@ private:
 
         if (!is_real) {
             if (std::int64_t whole; direct::read(this->scan, whole)) {
-                into.emplace<std::int64_t>(whole);
+                into = whole;
                 return true;
             }
             if (!this->scan.ok()) return false;
             if (std::uint64_t wide; !negative && direct::read(this->scan, wide)) {
-                into.emplace<std::uint64_t>(wide);
+                into = wide;
                 return true;
             }
             if (!this->scan.ok()) return false;
         }
         if (double real; direct::read(this->scan, real)) {
-            into.emplace<double>(real);
+            into = real;
             return true;
         }
         if (this->scan.ok()) this->scan.fail(errc::invalid_number);
