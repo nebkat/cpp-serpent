@@ -359,42 +359,68 @@ template<bool Terminated>
     };
 
     if (!scan.need(1)) return {};
-    if (scan.peek() == '-') scan.advance(1);
 
-    if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-    if (scan.peek() == '0') {
-        scan.advance(1);
-        if (scan.available(1) && is_digit(scan.peek())) return reject(); // no leading zeros
+    // Walked on a local rather than through the cursor: asking the cursor whether a byte is
+    // there reloads its failure flag and range-checks it, and a number asks that once per digit
+    // group. Where there is a terminator, no byte is in any class, so it stops every loop here
+    // by itself and there is nothing to range-check at all.
+    const char *cur = scan.position;
+    const char *const limit = scan.limit;
+    const auto readable = [limit](const char *at) noexcept {
+        if constexpr (Terminated) { (void) limit; (void) at; return true; }
+        else return at != limit;
+    };
+    const auto give_up = [&] {
+        scan.position = cur;
+        return reject();
+    };
+
+    if (*cur == '-') ++cur;
+
+    if (!readable(cur) || !is_digit(*cur)) return give_up();
+    if (*cur == '0') {
+        ++cur;
+        if (readable(cur) && is_digit(*cur)) return give_up(); // no leading zeros
     } else {
-        scan.position = advance_while<Terminated>(scan.position, scan.limit, class_digit);
+        while (readable(cur) && is_digit(*cur)) ++cur;
     }
 
-    if (scan.available(1) && scan.peek() == '.') {
-        scan.advance(1);
-        if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-        scan.position = advance_while<Terminated>(scan.position, scan.limit, class_digit);
+    if (readable(cur) && *cur == '.') {
+        ++cur;
+        if (!readable(cur) || !is_digit(*cur)) return give_up();
+        while (readable(cur) && is_digit(*cur)) ++cur;
     }
 
-    if (scan.available(1) && (scan.peek() == 'e' || scan.peek() == 'E')) {
-        scan.advance(1);
-        if (scan.available(1) && (scan.peek() == '+' || scan.peek() == '-')) scan.advance(1);
-        if (!scan.available(1) || !is_digit(scan.peek())) return reject();
-        while (scan.available(1) && is_digit(scan.peek()))
-            scan.advance(1);
+    if (readable(cur) && (*cur == 'e' || *cur == 'E')) {
+        ++cur;
+        if (readable(cur) && (*cur == '+' || *cur == '-')) ++cur;
+        if (!readable(cur) || !is_digit(*cur)) return give_up();
+        while (readable(cur) && is_digit(*cur)) ++cur;
     }
 
-    return std::string_view { begin, static_cast<std::size_t>(scan.position - begin) };
+    scan.position = cur;
+    return std::string_view { begin, static_cast<std::size_t>(cur - begin) };
 }
 
 template<bool Terminated>
 constexpr void scan_literal(basic_cursor<Terminated> &scan, std::string_view word) noexcept {
     if (!scan.ok()) return;
 
+    // Whole word first, where the whole word is there: its length is a constant at every call
+    // site, so this is a word-sized load and compare rather than a call into memcmp.
+    const auto have = static_cast<std::size_t>(scan.limit - scan.position);
+    if (have >= word.size()) {
+        if (__builtin_memcmp(scan.position, word.data(), word.size()) != 0) {
+            scan.fail(errc::unexpected_character);
+            return;
+        }
+        scan.advance(word.size());
+        return;
+    }
+
     // Compare what is there before complaining about what is not: "nan" should be reported
     // as an unexpected character, not as a document that ended early.
-    const auto have = static_cast<std::size_t>(scan.limit - scan.position);
-    const auto comparable = have < word.size() ? have : word.size();
-    if (std::string_view { scan.position, comparable } != word.substr(0, comparable)) {
+    if (std::string_view { scan.position, have } != word.substr(0, have)) {
         scan.fail(errc::unexpected_character);
         return;
     }
