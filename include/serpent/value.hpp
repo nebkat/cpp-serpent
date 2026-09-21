@@ -363,7 +363,23 @@ private:
         this->set_shape(shape::binary_block);
     }
 
-    void release() noexcept;
+    /// Frees a block this node owns. Out of line: the node that has one is the rare node.
+    void release_block() noexcept;
+
+    /**
+     * Drops what this holds.
+     *
+     * Only four of the fourteen shapes own anything, and a builder assigns and destroys far more
+     * scalars than blocks, so the test for "owns nothing" is settled here and the freeing is a
+     * call the common node never makes.
+     */
+    SERPENT_ALWAYS_INLINE void release() noexcept {
+        const auto code = static_cast<unsigned>(this->tag & 0x0F);
+        if (code - static_cast<unsigned>(shape::text_block) < 4) this->release_block();
+        this->slot.whole_signed = 0;
+        this->tag = 0;
+    }
+
     void copy_from(const value &other);
 
 public:
@@ -729,16 +745,14 @@ inline member *value::object::end() noexcept {
 inline std::size_t value::object::size() const noexcept {
     return this->entries == nullptr ? 0 : this->entries->size();
 }
-inline void value::release() noexcept {
-    switch (this->borrowed(this->held()) ? shape::empty : this->held()) {
+inline void value::release_block() noexcept {
+    switch (this->held()) {
     case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
     case shape::binary_block: delete[] const_cast<std::byte *>(this->slot.bytes); break;
     case shape::array_block:  array::release(this->slot.items); break;
     case shape::object_block: detail::run<member>::release(this->slot.members); break;
     default: break;
     }
-    this->slot.whole_signed = 0;
-    this->tag = 0;
 }
 
 inline void value::copy_from(const value &other) {
