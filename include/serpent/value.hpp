@@ -849,27 +849,6 @@ inline void value::append_member(std::string_view name, value item) {
             this->slot.members, member { value { name }, std::move(item) });
 }
 
-/// Leaves one member per name - the last added under it, where the first was.
-inline void value::coalesce_members() {
-    const auto members = this->as_writable_object();
-    if (members.size() < 2) return;
-    std::uint32_t kept = 0;
-    for (std::size_t index = 0; index < members.size(); ++index) {
-        bool merged = false;
-        for (std::uint32_t earlier = 0; earlier < kept; ++earlier) {
-            if (name_of(members[earlier]) == name_of(members[index])) {
-                members[earlier].second = std::move(members[index].second);
-                merged = true;
-                break;
-            }
-        }
-        if (merged) continue;
-        if (kept != index) members[kept] = std::move(members[index]);
-        ++kept;
-    }
-    detail::run<member>::shrink_to(this->slot.members, kept);
-}
-
 inline bool value::erase_member(std::string_view name) {
     const auto members = this->as_writable_object();
     for (std::size_t index = 0; index < members.size(); ++index) {
@@ -932,19 +911,23 @@ inline value &value::object::operator[](std::string_view name) {
     return this->entries->data()[this->entries->size() - 1].second;
 }
 
-inline void value::object::coalesce_duplicates() {
-    const std::size_t count = this->size();
+namespace detail {
+
+/** Leaves one member per name in a run - the last added under it, where the first was. */
+inline void coalesce_run(run<member> *&entries_run) {
+    if (entries_run == nullptr) return;
+    const std::size_t count = entries_run->size();
     if (count < 2) return;
 
     // Few enough members that a hash table would cost more than it saves.
     if (count < 16) {
-        auto *entries = this->entries->data();
-        for (std::size_t index = 0; index < this->size(); ++index) {
-            for (std::size_t later = index + 1; later < this->size();) {
+        auto *entries = entries_run->data();
+        for (std::size_t index = 0; index < entries_run->size(); ++index) {
+            for (std::size_t later = index + 1; later < entries_run->size();) {
                 if (name_of(entries[later]) == name_of(entries[index])) {
                     entries[index].second = std::move(entries[later].second);
-                    member_run::erase_at(this->entries, later);
-                    entries = this->entries->data();
+                    run<member>::erase_at(entries_run, later);
+                    entries = entries_run->data();
                 } else {
                     ++later;
                 }
@@ -981,7 +964,7 @@ inline void value::object::coalesce_duplicates() {
         return mixed;
     };
 
-    auto *entries = this->entries->data();
+    auto *entries = entries_run->data();
     std::uint32_t kept = 0;
     for (std::size_t index = 0; index < count; ++index) {
         const std::string_view name = name_of(entries[index]);
@@ -1001,7 +984,18 @@ inline void value::object::coalesce_duplicates() {
             slot = (slot + 1) & (slots - 1);
         }
     }
-    member_run::shrink_to(this->entries, kept);
+    run<member>::shrink_to(entries_run, kept);
+}
+
+} // namespace detail
+
+inline void value::object::coalesce_duplicates() { detail::coalesce_run(this->entries); }
+
+inline void value::coalesce_members() {
+    if (this->form() != shape::object_block) return;
+    // Promotes a borrowed run to an owned one first, as any write does.
+    std::ignore = this->as_writable_object();
+    detail::coalesce_run(this->slot.members);
 }
 
 inline bool operator==(const value::object &left, const value::object &right) noexcept {
