@@ -45,7 +45,7 @@ class tree_builder {
     // container to the next. One for every depth there can be, never grown: a container holds
     // a reference to its own while those below it are gathered.
     std::array<std::vector<serpent::value::object::entry>, max_depth + 1> members_at {};
-    std::array<serpent::value::array, max_depth + 1> elements_at {};
+    std::array<std::vector<serpent::value>, max_depth + 1> elements_at {};
 
 public:
     explicit tree_builder(scanner::basic_cursor<Terminated> &scan) noexcept : scan(scan) {}
@@ -65,7 +65,7 @@ public:
             return this->members(into.emplace<serpent::value::object>(), depth);
         case '[':
             this->scan.advance(1);
-            return this->elements(into.emplace<serpent::value::array>(), depth);
+            return this->elements(into, depth);
         case '"':
             this->scratch.clear();
             if (!direct::read(this->scan, this->scratch)) return false;
@@ -138,7 +138,7 @@ private:
         return false;
     }
 
-    bool elements(serpent::value::array &items, int depth) {
+    bool elements(serpent::value &into, int depth) {
         scanner::skip_whitespace(this->scan);
         if (!this->scan.available(1)) {
             this->scan.fail(errc::unterminated_container);
@@ -146,17 +146,24 @@ private:
         }
         if (this->scan.peek() == ']') {
             this->scan.advance(1);
+            into = serpent::value { static_cast<serpent::value::array *>(nullptr) };
             return true;
         }
+        // Gathered at this depth first, so a failure part-way leaves nothing half-built in the
+        // tree, and the run is grown once rather than per element of every nesting above it.
         auto &gathered = this->elements_at[static_cast<std::size_t>(depth)];
         gathered.clear();
         do {
-            if (!this->build(gathered.emplace_back(), depth + 1)) return false;
+            gathered.emplace_back();
+            if (!this->build(gathered.back(), depth + 1)) return false;
         } while (!this->closed(']') && this->scan.ok());
         if (!this->scan.ok()) return false;
-        items.reserve(gathered.size());
-        for (auto &element : gathered) items.push_back(std::move(element));
+
+        // Sized once from what was gathered, so the run is allocated exactly and never grown.
+        auto *block = serpent::value::array::reserved(static_cast<std::uint32_t>(gathered.size()));
+        for (auto &element : gathered) block = serpent::value::array::appended(block, std::move(element));
         gathered.clear();
+        into = serpent::value { block };
         return true;
     }
 

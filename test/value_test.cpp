@@ -69,7 +69,7 @@ void what_it_holds() {
     check(value { "text" }.is_string(), "a string literal is a string, not a bool");
     check(value { std::string { "text" } }.is_string(), "string");
     check(value { value::binary { std::byte { 1 } } }.is_binary(), "binary");
-    check(value { value::array { 1, 2 } }.is_array(), "array");
+    check(value::of({ 1, 2 }).is_array(), "array");
 
     // Widths are not kept: the writer narrows every integer to the marker that holds it, so
     // there is nothing for the tree to remember.

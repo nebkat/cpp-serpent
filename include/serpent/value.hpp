@@ -12,6 +12,8 @@
 // costs nothing: bjdata::reader::over(bytes) and json::reader::over(text) walk it in place. Build a value when
 // you are the one producing the document.
 
+#include <new>
+#include <memory>
 #include <serpent/error.hpp>
 #include <serpent/kind.hpp>
 #include <serpent/serializer.hpp>
@@ -41,9 +43,131 @@ namespace serpent {
  * code that started it has gone. That ownership is the whole point of it, and the reason it is
  * not what the rest of the library does.
  */
+namespace detail {
+
+/**
+ * A growable run of T in one allocation: the count and the capacity sit in front of the
+ * elements, so whatever holds a run holds nothing but the pointer.
+ *
+ * std::vector would do all of this correctly and cost a second allocation for its own object;
+ * a value is sixteen bytes and has room for a pointer, not for a vector. So the bookkeeping
+ * moves into the block, and the lifetime of the elements is managed here - in one place, with
+ * one test - rather than at every call site.
+ */
+template<typename T>
+class run {
+    std::uint32_t used = 0;
+    std::uint32_t room = 0;
+
+    /// Where the elements begin, past the header and at T's alignment.
+    static constexpr std::size_t origin =
+            (sizeof(std::uint32_t) * 2 + alignof(T) - 1) / alignof(T) * alignof(T);
+
+    static_assert(alignof(T) <= alignof(std::max_align_t), "a run cannot over-align its elements");
+
+    static std::size_t bytes_for(std::uint32_t room) noexcept { return origin + std::size_t(room) * sizeof(T); }
+
+public:
+    run() = delete;
+    ~run() = delete;   ///< never destroyed as an object: release() does it
+
+    [[nodiscard]] std::uint32_t size() const noexcept { return this->used; }
+    [[nodiscard]] bool empty() const noexcept { return this->used == 0; }
+
+    [[nodiscard]] T *data() noexcept {
+        return reinterpret_cast<T *>(reinterpret_cast<std::byte *>(this) + origin);
+    }
+    [[nodiscard]] const T *data() const noexcept {
+        return reinterpret_cast<const T *>(reinterpret_cast<const std::byte *>(this) + origin);
+    }
+
+    [[nodiscard]] T *begin() noexcept { return this->data(); }
+    [[nodiscard]] T *end() noexcept { return this->data() + this->used; }
+    [[nodiscard]] const T *begin() const noexcept { return this->data(); }
+    [[nodiscard]] const T *end() const noexcept { return this->data() + this->used; }
+
+    [[nodiscard]] T &operator[](std::size_t index) noexcept { return this->data()[index]; }
+    [[nodiscard]] const T &operator[](std::size_t index) const noexcept { return this->data()[index]; }
+
+    /// An empty run with room for as many, or nullptr for none at all.
+    [[nodiscard]] static run *reserved(std::uint32_t room) {
+        if (room == 0) return nullptr;
+        auto *block = static_cast<run *>(::operator new(bytes_for(room)));
+        block->used = 0;
+        block->room = room;
+        return block;
+    }
+
+    static void release(run *block) noexcept {
+        if (block == nullptr) return;
+        std::destroy_n(block->data(), block->used);
+        ::operator delete(static_cast<void *>(block));
+    }
+
+    /// A copy of one, holding copies of its elements and no more room than it needs.
+    [[nodiscard]] static run *copy_of(const run *other) {
+        if (other == nullptr || other->used == 0) return nullptr;
+        auto *block = reserved(other->used);
+        // A throwing copy must leave nothing behind but the block it came from - and where
+        // exceptions are off there is nothing to unwind, so the guard goes with them.
+#if defined(__cpp_exceptions) && __cpp_exceptions
+        try {
+            std::uninitialized_copy_n(other->data(), other->used, block->data());
+        } catch (...) {
+            ::operator delete(static_cast<void *>(block));
+            throw;
+        }
+#else
+        std::uninitialized_copy_n(other->data(), other->used, block->data());
+#endif
+        block->used = other->used;
+        return block;
+    }
+
+    /**
+     * Adds one, growing the block when it is full and answering where the block now is.
+     *
+     * Doubling, because appending one at a time is how a document is built and anything less
+     * makes that quadratic. The old elements move rather than copy, and a move that throws
+     * would leave the run half in each block - so only a nothrow-movable T is accepted, which
+     * value and member both are.
+     */
+    [[nodiscard]] static run *appended(run *block, T item) {
+        static_assert(std::is_nothrow_move_constructible_v<T>, "a run moves its elements when it grows");
+        if (block == nullptr) block = reserved(4);
+        else if (block->used == block->room) {
+            auto *wider = reserved(block->room * 2);
+            std::uninitialized_move_n(block->data(), block->used, wider->data());
+            wider->used = block->used;
+            release(block);
+            block = wider;
+        }
+        std::construct_at(block->data() + block->used, std::move(item));
+        ++block->used;
+        return block;
+    }
+
+    /// Drops the one at an index, keeping the order of the rest.
+    static void erase_at(run *block, std::size_t index) noexcept {
+        if (block == nullptr || index >= block->used) return;
+        std::move(block->data() + index + 1, block->data() + block->used, block->data() + index);
+        std::destroy_at(block->data() + block->used - 1);
+        --block->used;
+    }
+
+    /// Forgets everything past a count, for a caller that has moved them away itself.
+    static void shrink_to(run *block, std::uint32_t kept) noexcept {
+        if (block == nullptr || kept >= block->used) return;
+        std::destroy_n(block->data() + kept, block->used - kept);
+        block->used = kept;
+    }
+};
+
+}
+
 class value {
 public:
-    using array = std::vector<value>;
+    using array = detail::run<value>;
     using binary = std::vector<std::byte>;
 
     /**
@@ -161,7 +285,7 @@ private:
         double        number;
         const char      *text;
         const std::byte *bytes;
-        array        *items;
+        array        *items;      ///< owned: a block this value frees. borrowed: the arena's
         object       *members;
         char          head[8];
     };
@@ -219,7 +343,7 @@ private:
         switch (this->borrowed(this->held()) ? shape::empty : this->held()) {
         case shape::text_block:   delete[] const_cast<char *>(this->slot.text); break;
         case shape::binary_block: delete[] const_cast<std::byte *>(this->slot.bytes); break;
-        case shape::array_block:  delete this->slot.items; break;
+        case shape::array_block:  array::release(this->slot.items); break;
         case shape::object_block: delete this->slot.members; break;
         default: break;
         }
@@ -240,7 +364,7 @@ private:
             break;
         case shape::text_block:   this->assign_text({ other.slot.text, other.block_size() }); break;
         case shape::binary_block: this->assign_bytes({ other.slot.bytes, other.block_size() }); break;
-        case shape::array_block:  this->slot.items = new array(*other.slot.items); this->set_shape(shape::array_block); break;
+        case shape::array_block:  this->slot.items = array::copy_of(other.slot.items); this->set_shape(shape::array_block); break;
         case shape::object_block: this->slot.members = new object(*other.slot.members); this->set_shape(shape::object_block); break;
         }
     }
@@ -299,7 +423,7 @@ public:
     value(const std::string &text) { this->assign_text(text); }
     value(std::span<const std::byte> bytes) { this->assign_bytes(bytes); }
     value(binary bytes) { this->assign_bytes(bytes); }
-    value(array items) { this->slot.items = new array(std::move(items)); this->set_shape(shape::array_block); }
+    value(array *items) noexcept { this->slot.items = items; this->set_shape(shape::array_block); }
     value(object members) { this->slot.members = new object(std::move(members)); this->set_shape(shape::object_block); }
 
     /**
@@ -369,7 +493,11 @@ public:
     }
 
     /** An array written out at its call site. */
-    static value of(std::initializer_list<value> items) { return value { array { items } }; }
+    static value of(std::initializer_list<value> items) {
+        array *block = nullptr;
+        for (const auto &item : items) block = array::appended(block, item);
+        return value { block };
+    }
 
     // ---------------- what it is ----------------
 
@@ -427,8 +555,10 @@ public:
     }
 
     /** The array or object contents, or nullptr when it is neither. */
-    [[nodiscard]] const array *as_array() const noexcept {
-        return this->form() == shape::array_block ? this->slot.items : nullptr;
+    /** The elements, of an owned array or a borrowed one alike; empty when it is neither. */
+    [[nodiscard]] std::span<const value> as_array() const noexcept {
+        if (this->form() != shape::array_block || this->slot.items == nullptr) return {};
+        return { this->slot.items->data(), this->slot.items->size() };
     }
     [[nodiscard]] const object *as_object() const noexcept {
         return this->form() == shape::object_block ? this->slot.members : nullptr;
@@ -442,10 +572,24 @@ public:
      * place a read-only node becomes an editable one, and the only place it costs anything.
      * Still nullptr when this is not an array or an object at all.
      */
-    [[nodiscard]] array *as_writable_array() {
-        if (this->form() != shape::array_block) return nullptr;
-        if (this->is_borrowed()) *this = value { *this->slot.items };
-        return this->slot.items;
+    /**
+     * The elements to change rather than to read.
+     *
+     * A borrowed run belongs to a document and may be shared, so it is copied into a block of
+     * this value's own first - the one place a read-only array becomes an editable one. The
+     * span may be written through but not grown: growing may move the block, so push_back()
+     * on the value does that.
+     */
+    [[nodiscard]] std::span<value> as_writable_array() {
+        if (this->form() != shape::array_block) return {};
+        if (this->is_borrowed()) {
+            auto *copy = array::copy_of(this->slot.items);
+            this->release();
+            this->slot.items = copy;
+            this->set_shape(shape::array_block);
+        }
+        if (this->slot.items == nullptr) return {};
+        return { this->slot.items->data(), this->slot.items->size() };
     }
 
     [[nodiscard]] object *as_writable_object() {
@@ -456,7 +600,7 @@ public:
 
     /** How many members or elements, counting a scalar as one and null as none. */
     [[nodiscard]] std::size_t size() const noexcept {
-        if (const auto *items = this->as_array()) return items->size();
+        if (this->is_array()) return this->as_array().size();
         if (const auto *members = this->as_object()) return members->size();
         return this->is_null() ? 0 : 1;
     }
@@ -500,17 +644,18 @@ public:
     }
 
     [[nodiscard]] const value &at(std::size_t index) const {
-        const auto *items = this->as_array();
-        if (items == nullptr || index >= items->size()) raise(errc::out_of_range, 0);
-        return (*items)[index];
+        const auto items = this->as_array();
+        if (index >= items.size()) raise(errc::out_of_range, 0);
+        return items[index];
     }
 
     /** Appends, turning a null value into an array first, as operator[] does for objects. */
     value &push_back(value item) {
-        if (this->is_null()) this->emplace<array>();
-        auto *items = this->as_writable_array();
-        if (items == nullptr) raise(errc::type_mismatch, 0);
-        return items->emplace_back(std::move(item));
+        if (this->is_null()) { this->slot.items = nullptr; this->set_shape(shape::array_block); }
+        if (!this->is_array()) raise(errc::type_mismatch, 0);
+        if (this->is_borrowed()) (void) this->as_writable_array();
+        this->slot.items = array::appended(this->slot.items, std::move(item));
+        return (*this->slot.items)[this->slot.items->size() - 1];
     }
 
     /**
@@ -543,7 +688,7 @@ public:
             const auto right_bytes = right.read_binary();
             if (left_bytes.has_value() != right_bytes.has_value()) return false;
             if (left_bytes) return std::ranges::equal(*left_bytes, *right_bytes);
-            return *left.as_array() == *right.as_array();
+            return std::ranges::equal(left.as_array(), right.as_array());
         }
         case kind::object:  return *left.as_object() == *right.as_object();
         default:            return false;
@@ -779,7 +924,7 @@ public:
     template<std::ranges::input_range R>
     void range(const R &items);
 
-    void begin_array() { this->open.push_back(frame { serpent::value { serpent::value::array {} }, {}, false }); }
+    void begin_array() { this->open.push_back(frame { serpent::value { static_cast<serpent::value::array *>(nullptr) }, {}, false }); }
     void begin_object() { this->open.push_back(frame { serpent::value { serpent::value::object {} }, {}, true }); }
 
     void end_container() {
@@ -906,7 +1051,7 @@ public:
     /** Already known, where a scanning reader would have to count. */
     [[nodiscard]] std::optional<std::size_t> size_hint() const noexcept {
         if (this->target == nullptr) return std::nullopt;
-        if (const auto *items = this->target->as_array()) return items->size();
+        if (this->target->is_array()) return this->target->as_array().size();
         return std::nullopt;
     }
 
@@ -920,9 +1065,9 @@ public:
 
     [[nodiscard]] value_reader operator[](std::size_t index) const noexcept {
         if (this->target == nullptr) return {};
-        const auto *items = this->target->as_array();
-        if (items == nullptr || index >= items->size()) return {};
-        return value_reader { (*items)[index] };
+        const auto items = this->target->as_array();
+        if (index >= items.size()) return {};
+        return value_reader { items[index] };
     }
 
     struct key_value;
@@ -981,15 +1126,13 @@ public:
     };
 
     class array_range {
-        const value::array *items = nullptr;
+        std::span<const value> items {};
 
     public:
-        constexpr explicit array_range(const value::array *items) noexcept : items(items) {}
-        [[nodiscard]] array_iterator begin() const noexcept {
-            return array_iterator { this->items == nullptr ? nullptr : this->items->data() };
-        }
+        constexpr explicit array_range(std::span<const value> items) noexcept : items(items) {}
+        [[nodiscard]] array_iterator begin() const noexcept { return array_iterator { this->items.data() }; }
         [[nodiscard]] array_iterator end() const noexcept {
-            return array_iterator { this->items == nullptr ? nullptr : this->items->data() + this->items->size() };
+            return array_iterator { this->items.data() + this->items.size() };
         }
     };
 
@@ -1007,7 +1150,7 @@ public:
     };
 
     [[nodiscard]] array_range array() const noexcept {
-        return array_range { this->target == nullptr ? nullptr : this->target->as_array() };
+        return array_range { this->target == nullptr ? std::span<const value> {} : this->target->as_array() };
     }
 
     [[nodiscard]] member_range items() const noexcept {
@@ -1077,7 +1220,7 @@ struct serializer<value, void> {
             return;
         case kind::array:
             if (const auto bytes = item.template as<std::span<const std::byte>>()) out.bytes(*bytes);
-            else out.range(*item.as_array());
+            else out.range(item.as_array());
             return;
         case kind::object: {
             const auto scope = out.object();
@@ -1128,12 +1271,15 @@ struct serializer<value, void> {
                     return true;
                 }
             }
-            value::array items;
+            value::array *items = nullptr;
             if constexpr (requires { source.size_hint(); }) {
-                if (const auto hint = source.size_hint()) items.reserve(*hint);
+                if (const auto hint = source.size_hint())
+                    items = value::array::reserved(static_cast<std::uint32_t>(*hint));
             }
             for (const auto &element : source.array()) {
-                if (!read(element, items.emplace_back())) return false;
+                value element_value;
+                if (!read(element, element_value)) { value::array::release(items); return false; }
+                items = value::array::appended(items, std::move(element_value));
             }
             item = value { std::move(items) };
             return true;
