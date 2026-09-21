@@ -45,8 +45,18 @@ namespace serpent {
  */
 class value;
 
-/** One member of an object: its name, and what is under it. */
-struct member;
+/**
+ * One member of an object: its name, and what is under it.
+ *
+ * A std::pair, so that .first and .second mean here what they mean everywhere else and
+ * structured bindings, std::get and comparison all come with it. The name is a value rather
+ * than a std::string so that the same member serves an object that owns its names and one
+ * inside a document that borrows them - and so a short name costs no allocation at all.
+ *
+ * It cannot be called .value: a member of that name in this namespace changes the meaning of
+ * serpent::value, which the compiler refuses.
+ */
+using member = std::pair<value, value>;
 
 namespace detail {
 
@@ -679,25 +689,10 @@ private:
     }
 };
 
-/**
- * One member of an object.
- *
- * The name is a value rather than a std::string so that the same member serves an object that
- * owns its names and one inside a document that borrows them - and so that a short name, which
- * nearly every name is, costs no allocation at all.
- */
-struct member {
-    value key;
-    value held;
-
-    [[nodiscard]] std::string_view name() const noexcept {
-        return this->key.as<std::string_view>().value_or(std::string_view {});
-    }
-
-    friend bool operator==(const member &left, const member &right) noexcept {
-        return left.key == right.key && left.held == right.held;
-    }
-};
+/// The name of a member, as text; empty when the name is not text at all.
+[[nodiscard]] inline std::string_view name_of(const member &entry) noexcept {
+    return entry.first.as<std::string_view>().value_or(std::string_view {});
+}
 
 using member_run = detail::run<member>;
 
@@ -780,10 +775,10 @@ inline value &value::operator[](std::string_view name) {
     if (!this->is_object()) raise(errc::type_mismatch, 0, name);
     if (this->is_borrowed()) (void) this->as_writable_object();
     for (auto &entry : this->as_writable_object())
-        if (entry.name() == name) return entry.held;
+        if (name_of(entry) == name) return entry.second;
     this->slot.members = detail::run<member>::appended(
             this->slot.members, member { value { name }, value {} });
-    return (*this->slot.members)[this->slot.members->size() - 1].held;
+    return (*this->slot.members)[this->slot.members->size() - 1].second;
 }
 
 inline value value::of(std::initializer_list<std::pair<const std::string_view, value>> members) {
@@ -824,8 +819,8 @@ inline bool operator==(const value &left, const value &right) noexcept {
         if (ours.size() != right.as_object().size()) return false;
         // By name rather than in order: neither format ascribes meaning to key order.
         for (const auto &entry : ours) {
-            const value &other = right[entry.name()];
-            if (!(other == entry.held)) return false;
+            const value &other = right[name_of(entry)];
+            if (!(other == entry.second)) return false;
         }
         return true;
     }
@@ -836,19 +831,19 @@ inline bool operator==(const value &left, const value &right) noexcept {
 inline const value &value::operator[](std::string_view name) const noexcept {
     static const value nothing {};
     for (const auto &entry : this->as_object())
-        if (entry.name() == name) return entry.held;
+        if (name_of(entry) == name) return entry.second;
     return nothing;
 }
 
 inline bool value::contains(std::string_view name) const noexcept {
     for (const auto &entry : this->as_object())
-        if (entry.name() == name) return true;
+        if (name_of(entry) == name) return true;
     return false;
 }
 
 inline const value &value::at(std::string_view name) const {
     for (const auto &entry : this->as_object())
-        if (entry.name() == name) return entry.held;
+        if (name_of(entry) == name) return entry.second;
     raise(errc::missing_key, 0, name);
 }
 
@@ -868,8 +863,8 @@ inline void value::coalesce_members() {
     for (std::size_t index = 0; index < members.size(); ++index) {
         bool merged = false;
         for (std::uint32_t earlier = 0; earlier < kept; ++earlier) {
-            if (members[earlier].name() == members[index].name()) {
-                members[earlier].held = std::move(members[index].held);
+            if (name_of(members[earlier]) == name_of(members[index])) {
+                members[earlier].second = std::move(members[index].second);
                 merged = true;
                 break;
             }
@@ -884,7 +879,7 @@ inline void value::coalesce_members() {
 inline bool value::erase_member(std::string_view name) {
     const auto members = this->as_writable_object();
     for (std::size_t index = 0; index < members.size(); ++index) {
-        if (members[index].name() == name) {
+        if (name_of(members[index]) == name) {
             detail::run<member>::erase_at(this->slot.members, index);
             return true;
         }
@@ -927,20 +922,20 @@ inline void value::object::reserve(std::size_t members) {
 
 inline const value *value::object::find(std::string_view name) const noexcept {
     for (const auto &entry : this->members())
-        if (entry.name() == name) return &entry.held;
+        if (name_of(entry) == name) return &entry.second;
     return nullptr;
 }
 
 inline value *value::object::find(std::string_view name) noexcept {
     for (auto *entry = this->begin(); entry != this->end(); ++entry)
-        if (entry->name() == name) return &entry->held;
+        if (name_of(*entry) == name) return &entry->second;
     return nullptr;
 }
 
 inline value &value::object::operator[](std::string_view name) {
     if (auto *found = this->find(name)) return *found;
     this->append(name, value {});
-    return this->entries->data()[this->entries->size() - 1].held;
+    return this->entries->data()[this->entries->size() - 1].second;
 }
 
 inline void value::object::coalesce_duplicates() {
@@ -952,8 +947,8 @@ inline void value::object::coalesce_duplicates() {
         auto *entries = this->entries->data();
         for (std::size_t index = 0; index < this->size(); ++index) {
             for (std::size_t later = index + 1; later < this->size();) {
-                if (entries[later].name() == entries[index].name()) {
-                    entries[index].held = std::move(entries[later].held);
+                if (name_of(entries[later]) == name_of(entries[index])) {
+                    entries[index].second = std::move(entries[later].second);
                     member_run::erase_at(this->entries, later);
                     entries = this->entries->data();
                 } else {
@@ -995,7 +990,7 @@ inline void value::object::coalesce_duplicates() {
     auto *entries = this->entries->data();
     std::uint32_t kept = 0;
     for (std::size_t index = 0; index < count; ++index) {
-        const std::string_view name = entries[index].name();
+        const std::string_view name = name_of(entries[index]);
         std::size_t slot = hash_of(name) & (slots - 1);
         while (true) {
             if (table[slot] == 0) {
@@ -1005,8 +1000,8 @@ inline void value::object::coalesce_duplicates() {
                 break;
             }
             auto &earlier = entries[table[slot] - 1];
-            if (earlier.name() == name) {
-                earlier.held = std::move(entries[index].held);
+            if (name_of(earlier) == name) {
+                earlier.second = std::move(entries[index].second);
                 break;
             }
             slot = (slot + 1) & (slots - 1);
@@ -1018,14 +1013,14 @@ inline void value::object::coalesce_duplicates() {
 inline bool operator==(const value::object &left, const value::object &right) noexcept {
     if (left.size() != right.size()) return false;
     return std::ranges::all_of(left.members(), [&right](const member &entry) {
-        const auto *other = right.find(entry.name());
-        return other != nullptr && *other == entry.held;
+        const auto *other = right.find(name_of(entry));
+        return other != nullptr && *other == entry.second;
     });
 }
 
 inline bool value::object::erase(std::string_view name) {
     for (std::size_t index = 0; index < this->size(); ++index) {
-        if (this->entries->data()[index].name() == name) {
+        if (name_of(this->entries->data()[index]) == name) {
             member_run::erase_at(this->entries, index);
             return true;
         }
@@ -1254,7 +1249,7 @@ public:
     [[nodiscard]] value_reader operator[](std::string_view name) const noexcept {
         if (this->target == nullptr) return {};
         for (const auto &entry : this->target->as_object())
-            if (entry.name() == name) return value_reader { entry.held };
+            if (name_of(entry) == name) return value_reader { entry.second };
         return {};
     }
 
@@ -1385,7 +1380,7 @@ struct value_reader::key_value {
 };
 
 inline value_reader::key_value value_reader::member_iterator::operator*() const noexcept {
-    return key_value { this->position->name(), value_reader { this->position->held } };
+    return key_value { name_of(*this->position), value_reader { this->position->second } };
 }
 
 
@@ -1419,8 +1414,8 @@ struct serializer<value, void> {
         case kind::object: {
             const auto scope = out.object();
             for (const auto &entry : item.as_object()) {
-                out.key(entry.name());
-                out.value(entry.held);
+                out.key(name_of(entry));
+                out.value(entry.second);
             }
             return;
         }
