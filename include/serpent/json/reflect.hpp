@@ -240,15 +240,15 @@ private:
 
         auto &field = this->value.[:Member:];
         using field_type = std::remove_cvref_t<decltype(field)>;
-        constexpr auto tag = serpent::detail::annotation_of<tagged>(Member);
+        constexpr bool plain = !serpent::detail::member_is_projected<Member>();
 
-        if constexpr (direct::readable<field_type> && !tag.has_value()) {
+        if constexpr (direct::readable<field_type> && plain) {
             // The kinds of member a schema is mostly made of, read where they stand - and
             // inline, which read_at() below cannot be, since it recurses.
             if (direct::read(this->scan, field)) return;
             this->converted = false;
             scanner::skip_value(this->scan, 1);
-        } else if constexpr (read_with_cursor<field_type>() && !tag.has_value()) {
+        } else if constexpr (read_with_cursor<field_type>() && plain) {
             // A nested described type or a sequence, read with the same cursor. One that does
             // not convert is stepped over from its start, so the members after it are still
             // read and the object still closes.
@@ -262,15 +262,10 @@ private:
             // Anything else is read through a handle, by whatever reads that type anywhere else -
             // and says, as it is read, how far into the text it got.
             const basic_reader<Terminated> held { this->document, this->scan.position };
-            if constexpr (tag.has_value()) {
-                // A tagged variant is read through the tag that names its alternatives; reading it
-                // plainly would go back to trying each alternative in turn.
-                using declared = [:std::meta::type_of(Member):];
-                auto wrapper = make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field);
-                if (!read_into(held, wrapper)) this->converted = false;
-            } else {
-                if (!read_into(held, field)) this->converted = false;
-            }
+            // A tagged variant is read through the tag that names its alternatives, and a coded
+            // member through its codec; reading either plainly would get it wrong.
+            auto &&projection = serpent::detail::projected<Member>(field);
+            if (!read_into(held, projection)) this->converted = false;
             step_over_value(this->scan, held);
         }
     }
@@ -385,7 +380,7 @@ struct widest_member {
 
     static constexpr std::size_t value = [] () -> std::size_t {
         if (serpent::detail::has_annotation<skip>(Member)) return 0;
-        if (serpent::detail::annotation_of<tagged>(Member).has_value()) return 0;
+        if (serpent::detail::member_is_projected<Member>()) return 0;
 
         constexpr std::string_view name = serpent::detail::field_key<T, Member>();
         if (!scanner::is_plain_text(name)) return 0;
@@ -451,13 +446,7 @@ private:
         const auto &field = this->value.[:Member:];
 
         this->out.template key_literal<name>();
-        if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
-            using declared = [:std::meta::type_of(Member):];
-            static_assert(serpent::detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
-            this->out.value(make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field));
-        } else {
-            this->out.value(field);
-        }
+        this->out.value(serpent::detail::projected<Member>(field));
     }
 
     /**

@@ -195,6 +195,117 @@ struct naming {
 };
 
 /**
+ * On a field: write the enumerations in it as what each enumerator is called, whether or not the
+ * enumeration says so itself.
+ *
+ * For an enumeration that is not about serialization and should not have to say how it is
+ * written, and for one that is written differently in different places. An enumerator is its
+ * own serpent::as where it has one, else its identifier under this naming rule - or, given none,
+ * the enumeration's own. Entries override single enumerators for this field alone, a skip {}
+ * entry keeps one off the wire here, and a fallback {} entry replaces the enumeration's own:
+ *
+ *     [[= serpent::enum_as_name {}]] probe_state probe;
+ *     [[= serpent::enum_as_name { serpent::naming_style::snake_case }]] std::vector<probe_state> history;
+ *     [[= serpent::enum_as_name {
+ *         serpent::enum_entry { probe_state::idle, "waiting" },
+ *         serpent::enum_entry { probe_state::lost, "gone", serpent::fallback {} },
+ *     }]] probe_state probe;
+ *
+ * It reaches every enumeration inside an optional, a sequence, a set, a pair or a map, keys
+ * included; the shape the value takes on the wire is otherwise unchanged.
+ */
+template<typename E = void, std::size_t Count = 0>
+struct enum_as_name {
+    naming_style style = naming_style::as_written;
+    bool styled = false;
+    std::array<enum_entry<E>, Count> overrides;
+
+    template<typename... More>
+    consteval enum_as_name(enum_entry<E> first, More... more) : overrides { first, more... } {}
+
+    template<typename... More>
+    consteval enum_as_name(naming_style style, enum_entry<E> first, More... more)
+    : style(style)
+    , styled(true)
+    , overrides { first, more... } {}
+};
+
+template<>
+struct enum_as_name<void, 0> {
+    naming_style style = naming_style::as_written;
+    bool styled = false;
+
+    consteval enum_as_name() = default;
+    consteval enum_as_name(naming_style style) : style(style), styled(true) {}
+};
+
+enum_as_name() -> enum_as_name<>;
+enum_as_name(naming_style) -> enum_as_name<>;
+template<typename E, typename... More>
+enum_as_name(enum_entry<E>, More...) -> enum_as_name<E, 1 + sizeof...(More)>;
+template<typename E, typename... More>
+enum_as_name(naming_style, enum_entry<E>, More...) -> enum_as_name<E, 1 + sizeof...(More)>;
+
+/**
+ * On a field: write the enumerations in it as their underlying numbers, whatever the enumeration
+ * says about itself.
+ *
+ * The counterpart of enum_as_name, for a named enumeration that a compact document wants as a
+ * number. Entries override single enumerators with another integer:
+ *
+ *     [[= serpent::enum_as_number { serpent::enum_entry { reachability::unknown, -1 } }]] reachability reach;
+ */
+template<typename E = void, std::size_t Count = 0>
+struct enum_as_number {
+    std::array<enum_entry<E>, Count> overrides;
+
+    template<typename... More>
+    consteval enum_as_number(enum_entry<E> first, More... more) : overrides { first, more... } {}
+};
+
+template<>
+struct enum_as_number<void, 0> {
+    consteval enum_as_number() = default;
+};
+
+enum_as_number() -> enum_as_number<>;
+template<typename E, typename... More>
+enum_as_number(enum_entry<E>, More...) -> enum_as_number<E, 1 + sizeof...(More)>;
+
+/**
+ * On a field: write and read it with these, instead of whatever its type would use.
+ *
+ * Either a codec - a type with the static write and read a serializer<T> specialization has, so
+ * an existing one serves as it is:
+ *
+ *     [[= serpent::with<seconds_since_boot> {}]] std::chrono::milliseconds uptime;
+ *     [[= serpent::with<serpent::serializer<timestamp>> {}]] timestamp started;
+ *
+ * or the two functions themselves, which may be lambdas so long as they capture nothing:
+ *
+ *     [[= serpent::with {
+ *         [](auto &out, const std::chrono::milliseconds &value) { out.value(value.count() / 1000); },
+ *         [](const auto &source, std::chrono::milliseconds &value) { ... return true; },
+ *     }]] std::chrono::milliseconds uptime;
+ *
+ * The field is handed over whole: a codec on a std::vector<T> is given the vector.
+ */
+template<typename... Parts>
+struct with;
+
+template<typename Codec>
+struct with<Codec> {};
+
+template<typename Write, typename Read>
+struct with<Write, Read> {
+    Write write;
+    Read read;
+};
+
+template<typename Write, typename Read>
+with(Write, Read) -> with<Write, Read>;
+
+/**
  * @brief Everything a type says about itself, when its declaration is not yours to annotate.
  *
  * The annotations put that in one place, on the declaration. This is the same place for a type
@@ -595,6 +706,79 @@ consteval tagged resolved_tag() {
     return result;
 }
 
+// ---------------- a member written by something other than its type ----------------
+
+template<typename>
+inline constexpr bool is_enum_as_name = false;
+
+template<typename E, std::size_t Count>
+inline constexpr bool is_enum_as_name<enum_as_name<E, Count>> = true;
+
+template<typename>
+inline constexpr bool is_enum_as_number = false;
+
+template<typename E, std::size_t Count>
+inline constexpr bool is_enum_as_number<enum_as_number<E, Count>> = true;
+
+template<typename>
+inline constexpr bool is_with = false;
+
+template<typename... Parts>
+inline constexpr bool is_with<with<Parts...>> = true;
+
+/** Whether an annotation says how its member is written: with, enum_as_name or enum_as_number. */
+consteval bool is_codec_note(std::meta::info note) {
+    const auto type = std::meta::dealias(std::meta::type_of(note));
+    if (!std::meta::has_template_arguments(type)) return false;
+    const auto from = std::meta::template_of(type);
+    return from == ^^with || from == ^^enum_as_name || from == ^^enum_as_number;
+}
+
+consteval std::size_t codec_note_count(std::meta::info member) {
+    std::size_t count = 0;
+    for (const auto note : std::meta::annotations_of(member))
+        if (is_codec_note(note)) ++count;
+    return count;
+}
+
+/** The annotation that says how a member is written, or the null reflection if it has none. */
+consteval std::meta::info codec_note_of(std::meta::info member) {
+    for (const auto note : std::meta::annotations_of(member))
+        if (is_codec_note(note)) return note;
+    return {};
+}
+
+/**
+ * Whether a member's value goes through something other than its declared type.
+ *
+ * Asked by everything that would otherwise decide how to write or read a member from its type
+ * alone - a fast path for a number, a bound on a run's length, a table column. Each of those is
+ * wrong for a member written by a codec, and would be wrong quietly.
+ */
+template<std::meta::info Member>
+consteval bool member_is_projected() {
+    return annotation_of<tagged>(Member).has_value() || codec_note_of(Member) != std::meta::info {};
+}
+
+/**
+ * A member as its value is written and read: the field itself, or the field bound to whatever
+ * annotation on it says otherwise.
+ */
+template<std::meta::info Member, typename Field>
+constexpr decltype(auto) projected(Field &field) {
+    if constexpr (constexpr auto tag = annotation_of<tagged>(Member); tag.has_value()) {
+        using declared = [:std::meta::type_of(Member):];
+        static_assert(detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
+        return make_tagged<resolved_tag<declared, *tag>()>(field);
+    } else if constexpr (constexpr auto note = codec_note_of(Member); note != std::meta::info {}) {
+        using note_type = [:std::meta::type_of(note):];
+        static constexpr note_type value = std::meta::extract<note_type>(note);
+        return make_coded<value>(field);
+    } else {
+        return (field);
+    }
+}
+
 /**
  * Whether a document has to carry this member.
  *
@@ -798,6 +982,14 @@ consteval std::string_view annotation_complaint() {
         if constexpr (!std::meta::annotations_of_with_type(member, ^^naming).empty()) {
             complaint += std::string { name } + " carries serpent::naming, which belongs on the type; ";
         }
+        if constexpr (codec_note_count(member) > 1) {
+            complaint += std::string { name }
+                    + " carries more than one of serpent::with, enum_as_name and enum_as_number; ";
+        }
+        if constexpr (codec_note_count(member) > 0 && annotation_of<tagged>(member).has_value()) {
+            complaint += std::string { name } + " is tagged and also carries serpent::with, enum_as_name or "
+                                                "enum_as_number; ";
+        }
     }
     if (complaint.empty()) return {};
     complaint.resize(complaint.size() - 2); // the trailing separator
@@ -962,28 +1154,17 @@ void reflect_members(Visitor &visitor, Object &value) {
         if constexpr (!detail::has_annotation<skip>(member)) {
             // Bound to a reference first: a splice may not appear in an arbitrary expression.
             auto &field = value.[:member:];
+            auto &&projection = detail::projected<member>(field);
+            static constexpr std::string_view name = detail::field_key<T, member>();
 
-            if constexpr (constexpr auto tag = detail::annotation_of<tagged>(member); tag.has_value()) {
-                // Taken from the member rather than from the local, which may not be named in a
-                // template argument here.
-                using declared = [:std::meta::type_of(member):];
-                static_assert(detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
-
-                constexpr tagged resolved = detail::resolved_tag<declared, *tag>();
-                auto wrapper = make_tagged<resolved>(field);
-                visitor.member(detail::field_key<T, member>(), wrapper);
+            // Reading, a member the type insists on has to have been there. Keeping its default
+            // instead is how a half-specified document passes for a whole one. Said outright
+            // rather than left to member(), which exempts every optional, including one this
+            // type has marked required.
+            if constexpr (detail::member_is_required<T, member>()) {
+                if (!visitor.template member_if_present<name>(projection)) visitor.missing(name);
             } else {
-                static constexpr std::string_view name = detail::field_key<T, member>();
-
-                // Reading, a member the type insists on has to have been there. Keeping its
-                // default instead is how a half-specified document passes for a whole one.
-                // Said outright rather than left to member(), which exempts every optional,
-                // including one this type has marked required.
-                if constexpr (detail::member_is_required<T, member>()) {
-                    if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
-                } else {
-                    std::ignore = visitor.template member_if_present<name>(field);
-                }
+                std::ignore = visitor.template member_if_present<name>(projection);
             }
         }
     }
@@ -1398,5 +1579,385 @@ bool read_mapped_enum(const Source &source, E &value) {
         return detail::read_annotated_enum(source, value);
     }
 }
+
+#if SERPENT_HAS_REFLECTION
+
+// ---------------- enumerations under a field's enum_as_name or enum_as_number ----------------
+
+namespace detail {
+
+/** An enumerator's own identifier, for a diagnostic. */
+template<typename E>
+consteval std::string_view enumerator_name(E value) {
+    for (const auto enumerator : std::meta::enumerators_of(^^E))
+        if (std::meta::extract<E>(enumerator) == value) return std::meta::identifier_of(enumerator);
+    return "(no enumerator)";
+}
+
+/** What one enumerator is on the wire under a note, before the note's own entries apply. */
+template<auto Note, typename E, std::meta::info Enumerator>
+consteval as default_form_under() {
+    constexpr E value = std::meta::extract<E>(Enumerator);
+    if constexpr (is_enum_as_number<std::remove_cvref_t<decltype(Note)>>) {
+        if constexpr (std::is_signed_v<std::underlying_type_t<E>>)
+            return as { static_cast<long long>(std::to_underlying(value)) };
+        else
+            return as { static_cast<unsigned long long>(std::to_underlying(value)) };
+    } else {
+        if constexpr (tabulated_enum<E>) {
+            for (const auto &entry : describe<E>::values)
+                if (!entry.is_excluded && entry.value == value) return entry.wire;
+        }
+        if constexpr (constexpr auto given = annotation_of<as>(Enumerator); given.has_value()) {
+            return *given;
+        } else {
+            const naming_style style = Note.styled ? Note.style : naming_for<E>();
+            return as { convert_case(std::meta::identifier_of(Enumerator), style).view() };
+        }
+    }
+}
+
+/**
+ * Every value an enumeration can be on the wire under a note: each enumerator's default form,
+ * then the note's entries over them. Enumerators the enumeration keeps off the wire stay off,
+ * and so does an alias of one already listed - a C enumeration's _MIN or _DEFAULT.
+ */
+template<auto Note, typename E>
+consteval std::vector<enum_form<E>> forms_under_list() {
+    std::vector<enum_form<E>> forms;
+    template for (constexpr auto enumerator : std::define_static_array(std::meta::enumerators_of(^^E))) {
+        constexpr E value = std::meta::extract<E>(enumerator);
+        bool excluded = has_annotation<skip>(enumerator);
+        bool is_fallback = has_annotation<fallback>(enumerator);
+        if constexpr (tabulated_enum<E>) {
+            for (const auto &entry : describe<E>::values) {
+                if (entry.value != value) continue;
+                excluded = entry.is_excluded;
+                is_fallback = entry.is_fallback;
+            }
+        }
+        for (const auto &form : forms) excluded = excluded || form.value == value;
+        if (!excluded) forms.push_back({ value, default_form_under<Note, E, enumerator>(), is_fallback });
+    }
+
+    if constexpr (requires { Note.overrides; }) {
+        if constexpr (std::same_as<std::remove_cvref_t<decltype(Note.overrides[0].value)>, E>) {
+            bool replaces_fallback = false;
+            for (const auto &entry : Note.overrides) replaces_fallback = replaces_fallback || entry.is_fallback;
+            if (replaces_fallback)
+                for (auto &form : forms) form.is_fallback = false;
+
+            for (const auto &entry : Note.overrides) {
+                auto found = std::ranges::find(forms, entry.value, &enum_form<E>::value);
+                if (entry.is_excluded) {
+                    if (found != forms.end()) forms.erase(found);
+                } else if (found != forms.end()) {
+                    found->wire = entry.wire;
+                    found->is_fallback = found->is_fallback || entry.is_fallback;
+                } else {
+                    forms.push_back({ entry.value, entry.wire, entry.is_fallback });
+                }
+            }
+        }
+    }
+    return forms;
+}
+
+template<auto Note, typename E>
+inline constexpr auto forms_under = std::define_static_array(forms_under_list<Note, E>());
+
+/** What is wrong with the way a note writes an enumeration, or nothing. */
+template<auto Note, typename E>
+consteval std::string_view forms_under_complaint() {
+    const auto forms = forms_under_list<Note, E>();
+    std::string complaint;
+    std::size_t fallbacks = 0;
+    for (std::size_t first = 0; first < forms.size(); ++first) {
+        if (forms[first].is_fallback) ++fallbacks;
+        for (std::size_t second = first + 1; second < forms.size(); ++second) {
+            if (same_wire_form(forms[first].wire, forms[second].wire)) {
+                complaint += std::string { enumerator_name(forms[first].value) } + " and "
+                        + std::string { enumerator_name(forms[second].value) } + " are the same value on the wire; ";
+            }
+        }
+    }
+    if (fallbacks > 1) complaint += "more than one enumerator is the fallback; ";
+
+    if constexpr (requires { Note.overrides; }) {
+        for (std::size_t first = 0; first < Note.overrides.size(); ++first) {
+            for (std::size_t second = first + 1; second < Note.overrides.size(); ++second) {
+                if (Note.overrides[first].value == Note.overrides[second].value) {
+                    complaint += std::string { enumerator_name(Note.overrides[first].value) }
+                            + " is given twice; ";
+                }
+            }
+            if (is_enum_as_number<std::remove_cvref_t<decltype(Note)>> && !Note.overrides[first].is_excluded
+                    && Note.overrides[first].wire.held != as::kind::integer) {
+                complaint += std::string { enumerator_name(Note.overrides[first].value) }
+                        + " is given something other than a number, under enum_as_number; ";
+            }
+        }
+    }
+    if (complaint.empty()) return {};
+    complaint.resize(complaint.size() - 2); // the trailing separator
+    return std::define_static_string("this field's enum_as_name or enum_as_number cannot be read back as it is "
+                                     "written: "
+            + complaint);
+}
+
+/** Whether a value holds an enumeration anywhere a note can reach: through an optional, a range or a pair. */
+template<typename T>
+consteval bool holds_enum() {
+    using bare = std::remove_cvref_t<T>;
+    if constexpr (std::is_enum_v<bare>) {
+        return true;
+    } else if constexpr (string_like<bare> || byte_range<bare>) {
+        return false;
+    } else if constexpr (optional_like<bare>) {
+        return holds_enum<decltype(*std::declval<const bare &>())>();
+    } else if constexpr (pair_like<bare>) {
+        return holds_enum<decltype(std::declval<const bare &>().first)>()
+                || holds_enum<decltype(std::declval<const bare &>().second)>();
+    } else if constexpr (std::ranges::input_range<bare>) {
+        return holds_enum<std::ranges::range_value_t<bare>>();
+    } else {
+        return false;
+    }
+}
+
+/** Whether an enumeration of this type is somewhere a note can reach. */
+template<typename E, typename T>
+consteval bool holds_enum_of() {
+    using bare = std::remove_cvref_t<T>;
+    if constexpr (std::same_as<bare, E>) {
+        return true;
+    } else if constexpr (string_like<bare> || byte_range<bare>) {
+        return false;
+    } else if constexpr (optional_like<bare>) {
+        return holds_enum_of<E, decltype(*std::declval<const bare &>())>();
+    } else if constexpr (pair_like<bare>) {
+        return holds_enum_of<E, decltype(std::declval<const bare &>().first)>()
+                || holds_enum_of<E, decltype(std::declval<const bare &>().second)>();
+    } else if constexpr (std::ranges::input_range<bare>) {
+        return holds_enum_of<E, std::ranges::range_value_t<bare>>();
+    } else {
+        return false;
+    }
+}
+
+template<auto Note, typename Emitter, typename E>
+void emit_enum_under(Emitter &out, E value) {
+    static_assert(forms_under_complaint<Note, E>().empty(), forms_under_complaint<Note, E>());
+    for (const auto &form : forms_under<Note, E>) {
+        if (form.value == value) {
+            emit_wire_form(out, form.wire);
+            return;
+        }
+    }
+    for (const auto &form : forms_under<Note, E>) {
+        if (form.is_fallback) {
+            emit_wire_form(out, form.wire);
+            return;
+        }
+    }
+    // No enumerator and nothing to fall back to: the number is all there is to say, as it is
+    // for a mapped enumeration.
+    emit_value(out, std::to_underlying(value));
+}
+
+template<auto Note, typename Source, typename E>
+bool read_enum_under(const Source &source, E &value) {
+    static_assert(forms_under_complaint<Note, E>().empty(), forms_under_complaint<Note, E>());
+    if (!source.is_valid()) return false;
+    for (const auto &form : forms_under<Note, E>) {
+        if (source_is(source, form.wire)) {
+            value = form.value;
+            return true;
+        }
+    }
+    for (const auto &form : forms_under<Note, E>) {
+        if (form.is_fallback) {
+            value = form.value;
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Writes a value with every enumeration in it under a note, and everything else as it would be.
+ *
+ * The shapes follow emit_value's: the note changes what an enumeration becomes, never what the
+ * containers around it do.
+ */
+template<auto Note, typename Emitter, typename T>
+void emit_under(Emitter &out, const T &item) {
+    using bare = std::remove_cvref_t<T>;
+    if constexpr (!holds_enum<bare>()) {
+        emit_value(out, item);
+    } else if constexpr (std::is_enum_v<bare>) {
+        emit_enum_under<Note>(out, item);
+    } else if constexpr (optional_like<bare>) {
+        if (item.has_value())
+            emit_under<Note>(out, *item);
+        else
+            out.null();
+    } else if constexpr (pair_like<bare>) {
+        const auto scope = out.array();
+        emit_under<Note>(out, item.first);
+        emit_under<Note>(out, item.second);
+    } else if constexpr (map_like<bare>) {
+        const auto scope = out.object();
+        for (const auto &[name, mapped] : item) {
+            out.key(std::string_view { name });
+            emit_under<Note>(out, mapped);
+        }
+    } else {
+        const auto scope = out.array();
+        for (const auto &element : item) emit_under<Note>(out, element);
+    }
+}
+
+/** Reads what emit_under wrote. */
+template<auto Note, typename Source, typename T>
+bool read_under(const Source &source, T &value) {
+    if constexpr (!holds_enum<T>()) {
+        return read_into(source, value);
+    } else if constexpr (std::is_enum_v<T>) {
+        return read_enum_under<Note>(source, value);
+    } else if constexpr (optional_like<T>) {
+        if (!source.is_valid() || source.is_null()) {
+            value.reset();
+            return true;
+        }
+        std::remove_cvref_t<decltype(*value)> item {};
+        if (!read_under<Note>(source, item)) return false;
+        value = std::move(item);
+        return true;
+    } else if constexpr (pair_like<T>) {
+        if (!source.is_valid() || !source.is_array() || source.size() != 2) return false;
+        auto elements = source.array().begin();
+        if (!read_under<Note>(*elements, value.first)) return false;
+        ++elements;
+        return read_under<Note>(*elements, value.second);
+    } else if constexpr (keyed_but_not_an_object<T>) {
+        if (!source.is_valid() || !source.is_array()) return false;
+        value.clear();
+        for (const auto &element : source.array()) {
+            std::pair<typename T::key_type, typename T::mapped_type> entry {};
+            if (!read_under<Note>(element, entry)) return false;
+            value.emplace(std::move(entry.first), std::move(entry.second));
+        }
+        return true;
+    } else if constexpr (map_like<T>) {
+        if (!source.is_valid() || !source.is_object()) return false;
+        value.clear();
+        for (const auto &entry : source.items()) {
+            typename T::mapped_type slot {};
+            if (!read_under<Note>(entry.value, slot)) return false;
+            if constexpr (std::constructible_from<typename T::key_type, decltype(entry.key)>) {
+                value.emplace(typename T::key_type { entry.key }, std::move(slot));
+            } else {
+                value.emplace(typename T::key_type { entry.key_string() }, std::move(slot));
+            }
+        }
+        return true;
+    } else if constexpr (back_insertable<T>) {
+        if (!source.is_valid() || !source.is_array()) return false;
+        value.clear();
+        for (const auto &element : source.array()) {
+            std::ranges::range_value_t<T> slot {};
+            if (!read_under<Note>(element, slot)) return false;
+            value.push_back(std::move(slot));
+        }
+        return true;
+    } else if constexpr (insertable<T>) {
+        if (!source.is_valid() || !source.is_array()) return false;
+        value.clear();
+        for (const auto &element : source.array()) {
+            std::ranges::range_value_t<T> slot {};
+            if (!read_under<Note>(element, slot)) return false;
+            value.insert(std::move(slot));
+        }
+        return true;
+    } else if constexpr (fixed_sequence<T>) {
+        if (!source.is_valid() || !source.is_array()) return false;
+        auto slot = std::ranges::begin(value);
+        const auto limit = std::ranges::end(value);
+        for (const auto &element : source.array()) {
+            if (slot == limit) return false;
+            if (!read_under<Note>(element, *slot)) return false;
+            ++slot;
+        }
+        return slot == limit;
+    } else {
+        static_assert(always_false<T>, "enum_as_name and enum_as_number reach through optionals, sequences, sets, "
+                                       "pairs and maps; this field holds its enumeration some other way");
+        return false;
+    }
+}
+
+/** The codec a with<Codec> names. */
+template<typename>
+struct codec_of_note;
+
+template<typename Codec>
+struct codec_of_note<with<Codec>> {
+    using type = Codec;
+};
+
+template<typename Note>
+using codec_of = typename codec_of_note<Note>::type;
+
+/** Checks that apply to a note wherever it is used, whatever the field's value. */
+template<auto Note, typename T>
+consteval void check_note() {
+    using note_type = std::remove_cvref_t<decltype(Note)>;
+    if constexpr (is_enum_as_name<note_type> || is_enum_as_number<note_type>) {
+        static_assert(holds_enum<T>(),
+                "enum_as_name and enum_as_number belong on a field that holds an enumeration - itself, or "
+                "inside an optional, a sequence, a set, a pair or a map");
+        if constexpr (requires { Note.overrides; }) {
+            using entry_enum = std::remove_cvref_t<decltype(Note.overrides[0].value)>;
+            static_assert(holds_enum_of<entry_enum, T>(),
+                    "the entries in this enum_as_name or enum_as_number are for an enumeration this field "
+                    "does not hold");
+        }
+    }
+}
+
+} // namespace detail
+
+template<typename Emitter, auto Note, typename T>
+void detail::emit_coded(Emitter &out, const coded_member<Note, T> &item) {
+    using note_type = std::remove_cvref_t<decltype(Note)>;
+    using bare = std::remove_cvref_t<T>;
+    detail::check_note<Note, bare>();
+    if constexpr (detail::is_with<note_type>) {
+        if constexpr (requires { Note.write; })
+            Note.write(out, std::as_const(item.target));
+        else
+            detail::codec_of<note_type>::write(out, std::as_const(item.target));
+    } else {
+        detail::emit_under<Note>(out, item.target);
+    }
+}
+
+template<typename Source, auto Note, typename T>
+bool detail::read_coded(const Source &source, coded_member<Note, T> item) {
+    using note_type = std::remove_cvref_t<decltype(Note)>;
+    using bare = std::remove_cvref_t<T>;
+    detail::check_note<Note, bare>();
+    if constexpr (detail::is_with<note_type>) {
+        if constexpr (requires { Note.read; })
+            return Note.read(source, item.target);
+        else
+            return detail::codec_of<note_type>::read(source, item.target);
+    } else {
+        return detail::read_under<Note>(source, item.target);
+    }
+}
+
+#endif
 
 } // namespace serpent

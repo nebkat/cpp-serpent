@@ -25,7 +25,7 @@ set(TESTS
 
 # Suites that define types the way types are meant to be defined, by annotation.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    list(APPEND TESTS json_writer json_shapes json_bounded_write bjdata_shapes bjdata_bounded_write bjdata_table serializer reflect)
+    list(APPEND TESTS json_writer json_shapes json_bounded_write bjdata_shapes bjdata_bounded_write bjdata_table serializer reflect member_codec)
 endif()
 
 foreach(TEST_NAME IN LISTS TESTS)
@@ -84,7 +84,10 @@ if(SERPENT_HAS_REFLECTION_SUPPORT)
     #   duplicate_key       two members that are the same key on the wire
     #   enum_ambiguous      two enumerators that are the same value on the wire
     #   annotation_misuse   an annotation that cannot mean anything where it is
-    foreach(REFUSED IN ITEMS reflect_conflict enum_incomplete duplicate_key enum_ambiguous annotation_misuse)
+    #   enum_as_ambiguous   a field's entries that make two enumerators the same value on the wire
+    #   enum_as_misplaced   enum_as_name on a field that holds no enumeration
+    foreach(REFUSED IN ITEMS reflect_conflict enum_incomplete duplicate_key enum_ambiguous annotation_misuse
+            enum_as_ambiguous enum_as_misplaced)
         add_executable(${REFUSED}_test EXCLUDE_FROM_ALL "${REFUSED}_test.cpp")
         target_link_libraries(${REFUSED}_test PRIVATE serpent)
         add_test(NAME ${REFUSED}

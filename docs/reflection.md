@@ -70,6 +70,9 @@ struct [[= serpent::serializable {},
 | `tagged("key")` | a variant field | the same, decided at the field instead of on the alternatives |
 | `as(...)` | an enumerator | what it is on the wire, where its identifier will not do |
 | `fallback {}` | an enumerator | the one to use when nothing matches, in both directions |
+| `enum_as_name {...}` | a field | writes the enumerations in it by name, whatever they say themselves &mdash; see [At the field](#at-the-field) |
+| `enum_as_number {...}` | a field | writes them as numbers, whatever they say themselves |
+| `with<Codec> {}` / `with { write, read }` | a field | writes and reads it with these instead of by its type &mdash; see [A codec for one field](#a-codec-for-one-field) |
 
 Styles: `as_written`, `snake_case`, `screaming_snake_case`, `kebab_case`, `camel_case`,
 `pascal_case`.
@@ -233,6 +236,63 @@ struct [[= serpent::serializable {}]] listener {
 
 Two enumerations may give the same spelling different meanings, which a rule derived from the
 identifiers could not: `rtk_float` is `"float"` in one and `"rtk_float"` in another.
+
+### At the field
+
+An enumeration that has nothing to do with serialization need not say how it is written: the
+field holding it can. The same enumeration may then be a name in one document and a number in
+another.
+
+```cpp
+enum class probe_state { idle, busyNow, lost };   // says nothing
+
+struct [[= serpent::serializable {}]] status {
+    [[= serpent::enum_as_name {}]] probe_state probe;                                    // "busyNow"
+    [[= serpent::enum_as_name { serpent::naming_style::snake_case }]] probe_state last;  // "busy_now"
+    [[= serpent::enum_as_number {}]] link_kind link;   // a number, though link_kind is named
+};
+```
+
+An enumerator is its own `as(...)` where it has one, else its identifier under the field's naming
+rule, else the enumeration's. Entries change single enumerators for this field only &mdash; a new
+spelling, `skip {}` to keep one off the wire, `fallback {}` to replace the enumeration's own:
+
+```cpp
+[[= serpent::enum_as_name {
+    serpent::enum_entry { probe_state::idle, "waiting" },
+    serpent::enum_entry { probe_state::lost, "gone", serpent::fallback {} },
+}]] probe_state probe;
+
+[[= serpent::enum_as_number { serpent::enum_entry { reachability::unknown, -1 } }]] reachability reach;
+```
+
+The field's choice reaches every enumeration inside an optional, a sequence, a set, a pair or a
+map, keys included; the containers are written as they always are. The checks an annotated
+enumeration gets &mdash; no two enumerators the same on the wire, one fallback at most &mdash; are
+made again for each field, over the mapping as the field leaves it.
+
+### A codec for one field
+
+`with` hands a field to something else to write and read. A codec is a type with the two static
+functions a [`serializer<T>`](types.md#specialize-the-serializer) specialization has, so an
+existing specialization serves as it is; two lambdas that capture nothing will also do:
+
+```cpp
+[[= serpent::with<seconds_since_boot> {}]] std::chrono::milliseconds uptime;
+[[= serpent::with<serpent::serializer<timestamp>> {}]] timestamp started;
+
+[[= serpent::with {
+    [](auto &out, const int &value) { out.value(value + 100); },
+    [](const auto &source, int &value) {
+        const auto held = source.template as<int>();
+        if (held) value = *held - 100;
+        return held.has_value();
+    },
+}]] int offset;
+```
+
+The codec is given the field whole &mdash; on a `std::vector<T>` it gets the vector. Whether the
+document must carry the field is decided as for any other, by `required {}` and `defaulted {}`.
 
 ## A type you cannot annotate
 
@@ -441,6 +501,9 @@ error rather than something you find by reading a document that came out wrong:
 | `required {}` and `defaulted {}` together | they are opposites |
 | `skip {}` beside `key("…")` | a member that is not in the document has no key |
 | `as(…)` or `naming {…}` on a data member | both belong somewhere else |
+| a field's `enum_as_name` / `enum_as_number` making two enumerators one wire value, or naming two fallbacks | the same as on the enumeration, checked per field |
+| `enum_as_name` / `enum_as_number` on a field with no enumeration in it | there is nothing for it to do |
+| more than one of `with`, `enum_as_name`, `enum_as_number` and `tagged` on one field | nothing says which |
 
 Each names what it found:
 

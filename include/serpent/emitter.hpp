@@ -463,7 +463,9 @@ template<typename Emitter, typename T>
 void emit_value(Emitter &out, const T &item) {
     using bare = std::remove_cvref_t<T>;
 
-    if constexpr (std::same_as<bare, bool>) {
+    if constexpr (detail::is_coded_member<bare>) {
+        detail::emit_coded(out, item);
+    } else if constexpr (std::same_as<bare, bool>) {
         out.boolean(item);
     } else if constexpr (std::same_as<bare, std::nullptr_t> || std::same_as<bare, std::monostate>) {
         out.null();

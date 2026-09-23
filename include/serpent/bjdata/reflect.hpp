@@ -112,7 +112,8 @@ public:
                 // constant and the payload one load of a known width; a boolean is all marker,
                 // and a short string's marker and length marker are constant too. Written for
                 // size the marker is whatever held the value, and is looked at below.
-                if constexpr (fixed_width<field_type>) {
+                constexpr bool plain = !serpent::detail::member_is_projected<member>();
+                if constexpr (plain && fixed_width<field_type>) {
                     if (this->at(key_then<name, detail::own_marker<field_type>()>, sizeof(field_type))) {
                         this->scan.advance(key.size() + 1);
                         this->value.[:member:] = detail::load<field_type>(this->scan.position);
@@ -120,7 +121,7 @@ public:
                         found |= [] { return bit_of(member); }();
                         continue;
                     }
-                } else if constexpr (std::same_as<field_type, bool>) {
+                } else if constexpr (plain && std::same_as<field_type, bool>) {
                     if (this->at(key, 1)) {
                         const auto kind = static_cast<marker>(this->scan.position[key.size()]);
                         if (kind == marker::boolean_true || kind == marker::boolean_false) {
@@ -130,7 +131,7 @@ public:
                             continue;
                         }
                     }
-                } else if constexpr (std::same_as<field_type, std::string>) {
+                } else if constexpr (plain && std::same_as<field_type, std::string>) {
                     if (this->at(key_then<name, marker::string, marker::uint8>, 1)) {
                         const auto length = static_cast<std::size_t>(this->scan.position[key.size() + 2]);
                         if (this->scan.remaining() >= key.size() + 3 + length) {
@@ -256,9 +257,8 @@ private:
 
         auto &field = this->value.[:Member:];
         using field_type = std::remove_cvref_t<decltype(field)>;
-        constexpr auto tag = serpent::detail::annotation_of<tagged>(Member);
 
-        if constexpr (!tag.has_value() && direct::readable<field_type>) {
+        if constexpr (!serpent::detail::member_is_projected<Member>() && direct::readable<field_type>) {
             if (direct::read(this->scan, kind, field)) return this->scan.ok();
         }
         return this->read_value_through_view<Member>(kind);
@@ -274,13 +274,8 @@ private:
 
         auto &field = this->value.[:Member:];
         const reader held { kind, this->buffer, this->scan.position };
-        if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
-            using declared = [:std::meta::type_of(Member):];
-            auto wrapper = make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field);
-            if (!read_into(held, wrapper)) this->every_value_read = false;
-        } else {
-            if (!read_into(held, field)) this->every_value_read = false;
-        }
+        auto &&projection = serpent::detail::projected<Member>(field);
+        if (!read_into(held, projection)) this->every_value_read = false;
         detail::skip_value(this->scan, kind, 1);
         return this->scan.ok();
     }
@@ -637,7 +632,7 @@ template<typename T, std::meta::info Member>
 struct widest_member {
     static constexpr std::size_t value = [] () -> std::size_t {
         if (serpent::detail::has_annotation<skip>(Member)) return 0;
-        if (serpent::detail::annotation_of<tagged>(Member).has_value()) return 0;
+        if (serpent::detail::member_is_projected<Member>()) return 0;
 
         using field = std::remove_cvref_t<typename [:std::meta::type_of(Member):]>;
         if (!std::integral<field> && !std::floating_point<field>) return 0;
@@ -711,13 +706,7 @@ private:
         const auto &field = this->value.[:Member:];
 
         this->out.template key_literal<name>();
-        if constexpr (constexpr auto tag = serpent::detail::annotation_of<tagged>(Member); tag.has_value()) {
-            using declared = [:std::meta::type_of(Member):];
-            static_assert(serpent::detail::variant_like<declared>, "serpent::tagged belongs on a variant field");
-            this->out.value(make_tagged<serpent::detail::resolved_tag<declared, *tag>()>(field));
-        } else {
-            this->out.value(field);
-        }
+        this->out.value(serpent::detail::projected<Member>(field));
     }
 
     /** The members from `First` up to `Last` stored one after another, if room for them can be had. */

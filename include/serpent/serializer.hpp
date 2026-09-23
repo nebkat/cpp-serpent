@@ -361,6 +361,11 @@ bool read_into(const Source &source, tagged_variant<Tag, Variant> wrapper) {
     return read_tagged<Tag>(source, wrapper.target, std::make_index_sequence<std::variant_size_v<Variant>> {});
 }
 
+template<typename Source, auto Note, typename T>
+bool read_into(const Source &source, coded_member<Note, T> wrapper) {
+    return detail::read_coded(source, wrapper);
+}
+
 template<typename Source, typename Variant, std::size_t... Index>
 bool read_alternative(const Source &source, Variant &value, std::index_sequence<Index...>) {
     if constexpr (all_discriminated<Variant>(std::index_sequence<Index...> {})) {

@@ -18,6 +18,10 @@ struct serializer;
 template<typename Emitter, typename E>
 bool emit_mapped_enum(Emitter &out, E value);
 
+/** Turns a C++ value into calls on an emitter. Defined in emitter.hpp. */
+template<typename Emitter, typename T>
+void emit_value(Emitter &out, const T &item);
+
 /** Reads one value into a destination. Defined in serializer.hpp. */
 template<typename Source, typename T>
 bool read_into(const Source &source, T &value);
@@ -90,5 +94,36 @@ template<tagged Tag, typename Variant>
 constexpr tagged_variant<Tag, Variant> make_tagged(Variant &target) {
     return tagged_variant<Tag, Variant> { target };
 }
+
+/**
+ * A member bound to the annotation that says how its value is written and read - serpent::with,
+ * serpent::enum_as_name or serpent::enum_as_number - carried the way tagged_variant is.
+ */
+template<auto Note, typename T>
+struct coded_member {
+    T &target;
+};
+
+template<auto Note, typename T>
+constexpr coded_member<Note, T> make_coded(T &target) {
+    return coded_member<Note, T> { target };
+}
+
+namespace detail {
+
+template<typename>
+inline constexpr bool is_coded_member = false;
+
+template<auto Note, typename T>
+inline constexpr bool is_coded_member<coded_member<Note, T>> = true;
+
+/** Defined in reflect.hpp, which is the only place a coded_member is made. */
+template<typename Emitter, auto Note, typename T>
+void emit_coded(Emitter &out, const coded_member<Note, T> &item);
+
+template<typename Source, auto Note, typename T>
+bool read_coded(const Source &source, coded_member<Note, T> item);
+
+} // namespace detail
 
 } // namespace serpent

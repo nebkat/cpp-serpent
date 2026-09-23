@@ -65,7 +65,7 @@ consteval bool is_table_record() {
         template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 using field = std::remove_cvref_t<typename [:std::meta::type_of(member):]>;
-                if constexpr (serpent::detail::annotation_of<tagged>(member).has_value() || !mappable<field>()) every = false;
+                if constexpr (serpent::detail::member_is_projected<member>() || !mappable<field>()) every = false;
             }
         }
         return every;
