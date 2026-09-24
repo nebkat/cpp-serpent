@@ -723,7 +723,7 @@ public:
             if (this->layout->place_at(container.source, container.table.container)) {
                 if (container.table.is_record()) {
                     this->next_field = 0;
-                    this->last_field = this->layout->fields().count;
+                    this->last_field = this->layout->fields().count();
                 } else {
                     const auto &record = this->layout->fields().fields[container.table.field];
                     this->next_field = record.children;

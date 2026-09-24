@@ -22,7 +22,6 @@
 #include <serpent/bjdata/marker.hpp>
 #include <serpent/error.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -57,21 +56,24 @@ struct field {
     std::uint32_t next = 0;              ///< index of the field after this one and its subtree
 };
 
-/** The most fields a schema may declare, nested ones included; a bound so that no allocation is needed. */
+/**
+ * The most fields a schema may declare, nested ones included. The count comes from the document,
+ * so this bounds what one can make the reader hold.
+ */
 inline constexpr std::size_t max_fields = 64;
 
 struct schema {
-    std::array<field, max_fields> fields {};
-    std::uint32_t count = 0;             ///< fields in use
+    std::vector<field> fields;           ///< every field, a record's or an array's children right after it
     std::uint32_t record_bytes = 0;      ///< payload bytes per record
     std::uint32_t top_level = 0;         ///< fields directly in the record
 
+    [[nodiscard]] std::uint32_t count() const noexcept { return static_cast<std::uint32_t>(this->fields.size()); }
     [[nodiscard]] const field *begin() const noexcept { return this->fields.data(); }
-    [[nodiscard]] const field *end() const noexcept { return this->fields.data() + this->count; }
+    [[nodiscard]] const field *end() const noexcept { return this->fields.data() + this->fields.size(); }
 
     /** The top-level field of that name, or null. */
     [[nodiscard]] const field *find(std::string_view name) const noexcept {
-        for (std::uint32_t index = 0; index < this->count; index = this->fields[index].next) {
+        for (std::uint32_t index = 0; index < this->count(); index = this->fields[index].next) {
             if (this->fields[index].name == name) return &this->fields[index];
         }
         return nullptr;
@@ -82,7 +84,24 @@ namespace detail {
 
 using bjdata::detail::cursor;
 
-std::uint32_t parse_type(cursor &source, schema &into, field &field, int depth) noexcept;
+std::uint32_t parse_type(cursor &source, schema &into, std::uint32_t index, int depth) noexcept;
+
+/**
+ * Appends a field and returns its index. Fields are referred to by index throughout the parse:
+ * a nested type pushes its children while its own field is still being described, and a push
+ * may move the vector.
+ */
+[[nodiscard]] inline std::optional<std::uint32_t> push_field(cursor &source, schema &into) noexcept {
+    if (into.fields.size() == max_fields) {
+        source.fail(errc::dimension_overflow);
+        return std::nullopt;
+    }
+    const auto index = into.count();
+    // The link to the field after this one is set once its subtree is known; until then it
+    // points just past this one, so a schema that fails to parse still walks forward.
+    into.fields.emplace_back().next = index + 1;
+    return index;
+}
 
 /** The fields of a record whose `{` the cursor has passed; returns the bytes they take. */
 inline std::uint32_t parse_fields(cursor &source, schema &into, int depth) noexcept {
@@ -93,24 +112,19 @@ inline std::uint32_t parse_fields(cursor &source, schema &into, int depth) noexc
             source.advance(1);
             return offset;
         }
-        if (into.count == max_fields) {
-            source.fail(errc::dimension_overflow);
-            return offset;
-        }
-        auto &field = into.fields[into.count++];
-        // The link to the field after this one is set once its subtree is known; until then it
-        // points just past this one, so a schema that fails to parse still walks forward.
-        field.next = into.count;
+        const auto index = push_field(source, into);
+        if (!index) return offset;
+        auto &field = into.fields[*index];
         field.name = bjdata::detail::read_key(source);
         if (!source.ok()) return offset;
         field.offset = offset;
-        offset += parse_type(source, into, field, depth);
+        offset += parse_type(source, into, *index, depth);
     }
     return offset;
 }
 
-/** One type of the schema, at the cursor, into `field`; returns the bytes it takes of a record. */
-inline std::uint32_t parse_type(cursor &source, schema &into, field &field, int depth) noexcept {
+/** One type of the schema, at the cursor, into the field at `index`; returns the bytes it takes of a record. */
+inline std::uint32_t parse_type(cursor &source, schema &into, std::uint32_t index, int depth) noexcept {
     if (depth > max_depth) {
         source.fail(errc::depth_exceeded);
         return 0;
@@ -121,11 +135,13 @@ inline std::uint32_t parse_type(cursor &source, schema &into, field &field, int 
     source.advance(1);
 
     const auto done = [&](std::uint32_t width) {
+        auto &field = into.fields[index];
         field.width = width;
-        field.next = into.count;
+        field.next = into.count();
         return width;
     };
 
+    auto &field = into.fields[index];
     switch (kind) {
     case marker::boolean_true:
         field.kind = field_kind::boolean;
@@ -147,7 +163,7 @@ inline std::uint32_t parse_type(cursor &source, schema &into, field &field, int 
     }
     case marker::object_begin: {
         field.kind = field_kind::record;
-        field.children = into.count;
+        field.children = into.count();
         return done(parse_fields(source, into, depth + 1));
     }
     case marker::array_begin: {
@@ -194,7 +210,8 @@ inline std::uint32_t parse_type(cursor &source, schema &into, field &field, int 
         }
         // `[` types `]`: a fixed run of elements, each with a type of its own.
         field.kind = field_kind::array;
-        field.children = into.count;
+        const auto children = into.count();
+        field.children = children;
         std::uint32_t width = 0;
         while (source.ok()) {
             if (!source.need(1)) return 0;
@@ -202,16 +219,12 @@ inline std::uint32_t parse_type(cursor &source, schema &into, field &field, int 
                 source.advance(1);
                 break;
             }
-            if (into.count == max_fields) {
-                source.fail(errc::dimension_overflow);
-                return 0;
-            }
-            auto &element = into.fields[into.count++];
-            element.next = into.count;
-            element.offset = width;
-            width += parse_type(source, into, element, depth + 1);
+            const auto element = push_field(source, into);
+            if (!element) return 0;
+            into.fields[*element].offset = width;
+            width += parse_type(source, into, *element, depth + 1);
         }
-        if (field.children == into.count) {
+        if (children == into.count()) {
             source.fail(errc::invalid_dimensions, at);
             return 0;
         }
@@ -239,9 +252,9 @@ inline std::uint32_t parse_type(cursor &source, schema &into, field &field, int 
 [[nodiscard]] inline schema parse(bjdata::detail::cursor &source) noexcept {
     schema result;
     result.record_bytes = detail::parse_fields(source, result, 0);
-    if (source.ok() && result.count == 0) source.fail(errc::invalid_dimensions);
+    if (source.ok() && result.fields.empty()) source.fail(errc::invalid_dimensions);
     if (!source.ok()) return result;
-    for (std::uint32_t index = 0; index < result.count; index = result.fields[index].next) ++result.top_level;
+    for (std::uint32_t index = 0; index < result.count(); index = result.fields[index].next) ++result.top_level;
     return result;
 }
 
@@ -312,8 +325,7 @@ class table {
         const std::byte *text = nullptr;
         std::uint64_t length = 0;
     };
-    std::array<offset_field, max_fields> offset_fields {};
-    std::uint32_t offset_field_count = 0;
+    std::vector<offset_field> offset_fields;
     bool placed = false;
 
 public:
@@ -340,8 +352,9 @@ public:
         if (static_cast<std::uint64_t>(this->limit - this->body) < payload) return false;
         const std::byte *after = this->body + payload;
 
-        this->offset_field_count = 0;
-        for (std::uint32_t index = 0; index < this->layout.count; ++index) {
+        this->offset_fields.clear();
+        this->dictionaries.assign(this->layout.fields.size(), {});
+        for (std::uint32_t index = 0; index < this->layout.count(); ++index) {
             const auto &field = this->layout.fields[index];
             if (field.kind != field_kind::offsets) continue;
             const auto width = payload_width(field.type);
@@ -349,7 +362,7 @@ public:
             if (static_cast<std::uint64_t>(this->limit - after) < entries) return false;
             const std::int64_t last = bjdata::detail::load_integer(field.type, after + this->records * width);
             if (last < 0 || static_cast<std::uint64_t>(this->limit - after - entries) < static_cast<std::uint64_t>(last)) return false;
-            auto &placed_field = this->offset_fields[this->offset_field_count++];
+            auto &placed_field = this->offset_fields.emplace_back();
             placed_field.field = index;
             placed_field.offsets = after;
             placed_field.text = after + entries;
@@ -381,8 +394,8 @@ public:
     }
     /** Just past the whole table: payload and every offset table and its text. */
     [[nodiscard]] const std::byte *end() const noexcept {
-        if (this->offset_field_count == 0) return this->payload_end();
-        const auto &last = this->offset_fields[this->offset_field_count - 1];
+        if (this->offset_fields.empty()) return this->payload_end();
+        const auto &last = this->offset_fields.back();
         return last.text + last.length;
     }
 
@@ -411,7 +424,7 @@ public:
     }
 
 private:
-    mutable std::array<std::vector<std::string_view>, max_fields> dictionaries {};
+    mutable std::vector<std::vector<std::string_view>> dictionaries; ///< one a field, filled when first asked
 
     [[nodiscard]] const std::vector<std::string_view> &dictionary_of(const field &field) const noexcept {
         auto &entries = this->dictionaries[static_cast<std::size_t>(&field - this->layout.fields.data())];
@@ -428,8 +441,8 @@ public:
     /** The text an offset field's index names, or nothing for an index past the table. */
     [[nodiscard]] std::optional<std::string_view> offset_entry(const field &field, std::uint64_t index) const noexcept {
         const offset_field *placed_field = nullptr;
-        for (std::uint32_t at = 0; at < this->offset_field_count; ++at) {
-            if (&this->layout.fields[this->offset_fields[at].field] == &field) placed_field = &this->offset_fields[at];
+        for (const auto &candidate : this->offset_fields) {
+            if (&this->layout.fields[candidate.field] == &field) placed_field = &candidate;
         }
         if (placed_field == nullptr || index >= this->records) return std::nullopt;
         const auto width = payload_width(field.type);

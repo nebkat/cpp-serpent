@@ -469,7 +469,7 @@ public:
     table_filler(const soa::table &source, const soa::field *record = nullptr) noexcept : source(source), record(record) {
         const auto &layout = source.fields();
         const std::uint32_t first = record == nullptr ? 0 : record->children;
-        const std::uint32_t last = record == nullptr ? layout.count : record->next;
+        const std::uint32_t last = record == nullptr ? layout.count() : record->next;
         std::size_t position = 0;
         template for (constexpr auto member : members) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
