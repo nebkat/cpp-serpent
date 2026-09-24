@@ -808,10 +808,11 @@ inline void coalesce_run(run<member> *&entries_run) {
     }
 
     // A flat table of entry indices, open-addressed, at least twice the size it needs: on the
-    // stack for any object of ordinary size, so that checking costs no allocation at all.
+    // stack for an object of up to thirty-two members, so that checking one costs no
+    // allocation; small enough that the stack of a small target is not asked for much.
     std::size_t slots = 32;
     while (slots < count * 2) slots *= 2;
-    std::array<std::uint32_t, 256> near {};
+    std::array<std::uint32_t, 64> near {};
     std::vector<std::uint32_t> far;
     std::uint32_t *table = near.data();
     if (slots > near.size()) {
