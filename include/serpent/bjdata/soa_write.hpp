@@ -179,7 +179,7 @@ private:
     static constexpr std::size_t slots = 512; ///< twice the bound, rounded to a power of two
 
     std::vector<std::string_view> entries;
-    std::array<std::uint16_t, slots> table {}; ///< entry index + 1 by hash, open-addressed; 0 is empty
+    std::vector<std::uint16_t> table = std::vector<std::uint16_t>(slots); ///< entry index + 1 by hash, open-addressed; 0 is empty
     std::uint64_t bytes = 0;                    ///< every value's length summed, for an offset table
     std::uint64_t records = 0;
     bool characters = true;
