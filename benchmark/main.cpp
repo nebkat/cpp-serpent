@@ -9,11 +9,13 @@
 #include <serpent/bjdata.hpp>
 #include <serpent/json.hpp>
 #include <serpent/json/indexed.hpp>
+#include <serpent/msgpack.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <glaze/cbor.hpp>
 #include <glaze/glaze.hpp>
+#include <glaze/msgpack.hpp>
 #include <rapidjson/document.h>
 #include <simdjson/simdjson.h>
 #include <yyjson/yyjson.h>
@@ -30,6 +32,7 @@
 
 namespace json = serpent::json;
 namespace bjdata = serpent::bjdata;
+namespace msgpack = serpent::msgpack;
 using other = nlohmann::json;
 
 // These allocate through malloc rather than operator new, so the counter cannot see them.
@@ -402,6 +405,28 @@ static void check_results(const std::vector<reading> &values, const std::string 
                 values.at(777).station);
     }
     {
+        // One format, three libraries: each has to read what the others write.
+        const auto ours = msgpack::encode(values);
+        std::vector<reading> glazed;
+        const bool read = !glz::read_msgpack(glazed, std::string_view { reinterpret_cast<const char *>(ours.data()), ours.size() });
+        agree("our MessagePack reads as glaze's", read && glazed.size() == values.size() ? glazed.at(777).station : "",
+                values.at(777).station);
+        agree("our MessagePack reads as nlohmann's",
+                other::from_msgpack(std::vector<std::uint8_t>(std::from_range, ours | std::views::transform([](std::byte b) {
+                    return static_cast<std::uint8_t>(b);
+                }))).get<std::vector<reading>>().at(4321).station,
+                values.at(4321).station);
+
+        std::string theirs;
+        std::ignore = glz::write_msgpack(values, theirs);
+        const auto from_glaze = msgpack::decode<std::vector<reading>>(std::as_bytes(std::span { theirs }));
+        agree("glaze's MessagePack reads as ours", from_glaze ? from_glaze->at(777).station : "", values.at(777).station);
+        const auto from_nlohmann = other::to_msgpack(other(values));
+        const auto nlohmann_read = msgpack::decode<std::vector<reading>>(std::as_bytes(std::span { from_nlohmann }));
+        agree("nlohmann's MessagePack reads as ours", nlohmann_read ? nlohmann_read->at(4321).station : "",
+                values.at(4321).station);
+    }
+    {
         const auto cbor = other::to_cbor(other(values));
         agree("CBOR round-trips the same records", other::from_cbor(cbor).get<std::vector<reading>>().at(777).station,
                 values.at(777).station);
@@ -549,6 +574,30 @@ static void typed_workload(const std::string &workload, const std::vector<T> &va
     });
     bench::measure(workload, "binary decode", "nlohmann", cbor.size(),
             [&] { return other::from_cbor(cbor).get<std::vector<T>>().size(); });
+
+    // MessagePack: the one binary format all three write, so here only the library varies.
+    const auto packed = msgpack::encode(values);
+    std::string glaze_packed;
+    std::ignore = glz::write_msgpack(values, glaze_packed);
+    const auto nlohmann_packed = other::to_msgpack(other(values));
+
+    bench::measure(workload, "MessagePack encode", "serpent", packed.size(), [&] { return msgpack::encode(values).size(); });
+    bench::measure(workload, "MessagePack encode", "glaze", glaze_packed.size(), [&] {
+        std::string buffer;
+        std::ignore = glz::write_msgpack(values, buffer);
+        return buffer.size();
+    });
+    bench::measure(workload, "MessagePack encode", "nlohmann", nlohmann_packed.size(),
+            [&] { return other::to_msgpack(other(values)).size(); });
+
+    bench::measure(workload, "MessagePack decode", "serpent", packed.size(),
+            [&] { return msgpack::decode<std::vector<T>>(packed)->size(); });
+    bench::measure(workload, "MessagePack decode", "glaze", glaze_packed.size(), [&] {
+        std::vector<T> out;
+        return glz::read_msgpack(out, glaze_packed) ? 0 : out.size();
+    });
+    bench::measure(workload, "MessagePack decode", "nlohmann", nlohmann_packed.size(),
+            [&] { return other::from_msgpack(nlohmann_packed).get<std::vector<T>>().size(); });
 }
 
 static void your_own_types(const std::vector<reading> &readings) {
