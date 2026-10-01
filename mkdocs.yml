@@ -61,6 +61,7 @@ nav:
   - Formats:
       - JSON: json.md
       - BJData: bjdata.md
+      - MessagePack: msgpack.md
   - Configuration: configuration.md
   - Benchmarks: benchmarks.md
   - Design notes: design.md

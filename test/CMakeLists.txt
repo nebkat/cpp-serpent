@@ -19,13 +19,14 @@ set(TESTS
     json_indexed
     json_walking
     bjdata_walking
+    msgpack
     fixture
     manual
     value)
 
 # Suites that define types the way types are meant to be defined, by annotation.
 if(SERPENT_HAS_REFLECTION_SUPPORT)
-    list(APPEND TESTS json_writer json_shapes json_bounded_write bjdata_shapes bjdata_bounded_write bjdata_table serializer reflect member_codec)
+    list(APPEND TESTS json_writer json_shapes json_bounded_write bjdata_shapes bjdata_bounded_write bjdata_table serializer reflect member_codec msgpack_shapes)
 endif()
 
 foreach(TEST_NAME IN LISTS TESTS)
