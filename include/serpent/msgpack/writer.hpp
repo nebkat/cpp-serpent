@@ -98,6 +98,20 @@ class writer : public byte_emitter {
         this->gathered.insert(this->gathered.end(), bytes.begin(), bytes.end());
     }
 
+    /**
+     * Bytes whose count is known when the program is compiled - a number and its format byte, a
+     * constant key - so that the copy into the sink is of a fixed size and can be inlined, where
+     * emit() has to call out to copy however many it is given.
+     */
+    template<std::size_t Width>
+    SERPENT_ALWAYS_INLINE void emit_piece(const std::array<std::byte, Width> &piece) noexcept {
+        if (this->gathering_from == 0) {
+            this->put_constant(piece);
+            return;
+        }
+        this->emit(piece);
+    }
+
     void emit_byte(std::uint8_t value) noexcept {
         if (this->gathering_from == 0) {
             this->put_byte(static_cast<std::byte>(value));
@@ -109,12 +123,12 @@ class writer : public byte_emitter {
 
     /** A format byte and a big-endian payload, as one piece. */
     template<typename T>
-    void emit_headed(std::uint8_t head, T value) noexcept {
+    SERPENT_ALWAYS_INLINE void emit_headed(std::uint8_t head, T value) noexcept {
         const nonstd::unaligned_big<T> stored { value };
         std::array<std::byte, 1 + sizeof(T)> piece {};
         piece[0] = static_cast<std::byte>(head);
         std::memcpy(piece.data() + 1, stored.data(), sizeof(T));
-        this->emit(piece);
+        this->emit_piece(piece);
     }
 
     /**
@@ -343,7 +357,7 @@ public:
     template<const std::string_view &Name>
     void key_literal() noexcept {
         if (!this->begin_key()) return;
-        this->emit(detail::encoded_key<Name>);
+        this->emit_piece(detail::encoded_key<Name>);
     }
 
     /** An array or map whose count is not known yet: gathered until it closes. */

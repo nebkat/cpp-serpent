@@ -6,9 +6,11 @@
 // string's length, a small container's count - and the rest say how many bytes follow and what
 // they are. Everything after the first byte is big-endian.
 
+#include <serpent/config.hpp>
 #include <serpent/kind.hpp>
 #include <nonstd/unaligned.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -89,7 +91,7 @@ struct shape {
     std::uint32_t inline_length = 0;
 };
 
-[[nodiscard]] constexpr shape shape_of(std::uint8_t head) noexcept {
+[[nodiscard]] constexpr shape classify(std::uint8_t head) noexcept {
     if (head <= 0x7f) return { family::unsigned_integer, 0, 0, 0 };
     if (head <= 0x8f) return { family::map, 0, 0, static_cast<std::uint32_t>(head & 0x0fu) };
     if (head <= 0x9f) return { family::array, 0, 0, static_cast<std::uint32_t>(head & 0x0fu) };
@@ -131,6 +133,18 @@ struct shape {
     }
 }
 
+/**
+ * What every format byte says, worked out once. Every value is asked this more than once - what
+ * kind it is, how to read it, how far it reaches - and a load is cheaper each time than the switch.
+ */
+inline constexpr auto shapes = [] {
+    std::array<shape, 256> table {};
+    for (std::size_t head = 0; head < table.size(); ++head) table[head] = classify(static_cast<std::uint8_t>(head));
+    return table;
+}();
+
+[[nodiscard]] SERPENT_ALWAYS_INLINE constexpr shape shape_of(std::uint8_t head) noexcept { return shapes[head]; }
+
 /** The JSON-level shape a family reads as. Binary is an array of bytes, as BJData's is; an extension has none. */
 [[nodiscard]] constexpr kind kind_of(family value) noexcept {
     switch (value) {
@@ -148,7 +162,7 @@ struct shape {
 }
 
 /** A big-endian unsigned number `width` bytes wide - one, two, four or eight - at `from`. */
-[[nodiscard]] inline std::uint64_t load_big(const std::byte *from, std::size_t width) noexcept {
+[[nodiscard]] SERPENT_ALWAYS_INLINE inline std::uint64_t load_big(const std::byte *from, std::size_t width) noexcept {
     switch (width) {
     case 1: return std::to_integer<std::uint8_t>(from[0]);
     case 2: {

@@ -386,6 +386,14 @@ void reading() {
     check(msgpack::decode<std::vector<std::byte>>(bin) == payload({ 1, 2, 3 }), "into a byte vector");
     check(msgpack::decode<std::vector<int>>(bin) == std::vector<int> { 1, 2, 3 }, "or into a vector of numbers");
 
+    // A run of numbers is read straight into its container, each at whatever width it was written.
+    check(msgpack::decode<std::vector<int>>(read("9301d0dfcd0100")) == std::vector<int> { 1, -33, 256 }, "numbers of every width");
+    check(msgpack::decode<std::vector<double>>(read("92ca3fc0000005")) == std::vector<double> { 1.5, 5.0 },
+            "reals, and an integer among them");
+    check(!msgpack::decode<std::vector<std::uint8_t>>(read("9201cd0100")), "one that does not fit fails the whole");
+    check(!msgpack::decode<std::vector<int>>(read("9201a161")), "as does one that is not a number");
+    check(msgpack::decode<std::vector<int>>(read("90"))->empty(), "an empty array is an empty container");
+
     const auto ext_bytes = read("c703050a0b0c");
     const auto ext = msgpack::reader::over(ext_bytes);
     check(ext.is_extension() && !ext.is_valid() && ext.type() == kind::invalid, "an ext has no kind");
@@ -459,12 +467,14 @@ void malformed() {
     // Every document cut short at every length is refused, and walking it does nothing worse
     // than come up short - under the sanitizers, that is the test.
     for (const auto &whole : { from_hex(python_extended), from_hex(python_fd), from_hex(python_named),
-                 read("84a165d6ff5f5e1000a162c4020102a16e9281a17891c093010203a17acb3ff8000000000000") }) {
+                 read("84a165d6ff5f5e1000a162c4020102a16e9281a17891c093010203a17acb3ff8000000000000"),
+                 read("9401d0dfcd0100cb3ff8000000000000") }) {
         check(msgpack::validate(whole).has_value(), "the whole document validates");
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const std::span<const std::byte> cut { whole.data(), length };
             if (msgpack::validate(cut).has_value()) check(false, "a document cut short validates");
             std::ignore = msgpack::decode<can_frame>(cut);
+            std::ignore = msgpack::decode<std::vector<int>>(cut);
             std::ignore = msgpack::reader::over(cut).as<value>();
         }
     }

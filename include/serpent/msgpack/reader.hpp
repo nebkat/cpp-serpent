@@ -15,6 +15,7 @@
 //                since it has no name to give it.
 
 #include <serpent/concepts.hpp>
+#include <serpent/config.hpp>
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
 #include <serpent/kind.hpp>
@@ -59,7 +60,7 @@ struct header {
  * each element still to come, so that a count no buffer could hold is refused before anything
  * is walked.
  */
-[[nodiscard]] inline header read_header(std::uint8_t head, const std::byte *payload, const std::byte *limit) noexcept {
+[[nodiscard]] SERPENT_ALWAYS_INLINE inline header read_header(std::uint8_t head, const std::byte *payload, const std::byte *limit) noexcept {
     const auto described = shape_of(head);
     header out { described.type, described.inline_length, nullptr, 0 };
     if (described.type == family::invalid || payload == nullptr || payload > limit) return out;
@@ -127,11 +128,15 @@ struct cursor {
     }
 };
 
+inline void skip_container(cursor &scan, const header &info, int depth) noexcept;
+
 /**
  * Steps over a value whose format byte has been read and whose payload begins at the cursor.
- * Containers are walked; everything else is stepped over by its header.
+ *
+ * Anything but a container is stepped over by its header, here; only a container is walked, in a
+ * function of its own, since a walk is a loop and a recursion and the rest is a few loads.
  */
-inline void skip_value(cursor &scan, std::uint8_t head, int depth) noexcept {
+SERPENT_ALWAYS_INLINE inline void skip_value(cursor &scan, std::uint8_t head, int depth) noexcept {
     if (head == format::never_used) {
         scan.fail(errc::invalid_marker, scan.position - 1);
         return;
@@ -145,6 +150,11 @@ inline void skip_value(cursor &scan, std::uint8_t head, int depth) noexcept {
         scan.position = info.body + info.length;
         return;
     }
+    skip_container(scan, info, depth);
+}
+
+/** Walks a container's elements, each stepped over in turn. */
+inline void skip_container(cursor &scan, const header &info, int depth) noexcept {
     if (depth >= max_depth) {
         scan.fail(errc::depth_exceeded, scan.position - 1);
         return;
@@ -161,6 +171,46 @@ inline void skip_value(cursor &scan, std::uint8_t head, int depth) noexcept {
         ++scan.position;
         skip_value(scan, next, depth + 1);
         if (!scan.ok()) return;
+    }
+}
+
+/**
+ * A number under the format byte `head`, its payload at `payload`, as a T: an integer that fits,
+ * or a real from a float, a double or an integer. False for anything else, and for what does not
+ * fit. What the reader's as<T>() and the run of numbers below both read a number with.
+ */
+template<typename T>
+    requires std::integral<T> || std::floating_point<T>
+SERPENT_ALWAYS_INLINE inline bool load_number(std::uint8_t head, const std::byte *payload, std::size_t available, T &out) noexcept {
+    if constexpr (std::floating_point<T>) {
+        if (head == format::float32 && available >= 4) {
+            out = static_cast<T>(std::bit_cast<float>(static_cast<std::uint32_t>(load_big(payload, 4))));
+            return true;
+        }
+        if (head == format::float64 && available >= 8) {
+            out = static_cast<T>(std::bit_cast<double>(load_big(payload, 8)));
+            return true;
+        }
+    }
+    integer_value found {};
+    if (!load_integer(head, payload, available, found)) return false;
+    if constexpr (std::floating_point<T>) {
+        out = found.negative ? static_cast<T>(static_cast<std::int64_t>(found.bits)) : static_cast<T>(found.bits);
+        return true;
+    } else {
+        if (found.negative) {
+            if constexpr (std::is_unsigned_v<T>) {
+                return false;
+            } else {
+                const auto value = static_cast<std::int64_t>(found.bits);
+                if (value < static_cast<std::int64_t>(std::numeric_limits<T>::min())) return false;
+                out = static_cast<T>(value);
+                return true;
+            }
+        }
+        if (found.bits > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) return false;
+        out = static_cast<T>(found.bits);
+        return true;
     }
 }
 
@@ -365,9 +415,9 @@ public:
             if (!text) return std::nullopt;
             return T { *text };
         } else if constexpr (std::floating_point<T>) {
-            return this->read_real<T>();
+            return this->read_number<T>();
         } else if constexpr (std::integral<T>) {
-            return this->read_integer<T>();
+            return this->read_number<T>();
         } else if constexpr (serpent::detail::structurally_readable<T>) {
             T value {};
             if (!read_into(*this, value)) return std::nullopt;
@@ -402,35 +452,12 @@ private:
         return std::span<const std::byte> { info.body, static_cast<std::size_t>(info.length) };
     }
 
-    template<std::integral T>
-    [[nodiscard]] std::optional<T> read_integer() const noexcept {
+    template<typename T>
+    [[nodiscard]] std::optional<T> read_number() const noexcept {
         if (this->payload == nullptr) return std::nullopt;
-        integer_value found {};
-        if (!load_integer(this->head, this->payload, this->available(), found)) return std::nullopt;
-        if (found.negative) {
-            if constexpr (std::is_unsigned_v<T>) {
-                return std::nullopt;
-            } else {
-                const auto value = static_cast<std::int64_t>(found.bits);
-                if (value < static_cast<std::int64_t>(std::numeric_limits<T>::min())) return std::nullopt;
-                return static_cast<T>(value);
-            }
-        }
-        if (found.bits > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) return std::nullopt;
-        return static_cast<T>(found.bits);
-    }
-
-    template<std::floating_point T>
-    [[nodiscard]] std::optional<T> read_real() const noexcept {
-        if (this->payload == nullptr) return std::nullopt;
-        if (this->head == format::float32 && this->available() >= 4)
-            return static_cast<T>(std::bit_cast<float>(static_cast<std::uint32_t>(load_big(this->payload, 4))));
-        if (this->head == format::float64 && this->available() >= 8)
-            return static_cast<T>(std::bit_cast<double>(load_big(this->payload, 8)));
-        integer_value found {};
-        if (!load_integer(this->head, this->payload, this->available(), found)) return std::nullopt;
-        if (found.negative) return static_cast<T>(static_cast<std::int64_t>(found.bits));
-        return static_cast<T>(found.bits);
+        T value {};
+        if (!detail::load_number(this->head, this->payload, this->available(), value)) return std::nullopt;
+        return value;
     }
 };
 
@@ -658,6 +685,37 @@ inline reader reader::operator[](std::string_view key) const noexcept {
         if (entry.key == key) return entry.value.clone();
     }
     return {};
+}
+
+/**
+ * Fills a contiguous container of numbers from an array of them, sized once and read straight
+ * through - where the general container read would go element by element through the iterator.
+ *
+ * Found by ordinary lookup from that read, as BJData's is. Answers nothing for anything but an
+ * array, a bin included, and leaves those to it; an element that is not a number of this type
+ * fails the read, as it would there.
+ */
+template<std::ranges::contiguous_range C, typename T = std::ranges::range_value_t<C>>
+    requires (std::integral<T> || std::floating_point<T>) && (!std::same_as<T, bool>) && (!std::same_as<T, char>)
+        && requires(C &out) { out.resize(std::size_t {}); }
+std::optional<bool> read_sequence(const reader &source, C &out) {
+    if (source.format_family() != family::array) return std::nullopt;
+    const std::byte *const limit = source.buffer().data() + source.buffer().size();
+    const auto info = detail::read_header(source.format_byte(), source.data(), limit);
+    if (!info.ok()) return false;
+
+    out.resize(static_cast<std::size_t>(info.length));
+    const std::byte *at = info.body;
+    for (auto &slot : out) {
+        if (at >= limit) return false;
+        const auto head = std::to_integer<std::uint8_t>(*at);
+        const auto described = shape_of(head);
+        // A number is its format byte and the fixed bytes after it, so it is stepped over by those.
+        if (!detail::load_number(head, at + 1, static_cast<std::size_t>(limit - at - 1), slot)) return false;
+        at += 1 + described.fixed_bytes;
+    }
+    source.note_end(at);
+    return true;
 }
 
 /**
