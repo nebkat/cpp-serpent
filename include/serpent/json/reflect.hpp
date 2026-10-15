@@ -381,6 +381,8 @@ struct widest_member {
     static constexpr std::size_t value = [] () -> std::size_t {
         if (serpent::detail::has_annotation<skip>(Member)) return 0;
         if (serpent::detail::member_is_projected<Member>()) return 0;
+        // Whether it is written at all is only known when it runs.
+        if (serpent::detail::member_omitted_when_empty<Member>()) return 0;
 
         constexpr std::string_view name = serpent::detail::field_key<T, Member>();
         if (!scanner::is_plain_text(name)) return 0;
@@ -444,6 +446,7 @@ private:
     void write_member() {
         static constexpr std::string_view name = serpent::detail::field_key<T, Member>();
         const auto &field = this->value.[:Member:];
+        if (serpent::detail::omitted_now<Member>(field)) return;
 
         this->out.template key_literal<name>();
         this->out.value(serpent::detail::projected<Member>(field));

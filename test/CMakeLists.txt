@@ -87,8 +87,9 @@ if(SERPENT_HAS_REFLECTION_SUPPORT)
     #   annotation_misuse   an annotation that cannot mean anything where it is
     #   enum_as_ambiguous   a field's entries that make two enumerators the same value on the wire
     #   enum_as_misplaced   enum_as_name on a field that holds no enumeration
+    #   omit_empty_misplaced  omit_empty on a field that can never be empty
     foreach(REFUSED IN ITEMS reflect_conflict enum_incomplete duplicate_key enum_ambiguous annotation_misuse
-            enum_as_ambiguous enum_as_misplaced)
+            enum_as_ambiguous enum_as_misplaced omit_empty_misplaced)
         add_executable(${REFUSED}_test EXCLUDE_FROM_ALL "${REFUSED}_test.cpp")
         target_link_libraries(${REFUSED}_test PRIVATE serpent)
         add_test(NAME ${REFUSED}

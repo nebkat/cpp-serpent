@@ -16,15 +16,16 @@ namespace serpent::msgpack {
  * Writes a described type as a counted map.
  *
  * Found by ordinary lookup from serializer<T>::write, as BJData's is. The count is every member
- * not skipped, and the name of a discriminated type; were a member ever to write other than one
- * key, the writer would fail on closing rather than send a map that says one thing and holds another.
+ * not skipped, less those left out while empty, and the name of a discriminated type; were a
+ * member ever to write other than one key, the writer would fail on closing rather than send a
+ * map that says one thing and holds another.
  */
 template<reflected_type T>
 void write_reflected(writer &out, const T &value) {
     constexpr std::size_t members
             = serpent::detail::wire_keys<T>().size() + (serpent::detail::is_discriminated<T>() ? 1 : 0);
     write_visitor<writer> visitor { out };
-    const auto scope = out.object(members);
+    const auto scope = out.object(members - serpent::detail::omitted_count(value));
     serpent::detail::reflect_members(visitor, value);
 }
 

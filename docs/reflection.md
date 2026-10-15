@@ -66,6 +66,7 @@ struct [[= serpent::serializable {},
 | `skip {}` | a field, **or an enumerator** | leaves it out of the document, both directions &mdash; and an enumerator so marked is not a candidate when choosing what to write, which is what a sentinel aliased onto a real value needs |
 | `required {}` | an optional field | the key must be present, though its value may be null |
 | `defaulted {}` | a plain field, **or a type** | the document may omit it, and it keeps its declared default; on a type it means every member, and `required {}` on one of them is the exception |
+| `omit_empty {}` | an optional field, **or a type** | an empty optional writes no key, rather than null; on a type it means every optional the type declares, and `required {}` on one of them is the exception |
 | `discriminant("key")` | a type | names it on the wire under `key`, so a variant can select it |
 | `tagged("key")` | a variant field | the same, decided at the field instead of on the alternatives |
 | `as(...)` | an enumerator | what it is on the wire, where its identifier will not do |

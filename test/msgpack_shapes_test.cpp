@@ -80,6 +80,17 @@ struct [[= serpent::serializable {}]] shape {
     std::vector<trimmed> parts;
 };
 
+struct [[= serpent::serializable {}]] sighting {
+    int id = 0;
+    [[= serpent::omit_empty {}]] std::optional<std::string> note {};
+    std::optional<int> count {};
+};
+
+struct [[= serpent::serializable {}]] id_and_count {
+    int id = 0;
+    std::optional<int> count {};
+};
+
 /** Every map in the document, at whatever depth: all of them must hold what they say they hold. */
 std::size_t count_members(const msgpack::reader &value) {
     std::size_t total = 0;
@@ -94,6 +105,13 @@ std::size_t count_members(const msgpack::reader &value) {
 } // namespace
 
 int main() {
+    // A member left out while empty is left out of the count too, so the map is still counted up front.
+    check_equal(std::string_view { hex(msgpack::encode(sighting { .id = 1 })) },
+            std::string_view { hex(msgpack::encode(id_and_count { .id = 1 })) },
+            "an empty omit_empty member is neither written nor counted");
+    const auto noted = msgpack::decode<sighting>(msgpack::encode(sighting { .id = 1, .note = "owl" }));
+    check(noted && noted->note == "owl" && !noted->count.has_value(), "and one that holds something is both");
+
     check_equal(std::string_view { hex(msgpack::encode(fd_frame)) }, python_fd, "a described frame is python-can's bytes");
     check(msgpack::decode<can_frame>(from_hex(python_fd)) == fd_frame, "and python-can's bytes are the frame");
 

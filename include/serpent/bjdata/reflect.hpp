@@ -704,6 +704,7 @@ private:
     void write_member() {
         static constexpr std::string_view name = serpent::detail::field_key<T, Member>();
         const auto &field = this->value.[:Member:];
+        if (serpent::detail::omitted_now<Member>(field)) return;
 
         this->out.template key_literal<name>();
         this->out.value(serpent::detail::projected<Member>(field));

@@ -36,6 +36,43 @@ struct[[ = serpent::serializable {}, = serpent::naming { serpent::naming_style::
     std::optional<int> vlanId {};
 };
 
+// An empty optional can go without its key, by the field or for a whole type, where
+// serpent::required keeps one stated; and the same document spelled without the key at all.
+struct[[= serpent::serializable {}]] sighting {
+    int id = 0;
+    [[= serpent::omit_empty {}]] std::optional<std::string> note {};
+    std::optional<int> count {};
+};
+
+struct[[= serpent::serializable {}, = serpent::omit_empty {}]] report_line {
+    int id = 0;
+    std::optional<std::string> note {};
+    [[= serpent::required {}]] std::optional<int> count {};
+};
+
+// The rule is the declaring type's: what the derived type adds is its own.
+struct[[= serpent::serializable {}]] placed_report_line : report_line {
+    std::optional<std::string> place {};
+};
+
+struct[[= serpent::serializable {}]] id_and_count {
+    int id = 0;
+    std::optional<int> count {};
+};
+
+// Listed rather than annotated, with the same option.
+struct listed_sighting {
+    int id = 0;
+    std::optional<std::string> note {};
+};
+template<>
+struct serpent::describe<listed_sighting> {
+    static constexpr serpent::member_entry members[] {
+        ^^listed_sighting::id,
+        { ^^listed_sighting::note, serpent::omit_empty {} },
+    };
+};
+
 // Nesting, containers and a type opted in without touching its definition.
 struct site {
     point origin {};
@@ -419,6 +456,27 @@ void an_absent_optional_is_still_written_null() {
     check(back && !back->vlanId.has_value(), "and reads back empty");
 }
 
+void an_empty_optional_can_go_without_its_key() {
+    check_equal(json::encode(sighting { .id = 1 }), std::string { R"({"id":1,"count":null})" },
+            "omit_empty on a field leaves it out while it is empty");
+    check_equal(json::encode(sighting { .id = 1, .note = "owl" }), std::string { R"({"id":1,"note":"owl","count":null})" },
+            "and writes it while it holds something");
+    check_equal(json::encode(report_line { .id = 1 }), std::string { R"({"id":1,"count":null})" },
+            "on a type it covers every optional but a required one");
+    check_equal(json::encode(placed_report_line { { .id = 1 } }), std::string { R"({"id":1,"count":null,"place":null})" },
+            "a member keeps the rule of the type that declared it");
+    check_equal(json::encode(listed_sighting { .id = 1 }), std::string { R"({"id":1})" }, "a listed member takes it too");
+
+    const auto back = json::decode<sighting>(json::encode(sighting { .id = 1 }));
+    check(back && back->id == 1 && !back->note.has_value(), "the missing key reads back empty");
+
+    check(bjdata::encode(sighting { .id = 1 }) == bjdata::encode(id_and_count { .id = 1 }),
+            "BJData writes the document without the key");
+    check(bjdata::encode(report_line { .id = 1 }) == bjdata::encode(id_and_count { .id = 1 }), "for a type too");
+    const auto binary = bjdata::decode<sighting>(bjdata::encode(sighting { .id = 1, .note = "owl" }));
+    check(binary && binary->note == "owl", "and reads back what was there");
+}
+
 void reflection_composes_with_containers() {
     const site value {
         .origin = { 1, 2 },
@@ -497,6 +555,7 @@ int main() {
     a_type_you_do_not_own();
     annotations_adjust_keys();
     an_absent_optional_is_still_written_null();
+    an_empty_optional_can_go_without_its_key();
     reflection_composes_with_containers();
     the_same_type_serves_both_formats();
     naming_styles();

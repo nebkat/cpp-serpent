@@ -74,6 +74,15 @@ struct required {};
  */
 struct defaulted {};
 
+/**
+ * On an optional field, or a type: write an empty optional as no key at all, rather than null.
+ *
+ * Reading is unaffected, since an absent optional reads as empty either way. On a type it means
+ * every optional member the type declares, and serpent::required on one of them is the
+ * exception: its key is the one that must be stated, so it is written null.
+ */
+struct omit_empty {};
+
 /** On a type: opt in to reflected serialization. */
 struct serializable {};
 
@@ -601,7 +610,7 @@ struct name_buffer {
  *
  * The options are the annotations, spelled the same and meaning the same, in any order:
  * serpent::key to rename it, serpent::required or serpent::defaulted to say whether the
- * document has to carry it.
+ * document has to carry it, serpent::omit_empty to leave it out of what is written while empty.
  */
 struct member_entry {
     std::meta::info which {};
@@ -610,6 +619,7 @@ struct member_entry {
     bool insisted = false;
     bool optional_in_document = false;
     bool excluded = false;
+    bool omitted_when_empty = false;
 
     consteval member_entry(std::meta::info which) : which(which) {}
 
@@ -631,6 +641,7 @@ private:
     consteval void apply(required) { this->insisted = true; }
     consteval void apply(defaulted) { this->optional_in_document = true; }
     consteval void apply(skip) { this->excluded = true; }
+    consteval void apply(omit_empty) { this->omitted_when_empty = true; }
 };
 
 /**
@@ -803,6 +814,34 @@ consteval bool member_is_required() {
     }
 }
 
+/**
+ * Whether an empty value of this member is left out of what is written.
+ *
+ * Only an optional can be empty. The type-wide rule is that of the type that declared the member,
+ * as its naming is: a base's members are the base's wire format.
+ */
+template<std::meta::info Member>
+consteval bool member_omitted_when_empty() {
+    using declared = [:std::meta::type_of(Member):];
+    if constexpr (!optional_like<declared>) {
+        return false;
+    } else if constexpr (has_annotation<required>(Member)) {
+        return false;
+    } else {
+        return has_annotation<omit_empty>(Member) || has_annotation<omit_empty>(std::meta::parent_of(Member));
+    }
+}
+
+/** Whether this member, as it holds now, is left out of what is written. */
+template<std::meta::info Member, typename Field>
+constexpr bool omitted_now(const Field &field) noexcept {
+    if constexpr (member_omitted_when_empty<Member>()) {
+        return !field.has_value();
+    } else {
+        return false;
+    }
+}
+
 /** The wire key for one field: an explicit key, else the type's naming rule. */
 template<typename T, std::meta::info Member>
 consteval std::string_view field_key() {
@@ -925,6 +964,18 @@ consteval std::vector<std::string_view> wire_keys() {
     return keys;
 }
 
+/** How many members of `value`, as it holds now, are left out of what is written. */
+template<typename T>
+constexpr std::size_t omitted_count(const T &value) noexcept {
+    std::size_t count = 0;
+    template for (constexpr auto member : std::define_static_array(members_including_bases<T>())) {
+        if constexpr (!has_annotation<skip>(member)) {
+            if (omitted_now<member>(value.[:member:])) ++count;
+        }
+    }
+    return count;
+}
+
 /** Whether two members claim the same key, which a rename or a naming rule can do. */
 template<typename T>
 consteval bool keys_are_distinct() {
@@ -972,6 +1023,13 @@ consteval std::string_view annotation_complaint() {
                     + " is not an optional and its type is not defaulted, so it is required already - "
                       "serpent::required says only that an optional's key must be stated, or that this "
                       "member is the exception to a defaulted type; ";
+        }
+        if constexpr (has_annotation<omit_empty>(member) && !optional_like<declared>) {
+            complaint += std::string { name }
+                    + " is not an optional, so it is never empty - serpent::omit_empty belongs on an optional or "
+                      "a type; ";
+        } else if constexpr (has_annotation<omit_empty>(member) && has_annotation<required>(member)) {
+            complaint += std::string { name } + " is required and omit_empty at once; ";
         }
         if constexpr (has_annotation<skip>(member) && has_annotation<key>(member)) {
             complaint += std::string { name } + " is skipped and also renamed; ";
@@ -1076,6 +1134,14 @@ consteval bool table_member_is_required() {
     else return !Entry.optional_in_document && !table_is_defaulted;
 }
 
+/** Whether an empty value of a listed member is left out of what is written, by the annotated rule. */
+template<typename T, member_entry Entry>
+consteval bool table_member_omitted_when_empty() {
+    using declared = [:std::meta::type_of(Entry.which):];
+    constexpr bool table_omits_empty = requires { describe<T>::omit_empty; };
+    return optional_like<declared> && !Entry.insisted && (Entry.omitted_when_empty || table_omits_empty);
+}
+
 /** Whether two listed members claim the same key. */
 template<typename T>
 consteval bool table_keys_are_distinct() {
@@ -1114,7 +1180,9 @@ void table_members(Visitor &visitor, Object &value) {
         auto &field = value.[:entry.which:];
         static constexpr std::string_view name = table_key<T, entry>();
 
-        if constexpr (table_member_is_required<T, entry>()) {
+        if constexpr (!std::remove_cvref_t<Visitor>::is_reading && table_member_omitted_when_empty<T, entry>()) {
+            if (field.has_value()) std::ignore = visitor.template member_if_present<name>(field);
+        } else if constexpr (table_member_is_required<T, entry>()) {
             if (!visitor.template member_if_present<name>(field)) visitor.missing(name);
         } else {
             std::ignore = visitor.template member_if_present<name>(field);
@@ -1161,7 +1229,9 @@ void reflect_members(Visitor &visitor, Object &value) {
             // instead is how a half-specified document passes for a whole one. Said outright
             // rather than left to member(), which exempts every optional, including one this
             // type has marked required.
-            if constexpr (detail::member_is_required<T, member>()) {
+            if constexpr (!std::remove_cvref_t<Visitor>::is_reading && detail::member_omitted_when_empty<member>()) {
+                if (field.has_value()) std::ignore = visitor.template member_if_present<name>(projection);
+            } else if constexpr (detail::member_is_required<T, member>()) {
                 if (!visitor.template member_if_present<name>(projection)) visitor.missing(name);
             } else {
                 std::ignore = visitor.template member_if_present<name>(projection);
