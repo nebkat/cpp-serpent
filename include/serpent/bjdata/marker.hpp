@@ -104,7 +104,9 @@ inline constexpr marker_set value_markers { marker::null, marker::boolean_true, 
 /** Width of a marker's payload in bytes, or variable_width when it is length-prefixed. */
 inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
 
-[[nodiscard]] constexpr std::size_t payload_width(marker value) noexcept {
+namespace detail {
+
+[[nodiscard]] constexpr std::size_t payload_width_of(marker value) noexcept {
     switch (value) {
     case marker::null:
     case marker::boolean_true:
@@ -125,6 +127,22 @@ inline constexpr std::size_t variable_width = static_cast<std::size_t>(-1);
     case marker::float64: return 8;
     default: return variable_width;
     }
+}
+
+/**
+ * The same as a table by byte. Asked for every value a reader steps over, and a switch is not
+ * always inlined; a load from here always is.
+ */
+inline constexpr auto payload_widths = [] {
+    std::array<std::size_t, 256> widths {};
+    for (std::size_t byte = 0; byte < widths.size(); ++byte) widths[byte] = payload_width_of(static_cast<marker>(byte));
+    return widths;
+}();
+
+} // namespace detail
+
+[[nodiscard]] constexpr std::size_t payload_width(marker value) noexcept {
+    return detail::payload_widths[static_cast<unsigned char>(value)];
 }
 
 /** A marker that opens a value, as opposed to a structural or reserved one. */
