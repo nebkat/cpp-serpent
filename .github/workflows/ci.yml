@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MSVC's AddressSanitizer is incompatible with the /RTC1 checks a Debug build has.
+          - name: Windows x86_64 MSVC
+            os: windows-2025
+            msvc_arch: x64
+            build_type: RelWithDebInfo
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the MSVC environment
+        if: matrix.msvc_arch
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Debug' }}
+          -DSERPENT_TEST_SANITIZE=${{ matrix.sanitize || 'ON' }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
