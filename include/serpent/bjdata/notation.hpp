@@ -8,7 +8,6 @@
 
 #include <charconv>
 #include <cmath>
-#include <format>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,6 +22,16 @@ inline void write_block(std::string &out, std::string_view text) {
     out += '[';
     out += text;
     out += ']';
+}
+
+/**
+ * An integer as a block. Through std::to_chars rather than std::format, which on Apple's libc++
+ * brings the floating-point formatting with it and so needs macOS 13.3 of anyone who includes it.
+ */
+inline void write_integer_block(std::string &out, std::integral auto value) {
+    char digits[24];
+    const auto written = std::to_chars(digits, digits + sizeof digits, value);
+    write_block(out, std::string_view { digits, static_cast<std::size_t>(written.ptr - digits) });
 }
 
 inline void write_block(std::string &out, marker value) {
@@ -48,9 +57,8 @@ inline std::int64_t notate_marked_integer(std::string &out, cursor &source) {
 
     const auto value = load_integer(kind, source.position);
     source.advance(width);
-    write_block(out,
-            kind == marker::uint64 ? std::format("{}", load<std::uint64_t>(source.position - width))
-                                   : std::format("{}", value));
+    if (kind == marker::uint64) write_integer_block(out, load<std::uint64_t>(source.position - width));
+    else write_integer_block(out, value);
     return value;
 }
 
@@ -104,7 +112,7 @@ inline std::uint64_t notate_count(std::string &out, cursor &source) {
         const auto width = payload_width(element);
         for (std::int64_t index = 0; index < entries && source.ok(); ++index) {
             if (!source.need(width)) return 0;
-            write_block(out, std::format("{}", load_integer(element, source.position)));
+            write_integer_block(out, load_integer(element, source.position));
             source.advance(width);
         }
     } else if (source.available(1) && source.peek_marker() == marker::count) {
@@ -198,7 +206,7 @@ inline void notate_table_field(std::string &out, const soa::schema &layout, cons
     case soa::field_kind::boolean: write_block(out, to_marker(*at)); return;
     case soa::field_kind::text: write_block(out, soa::table::fixed_text(field, at)); return;
     case soa::field_kind::dictionary:
-    case soa::field_kind::offsets: write_block(out, std::format("{}", load_integer(field.type, at))); return;
+    case soa::field_kind::offsets: write_integer_block(out, load_integer(field.type, at)); return;
     case soa::field_kind::record:
     case soa::field_kind::array:
         for (auto index = field.children; index < field.next; index = layout.fields[index].next) {
@@ -218,9 +226,9 @@ inline void notate_table_field(std::string &out, const soa::schema &layout, cons
         write_block(out, serpent::detail::format_real(value).view());
         return;
     }
-    case marker::character: write_block(out, std::format("{}", load<std::uint8_t>(at))); return;
-    case marker::uint64: write_block(out, std::format("{}", load<std::uint64_t>(at))); return;
-    default: write_block(out, std::format("{}", load_integer(field.type, at))); return;
+    case marker::character: write_integer_block(out, load<std::uint8_t>(at)); return;
+    case marker::uint64: write_integer_block(out, load<std::uint64_t>(at)); return;
+    default: write_integer_block(out, load_integer(field.type, at)); return;
     }
 }
 
@@ -264,7 +272,7 @@ inline void notate_table(std::string &out, cursor &source, const std::byte *cont
         if (field.kind != soa::field_kind::offsets) continue;
         const auto width = payload_width(field.type);
         for (std::uint64_t index = 0; index <= table.size(); ++index)
-            write_block(out, std::format("{}", load_integer(field.type, after + index * width)));
+            write_integer_block(out, load_integer(field.type, after + index * width));
         const auto length = static_cast<std::size_t>(load_integer(field.type, after + table.size() * width));
         after += (table.size() + 1) * width;
         write_block(out, std::string_view { reinterpret_cast<const char *>(after), length });
@@ -315,7 +323,7 @@ inline void notate_container(std::string &out, cursor &source, bool object, int 
         } else if (element == marker::character) {
             write_block(out, std::string_view { reinterpret_cast<const char *>(source.position), 1 });
         } else {
-            write_block(out, std::format("{}", load_integer(element, source.position)));
+            write_integer_block(out, load_integer(element, source.position));
         }
         source.advance(width);
     };
@@ -416,9 +424,9 @@ inline void notate_value(std::string &out, cursor &source, marker kind, int dept
         }
         if (!source.need(width)) return;
         if (kind == marker::uint64) {
-            write_block(out, std::format("{}", load<std::uint64_t>(source.position)));
+            write_integer_block(out, load<std::uint64_t>(source.position));
         } else {
-            write_block(out, std::format("{}", load_integer(kind, source.position)));
+            write_integer_block(out, load_integer(kind, source.position));
         }
         source.advance(width);
         return;
