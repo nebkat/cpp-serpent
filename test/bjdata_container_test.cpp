@@ -6,6 +6,7 @@
 #include <serpent/bjdata.hpp>
 
 #include <algorithm>
+#include <map>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -269,6 +270,25 @@ void checked_accessors() {
     throws([&] { return wide.get<std::uint8_t>(); }, errc::type_mismatch, "a value that does not fit throws");
 }
 
+// decode reads the whole buffer as the document: an array whose elements run out before its
+// end, or bytes after it, is a broken document and refused - in one pass, with try_decode saying
+// what validate() would have.
+void whole_documents() {
+    for (const auto *hex : { "5b550155025503", "5b55015502", "5b5501550255035d55", "5b23550355015502" }) {
+        const auto bytes = from_hex(hex);
+        check(!bjdata::decode<std::vector<int>>(bytes).has_value(), std::string { "decode refuses " } + hex);
+        const auto tried = bjdata::try_decode<std::vector<int>>(bytes);
+        check(!tried && tried.error().code() == validate(bytes).error().code() && tried.error().offset() == validate(bytes).error().offset(),
+                std::string { "try_decode reports what validate() does: " } + hex);
+    }
+    check(!bjdata::decode<std::map<std::string, int>>(from_hex("7b55016155015501625502")).has_value(), "an object too");
+    check(!bjdata::decode<int>(from_hex("55015501")).has_value(), "and a scalar with a byte after it");
+    check(bjdata::decode<std::vector<int>>(from_hex("5b5501550255035d")) == std::vector<int> { 1, 2, 3 }, "a whole one still reads");
+    check(bjdata::decode<std::vector<int>>(from_hex("5b2455235503010203")) == std::vector<int> { 1, 2, 3 }, "a typed one too");
+    check(bjdata::try_decode<std::vector<int>>(from_hex("5b5501550255035d55")).error().code() == errc::trailing_data,
+            "bytes after the document are trailing data");
+}
+
 } // namespace
 
 int main() {
@@ -279,5 +299,6 @@ int main() {
     strict_strong_types();
     validation();
     truncation();
+    whole_documents();
     return report("bjdata_container");
 }

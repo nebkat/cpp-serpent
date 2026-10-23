@@ -6,6 +6,7 @@
 #include <serpent/json.hpp>
 
 #include <array>
+#include <map>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -203,6 +204,33 @@ void truncation() {
     }
 }
 
+// decode reads the whole text as the document: elements running out before the closing
+// bracket, or anything but whitespace after it, is a broken document and refused - in one pass,
+// with try_decode saying what validate() would have.
+void whole_documents() {
+    for (const std::string text : { "[1,2,3", "[1,2", "[1,2,3,", "[1,2,3] x", "[1,2,3]]", "[1,2,3] [4]" }) {
+        check(!json::decode<std::vector<int>>(std::string_view { text }).has_value(), "decode refuses " + text);
+        check(!json::decode<std::vector<int>>(text).has_value(), "and terminated: " + text);
+        std::vector<int> into;
+        check(!json::decode_into(text, into), "decode_into refuses " + text);
+        const auto tried = json::try_decode<std::vector<int>>(text);
+        check(!tried && tried.error().code() == json::validate(text).error().code()
+                        && tried.error().offset() == json::validate(text).error().offset(),
+                "try_decode reports what validate() does: " + text);
+    }
+    for (const std::string text : { R"({"a":1,"b":2)", R"({"a":1} x)", R"({"a":1,)" })
+        check(!json::decode<std::map<std::string, int>>(text).has_value(), "an object too: " + text);
+
+    check(json::decode<std::vector<int>>(std::string_view { " [1, 2, 3] \n" }) == std::vector<int> { 1, 2, 3 },
+            "whitespace either side is still the whole document");
+    check(json::decode<std::vector<int>>(std::string_view { "[]" }) == std::vector<int> {}, "an empty array ends where it says");
+    check(json::decode<int>(std::string_view { "42" }) == 42 && !json::decode<int>(std::string_view { "42 43" }), "a scalar too");
+    check(json::try_decode<std::vector<int>>(std::string { "[1,2,3] x" }).error().code() == errc::trailing_data,
+            "text after the document is trailing data");
+    check(json::try_decode<std::vector<int>>(std::string { "[1,2" }).error().code() == errc::unterminated_container,
+            "a document cut short is an unterminated container");
+}
+
 } // namespace
 
 int main() {
@@ -211,5 +239,6 @@ int main() {
     containers();
     malformed();
     truncation();
+    whole_documents();
     return report("json_reader");
 }

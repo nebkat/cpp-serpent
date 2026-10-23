@@ -208,11 +208,26 @@ public:
 
     /** The text this value occupies, or nothing if it does not parse. */
     [[nodiscard]] std::optional<std::string_view> extent() const noexcept {
-        if (this->first == nullptr) return std::nullopt;
+        const char *const end = this->value_end();
+        if (end == nullptr) return std::nullopt;
+        return std::string_view { this->first, static_cast<std::size_t>(end - this->first) };
+    }
+
+    /**
+     * One past this value's last character, or null when it does not parse.
+     *
+     * Known without a scan once a walk has gone all the way through the value - which reading
+     * the whole of it does - and otherwise found by scanning on from wherever a walk got to. A
+     * walk that stopped early, at the end of the text or at a character that cannot be there,
+     * leaves its container open, so a document that was read to the end and does not end where
+     * its text does is one that is broken.
+     */
+    [[nodiscard]] const char *value_end() const noexcept {
+        if (this->first == nullptr) return nullptr;
+        if (this->reached != nullptr && this->open == 0) return this->reached;
         auto scan = this->scan();
-        scanner::skip_value(scan, 0);
-        if (!scan.ok()) return std::nullopt;
-        return std::string_view { this->first, static_cast<std::size_t>(scan.position - this->first) };
+        step_over_value(scan, *this);
+        return scan.ok() ? scan.position : nullptr;
     }
 
     // ---------------- checked ----------------

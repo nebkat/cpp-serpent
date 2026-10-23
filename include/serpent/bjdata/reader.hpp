@@ -166,11 +166,25 @@ public:
      * because an element of a typed container has none of its own in the stream.
      */
     [[nodiscard]] std::optional<std::span<const std::byte>> payload_bytes() const noexcept {
-        if (!this->is_valid()) return std::nullopt;
+        const auto *const end = this->value_end();
+        if (end == nullptr) return std::nullopt;
+        return std::span<const std::byte> { this->payload, static_cast<std::size_t>(end - this->payload) };
+    }
+
+    /**
+     * One past this value's last byte, or null when it does not parse.
+     *
+     * Known without a walk once one has gone all the way through the value - which reading the
+     * whole of it does - and found by one otherwise. A walk that stopped early, at the end of
+     * the buffer or at a byte that cannot be there, leaves nothing known, so a document that
+     * was read to the end and does not end where its bytes do is one that is broken.
+     */
+    [[nodiscard]] const std::byte *value_end() const noexcept {
+        if (this->reached != nullptr) return this->reached;
+        if (!this->is_valid()) return nullptr;
         auto scanner = this->scan();
         detail::skip_value(scanner, this->element, 0);
-        if (!scanner.ok()) return std::nullopt;
-        return std::span<const std::byte> { this->payload, static_cast<std::size_t>(scanner.position - this->payload) };
+        return scanner.ok() ? scanner.position : nullptr;
     }
 
     [[nodiscard]] detail::header container_header() const noexcept {
