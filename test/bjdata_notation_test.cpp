@@ -5,6 +5,9 @@
 #include <serpent/bjdata.hpp>
 #include <serpent/bjdata/notation.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 using namespace serpent;
@@ -46,10 +49,35 @@ void containers() {
     notated("5b2442235504deadbeef", "[[][$][B][#][U][4][222][173][190][239]", "binary elements are decimal");
 }
 
+// Draft 4 tables: the schema token by token, then each record's fields without markers, in
+// the order they lie. Checked against dart-bjdata's notation of the same documents, which it
+// writes, whitespace stripped, beside them; offsets.bjd it cannot write, so that one is here.
+void tables() {
+    const std::filesystem::path fixtures = std::filesystem::path { SERPENT_FIXTURE_DIR } / "soa";
+    const auto contents = [&](const std::string &name) {
+        std::ifstream stream { fixtures / name, std::ios::binary };
+        return std::string { std::istreambuf_iterator<char> { stream }, {} };
+    };
+    for (const std::string name : { "records", "records_columns", "mixed", "nested_table" }) {
+        const auto bytes = contents(name + ".bjd");
+        const auto notation = block_notation({ reinterpret_cast<const std::byte *>(bytes.data()), bytes.size() });
+        check_equal(std::string_view { notation }, std::string_view { contents(name + ".blocks") }, name + " is the reference's notation");
+    }
+
+    const auto offsets = contents("offsets.bjd");
+    check_equal(std::string_view { block_notation({ reinterpret_cast<const std::byte *>(offsets.data()), offsets.size() }) },
+            std::string_view { "[[][$][{][U][4][name][[][$][U][]][U][1][n][U][}][#][U][3][0][5][1][6][2][7][0][3][3][8][abcdefgh]" },
+            "an offset field's index a record, then its offsets and its text");
+
+    // A table runs to the end of its text, so whatever follows it is notated as itself.
+    notated("5b5b247b550161557d235502010255035d", "[[][[][$][{][U][1][a][U][}][#][U][2][1][2][U][3][]]", "a value after a table");
+}
+
 } // namespace
 
 int main() {
     documented();
     containers();
+    tables();
     return report("bjdata_notation");
 }

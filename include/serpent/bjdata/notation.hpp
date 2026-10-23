@@ -4,6 +4,7 @@
 #include <serpent/bjdata/marker.hpp>
 #include <serpent/real_format.hpp>
 #include <serpent/bjdata/reader.hpp>
+#include <serpent/bjdata/soa.hpp>
 
 #include <charconv>
 #include <cmath>
@@ -129,6 +130,149 @@ inline std::uint64_t notate_count(std::string &out, cursor &source) {
     return shape.total;
 }
 
+/** One type of a table's schema: its marker, then a length, a nested record or a run as it has. */
+inline void notate_schema_type(std::string &out, cursor &source, int depth);
+
+/** A table schema's fields, whose `{` has been emitted, up to and including its `}`. */
+inline void notate_schema_fields(std::string &out, cursor &source, int depth) {
+    if (depth > max_depth) {
+        source.fail(errc::depth_exceeded);
+        return;
+    }
+    while (source.need(1)) {
+        if (source.peek_marker() == marker::object_end) {
+            source.advance(1);
+            write_block(out, marker::object_end);
+            return;
+        }
+        notate_string_body(out, source);
+        notate_schema_type(out, source, depth);
+    }
+}
+
+inline void notate_schema_type(std::string &out, cursor &source, int depth) {
+    if (!source.need(1)) return;
+    const auto kind = source.peek_marker();
+    source.advance(1);
+    write_block(out, kind);
+    switch (kind) {
+    case marker::string:
+    case marker::high_precision: notate_marked_integer(out, source); return;
+    case marker::object_begin: notate_schema_fields(out, source, depth + 1); return;
+    case marker::array_begin: {
+        if (!source.need(1)) return;
+        if (source.peek_marker() == marker::strong_type) {
+            // `[$U]`, an offset index; or `[$S#n` and its entries, a dictionary.
+            source.advance(1);
+            write_block(out, marker::strong_type);
+            if (!source.need(1)) return;
+            write_block(out, to_marker(source.peek()));
+            source.advance(1);
+            if (!source.need(1)) return;
+            const auto next = source.peek_marker();
+            source.advance(1);
+            write_block(out, next);
+            if (next != marker::count) return;
+            const auto entries = notate_marked_integer(out, source);
+            for (std::int64_t index = 0; index < entries && source.ok(); ++index) notate_string_body(out, source);
+            return;
+        }
+        while (source.need(1) && source.peek_marker() != marker::array_end) notate_schema_type(out, source, depth + 1);
+        if (!source.ok()) return;
+        source.advance(1);
+        write_block(out, marker::array_end);
+        return;
+    }
+    default: return;
+    }
+}
+
+/**
+ * One field of one record, as the reference implementation writes it: a number or a `T` or `F`
+ * with no marker of its own, since the schema has given it; a dictionary or offset index as
+ * the integer it is; nothing for a null field; a nested record or run field by field.
+ */
+inline void notate_table_field(std::string &out, const soa::schema &layout, const soa::field &field, const std::byte *at) {
+    switch (field.kind) {
+    case soa::field_kind::null: return;
+    case soa::field_kind::boolean: write_block(out, to_marker(*at)); return;
+    case soa::field_kind::text: write_block(out, soa::table::fixed_text(field, at)); return;
+    case soa::field_kind::dictionary:
+    case soa::field_kind::offsets: write_block(out, std::format("{}", load_integer(field.type, at))); return;
+    case soa::field_kind::record:
+    case soa::field_kind::array:
+        for (auto index = field.children; index < field.next; index = layout.fields[index].next) {
+            const auto &child = layout.fields[index];
+            notate_table_field(out, layout, child, at + child.offset);
+        }
+        return;
+    case soa::field_kind::scalar: break;
+    }
+    switch (field.type) {
+    case marker::float16:
+    case marker::float32:
+    case marker::float64: {
+        const double value = field.type == marker::float16 ? decode_float16(load<std::uint16_t>(at))
+                : field.type == marker::float32            ? load<float>(at)
+                                                           : load<double>(at);
+        write_block(out, serpent::detail::format_real(value).view());
+        return;
+    }
+    case marker::character: write_block(out, std::format("{}", load<std::uint8_t>(at))); return;
+    case marker::uint64: write_block(out, std::format("{}", load<std::uint64_t>(at))); return;
+    default: write_block(out, std::format("{}", load_integer(field.type, at))); return;
+    }
+}
+
+/**
+ * A draft 4 table, whose `$` has been emitted and whose schema's `{` is at the cursor: the
+ * schema token by token, the count, every record's fields - a record at a time, or a field at a
+ * time when the table is column-major - and then each offset field's offsets and its text.
+ */
+inline void notate_table(std::string &out, cursor &source, const std::byte *container, int depth) {
+    soa::table table;
+    if (!table.place_at({ source.origin, source.limit }, container)) {
+        source.fail(errc::invalid_strong_type);
+        return;
+    }
+
+    source.advance(1);
+    write_block(out, marker::object_begin);
+    notate_schema_fields(out, source, depth + 1);
+    if (!source.need(1)) return;
+    source.advance(1);
+    write_block(out, marker::count);
+    notate_count(out, source);
+    if (!source.ok()) return;
+
+    const auto &layout = table.fields();
+    if (table.by_column()) {
+        for (std::uint32_t index = 0; index < layout.count(); index = layout.fields[index].next) {
+            for (std::uint64_t record = 0; record < table.size(); ++record)
+                notate_table_field(out, layout, layout.fields[index], table.at(layout.fields[index], record));
+        }
+    } else {
+        for (std::uint64_t record = 0; record < table.size(); ++record) {
+            for (std::uint32_t index = 0; index < layout.count(); index = layout.fields[index].next)
+                notate_table_field(out, layout, layout.fields[index], table.at(layout.fields[index], record));
+        }
+    }
+
+    // Placing the table checked that every offset table and its text lie inside the buffer.
+    const std::byte *after = table.payload_end();
+    for (const auto &field : layout) {
+        if (field.kind != soa::field_kind::offsets) continue;
+        const auto width = payload_width(field.type);
+        for (std::uint64_t index = 0; index <= table.size(); ++index)
+            write_block(out, std::format("{}", load_integer(field.type, after + index * width)));
+        const auto length = static_cast<std::size_t>(load_integer(field.type, after + table.size() * width));
+        after += (table.size() + 1) * width;
+        write_block(out, std::string_view { reinterpret_cast<const char *>(after), length });
+        after += length;
+    }
+    source.position = table.end();
+}
+
 inline void notate_container(std::string &out, cursor &source, bool object, int depth) {
     marker element = marker::invalid;
     std::uint64_t count = 0;
@@ -137,9 +281,14 @@ inline void notate_container(std::string &out, cursor &source, bool object, int 
     if (!source.need(1)) return;
 
     if (source.peek_marker() == marker::strong_type) {
+        const auto *const container = source.position - 1;
         source.advance(1);
         write_block(out, marker::strong_type);
         if (!source.need(1)) return;
+        if (source.peek_marker() == marker::object_begin) {
+            notate_table(out, source, container, depth);
+            return;
+        }
         element = to_marker(source.peek());
         source.advance(1);
         write_block(out, element);

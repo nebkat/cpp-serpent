@@ -3,3 +3,6 @@ beside it (`bjdata encode`, the default layout; `records_columns.bjd` with `--co
 except `offsets.bjd`, written by hand because dart-bjdata prefers a dictionary to an offset
 table for every string it is given: `[${ name [$U] n U }#3`, then three records of an index and
 a byte, then four `U` offsets and eight bytes of text.
+
+Each `.blocks` beside a `.bjd` dart-bjdata wrote is its block notation of the same document
+(`bjdata block`, with the same layout flag), whitespace stripped.
