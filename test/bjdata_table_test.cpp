@@ -239,6 +239,14 @@ int main() {
     check(std::string_view { reinterpret_cast<const char *>(offsets_written.data()), 16 }.find("[$u]") != std::string_view::npos,
             "three hundred distinct names are an offset table");
     check(bjdata::decode<std::vector<named>>(offsets_written) == many, "which reads back, repeats and empties included");
+    // Each record stores its own number, so the index has to reach the last record even when
+    // the text is short enough for a narrower one.
+    std::vector<named> mostly_empty = many;
+    mostly_empty.resize(70'000);
+    const auto wide_written = bjdata::encode(mostly_empty);
+    check(std::string_view { reinterpret_cast<const char *>(wide_written.data()), 16 }.find("[$m]") != std::string_view::npos,
+            "an offset index wide enough for every record, not just the text");
+    check(bjdata::decode<std::vector<named>>(wide_written) == mostly_empty, "which reads back");
     std::vector<named> few;
     for (int index = 0; index < 300; ++index) few.push_back({ index % 2 ? "odd" : "even", index });
     const auto dictionary_written = bjdata::encode(few);

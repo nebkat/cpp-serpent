@@ -22,6 +22,7 @@
 #include <serpent/concepts.hpp>
 #include <serpent/reflect.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -239,12 +240,16 @@ public:
         return this->overflowed ? field_kind::offsets : field_kind::dictionary;
     }
 
-    /** The marker of what each record stores: `C`, a dictionary index, or an offset index. */
+    /**
+     * The marker of what each record stores: `C`, a dictionary index, or an offset index. An
+     * offset index is the record's own number, and the table after the payload holds offsets
+     * into the text, so it is as wide as the larger of the two needs.
+     */
     [[nodiscard]] marker index_marker() const noexcept {
         switch (this->kind()) {
         case field_kind::scalar: return marker::character;
         case field_kind::dictionary: return unsigned_marker_for(this->entries.size());
-        default: return unsigned_marker_for(this->bytes);
+        default: return unsigned_marker_for(std::max(this->bytes, this->records));
         }
     }
 
