@@ -327,7 +327,7 @@ public:
     }
 
     /** The part of room_for() that has to go and get the room. */
-    [[gnu::noinline]] char *make_room_for(std::size_t bytes) noexcept {
+    SERPENT_NOINLINE char *make_room_for(std::size_t bytes) noexcept {
         if (!this->ok()) return nullptr;
         if (this->lend_room != nullptr) {
             // Preferred, not demanded. What is asked for here is a worst case - the longest an
@@ -347,7 +347,7 @@ public:
      * that a fixed buffer without it latches its overflow as it does for a write it refuses.
      * Null, and this emitter failed, where the room cannot be had in one piece.
      */
-    [[gnu::noinline]] char *demand_room_for(std::size_t bytes) noexcept {
+    SERPENT_NOINLINE char *demand_room_for(std::size_t bytes) noexcept {
         if (!this->ok()) return nullptr;
         if (bytes <= this->room_size - this->room_used) return reinterpret_cast<char *>(this->room + this->room_used);
         if (this->lend_room != nullptr) {
@@ -364,7 +364,7 @@ public:
     }
 
     /** Everything put() is not: a flush, an oversized write, or a sink that has failed. */
-    [[gnu::noinline]] void put_overflowing(std::span<const std::byte> bytes) noexcept {
+    SERPENT_NOINLINE void put_overflowing(std::span<const std::byte> bytes) noexcept {
         if (!this->ok()) return;
 
         if (this->lend_room != nullptr) {

@@ -200,7 +200,7 @@ inline std::uint32_t parse_type(cursor &source, schema &into, std::uint32_t inde
             field.kind = field_kind::dictionary;
             field.entries = static_cast<std::uint32_t>(entries);
             field.detail = source.position;
-            for (std::uint64_t index = 0; index < entries && source.ok(); ++index) bjdata::detail::skip_key(source);
+            for (std::uint64_t entry = 0; entry < entries && source.ok(); ++entry) bjdata::detail::skip_key(source);
             if (!source.ok()) return 0;
             field.type = entries <= 0xFF ? marker::uint8
                     : entries <= 0xFFFF   ? marker::uint16
@@ -336,7 +336,7 @@ public:
      * the schema and the records are. Not placed - and false - when the schema or the tables
      * after the payload do not parse or run past the buffer.
      */
-    [[nodiscard]] bool place(std::span<const std::byte> buffer, const bjdata::detail::container_prefix &prefix, bool column_major) noexcept {
+    [[nodiscard]] bool place(std::span<const std::byte> buffer, const bjdata::detail::container_prefix &prefix, bool by_column) noexcept {
         this->placed = false;
         if (!prefix.structured()) return false;
         bjdata::detail::cursor source { buffer.data(), prefix.table + 1, buffer.data() + buffer.size() };
@@ -345,7 +345,7 @@ public:
         this->body = prefix.body;
         this->limit = buffer.data() + buffer.size();
         this->records = prefix.count;
-        this->column_major = column_major;
+        this->column_major = by_column;
 
         if (this->layout.record_bytes != 0 && this->records > std::numeric_limits<std::uint64_t>::max() / this->layout.record_bytes) return false;
         const std::uint64_t payload = this->records * this->layout.record_bytes;
