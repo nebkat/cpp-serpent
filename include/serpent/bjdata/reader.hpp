@@ -475,9 +475,9 @@ private:
             // Elements of a run inside a record, each at its offset from the run's bytes.
             this->exhausted = this->next_field >= this->last_field;
             if (this->exhausted) return;
-            const auto &element = this->layout->fields().fields[this->next_field];
+            const auto &field = this->layout->fields().fields[this->next_field];
             this->current.table = this->container->table;
-            place_field(this->current, *this->layout, element, this->container->payload + element.offset);
+            place_field(this->current, *this->layout, field, this->container->payload + field.offset);
             return;
         }
         this->exhausted = this->record >= this->layout->size();

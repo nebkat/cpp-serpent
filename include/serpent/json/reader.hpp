@@ -261,9 +261,9 @@ public:
     /** JSON text is neither a string_view nor bytes to be lent: a string has to be decoded, and there is no binary. */
     template<typename T>
         requires std::same_as<T, std::string_view> || std::same_as<T, std::span<const std::byte>>
-    [[nodiscard]] std::optional<T> as() const noexcept = delete("a JSON string has to be decoded, so it cannot be "
-                                                              "borrowed as a string_view; read it as a std::string, "
-                                                              "or use decode_string_into");
+    [[nodiscard]] std::optional<T> as() const noexcept = SERPENT_DELETED("a JSON string has to be decoded, so it cannot be "
+                                                                       "borrowed as a string_view; read it as a std::string, "
+                                                                       "or use decode_string_into");
 
     /** as<T>(), or errc::type_mismatch thrown. */
     template<typename T>

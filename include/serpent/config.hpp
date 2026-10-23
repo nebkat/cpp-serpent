@@ -99,6 +99,34 @@
 
 #if SERPENT_FORCE_INLINE && (defined(__GNUC__) || defined(__clang__))
 #define SERPENT_ALWAYS_INLINE [[gnu::always_inline]]
+#elif SERPENT_FORCE_INLINE && defined(_MSC_VER)
+#define SERPENT_ALWAYS_INLINE [[msvc::forceinline]]
 #else
 #define SERPENT_ALWAYS_INLINE
+#endif
+
+/**
+ * The other way: a function kept out of line, because it is the rare branch of one that is
+ * inlined everywhere, and inlining it too would make every copy of the common branch larger.
+ * SERPENT_COLD says it is rare outright, where the compiler has a way to be told.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define SERPENT_NOINLINE [[gnu::noinline]]
+#define SERPENT_COLD [[gnu::cold]]
+#elif defined(_MSC_VER)
+#define SERPENT_NOINLINE [[msvc::noinline]]
+#define SERPENT_COLD
+#else
+#define SERPENT_NOINLINE
+#define SERPENT_COLD
+#endif
+
+/**
+ * A deleted function's reason, where the compiler can carry one into its diagnostic (C++26,
+ * P2573). Elsewhere - MSVC, so far - the function is deleted all the same, only without saying why.
+ */
+#if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L
+#define SERPENT_DELETED(reason) delete(reason)
+#else
+#define SERPENT_DELETED(reason) delete
 #endif

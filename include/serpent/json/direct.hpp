@@ -80,7 +80,9 @@ SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read_terminated(scanner::termina
     }
 
     std::uint64_t magnitude = 0;
+#if defined(__GNUC__)
 #pragma GCC unroll 19
+#endif
     for (int count = 0; count < 19; ++count) {
         const unsigned digit = digit_at(at);
         if (digit > 9) break;
@@ -168,7 +170,7 @@ SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(scanner::basic_cursor<Termi
  * conversion is only ever shown text the grammar has already passed.
  */
 template<bool Terminated, std::floating_point T>
-[[nodiscard, gnu::noinline, gnu::cold]] bool read_real_in_two_walks(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
+[[nodiscard]] SERPENT_NOINLINE SERPENT_COLD bool read_real_in_two_walks(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
     const auto text = scanner::scan_number(scan);
     if (!scan.ok()) return false;
 
@@ -310,9 +312,12 @@ template<std::floating_point T>
 template<bool Terminated, std::floating_point T>
 SERPENT_ALWAYS_INLINE [[nodiscard]] inline bool read(scanner::basic_cursor<Terminated> &scan, T &into) noexcept {
 #if SERPENT_USE_FAST_FLOAT
-    if constexpr (Terminated) return read_real_terminated(scan, into);
-    if (!at_number(scan)) return false;
-    return read_real_in_one_walk(scan, into);
+    if constexpr (Terminated) {
+        return read_real_terminated(scan, into);
+    } else {
+        if (!at_number(scan)) return false;
+        return read_real_in_one_walk(scan, into);
+    }
 #else
     if (!at_number(scan)) return false;
     return read_real_in_two_walks(scan, into);
