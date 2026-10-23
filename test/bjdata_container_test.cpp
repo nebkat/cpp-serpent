@@ -189,7 +189,8 @@ void validation() {
 void truncation() {
     // Every prefix of a good document must fail cleanly, never read out of bounds.
     for (const auto *hex : { "5b5501550255035d", "7b5501615501550162550255016355037d", "5b2455235508ddccbbaa44332211",
-                 "5b7b55016155017d5d", "5b2475235503010002000300" }) {
+                 "5b7b55016155017d5d", "5b2475235503010002000300", "5b6c0100000044000000000000f03f5d",
+                 "7b5501616c010000005501624400000000000000407d" }) {
         const auto whole = from_hex(hex);
         for (std::size_t length = 0; length < whole.size(); ++length) {
             const auto prefix = std::span { whole }.first(length);

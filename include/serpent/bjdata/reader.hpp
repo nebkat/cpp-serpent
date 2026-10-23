@@ -489,7 +489,7 @@ private:
     }
 
     /** Settles whether the cursor stands on an element, and if so points `current` at it. */
-    void normalise() noexcept {
+    SERPENT_ALWAYS_INLINE void normalise() noexcept {
         if (this->layout != nullptr) {
             this->normalise_in_table();
             return;
@@ -570,7 +570,7 @@ public:
 
     [[nodiscard]] const reader &operator*() const noexcept { return this->current; }
 
-    array_iterator &operator++() noexcept {
+    SERPENT_ALWAYS_INLINE array_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
         if (this->layout != nullptr) {
@@ -587,6 +587,13 @@ public:
                 return *this;
             }
             this->cursor += width;
+        } else if (const auto width = payload_width(this->current.element); width != variable_width) {
+            // A scalar is its marker and so many bytes after it, so finding its end needs no walk.
+            if (static_cast<std::uint64_t>(this->limit() - this->current.payload) < width) {
+                this->exhausted = true;
+                return *this;
+            }
+            this->cursor = this->current.payload + width;
         } else if (this->current.reached != nullptr) {
             // Something already walked this element to its end, so step to where it finished
             // rather than scanning the same bytes a second time to find the same place.
@@ -684,7 +691,7 @@ private:
         return true;
     }
 
-    void normalise() noexcept {
+    SERPENT_ALWAYS_INLINE void normalise() noexcept {
         if (this->layout != nullptr) {
             this->normalise_in_table();
             return;
@@ -743,7 +750,7 @@ public:
     [[nodiscard]] const key_value &operator*() const noexcept { return this->current; }
     [[nodiscard]] const key_value *operator->() const noexcept { return &this->current; }
 
-    member_iterator &operator++() noexcept {
+    SERPENT_ALWAYS_INLINE member_iterator &operator++() noexcept {
         if (this->exhausted) return *this;
 
         if (this->layout != nullptr) {
@@ -755,6 +762,12 @@ public:
         // The key and the value's marker were consumed by normalise(), so resume at the value.
         if (this->element != marker::invalid) {
             const auto width = payload_width(this->element);
+            if (static_cast<std::uint64_t>(this->limit() - this->current.value.payload) < width) {
+                this->exhausted = true;
+                return *this;
+            }
+            this->cursor = this->current.value.payload + width;
+        } else if (const auto width = payload_width(this->current.value.element); width != variable_width) {
             if (static_cast<std::uint64_t>(this->limit() - this->current.value.payload) < width) {
                 this->exhausted = true;
                 return *this;
