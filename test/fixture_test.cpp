@@ -219,7 +219,7 @@ int main(int argc, char **argv) {
     const std::filesystem::path directory = argc > 1 ? argv[1] : SERPENT_FIXTURE_DIR;
 
     if (!std::filesystem::is_directory(directory)) {
-        std::printf("fixture: no fixtures at %s\n", directory.c_str());
+        std::printf("fixture: no fixtures at %s\n", directory.string().c_str());
         return 1;
     }
 

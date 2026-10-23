@@ -3,6 +3,23 @@
 #   cmake -S . -B build && cmake --build build
 #   ctest --test-dir build --output-on-failure
 
+# The warnings and sanitizers every test is built with, in the compiler's own spelling. MSVC has
+# AddressSanitizer only, and it is incompatible with the /RTC1 checks of a Debug build.
+function(serpent_test_options TARGET)
+    if(MSVC)
+        target_compile_options(${TARGET} PRIVATE /W4 /permissive-)
+        if(SERPENT_TEST_SANITIZE)
+            target_compile_options(${TARGET} PRIVATE /fsanitize=address)
+        endif()
+    else()
+        target_compile_options(${TARGET} PRIVATE -Wall -Wextra)
+        if(SERPENT_TEST_SANITIZE)
+            target_compile_options(${TARGET} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(${TARGET} PRIVATE -fsanitize=address,undefined)
+        endif()
+    endif()
+endfunction()
+
 # Format-level suites, which name no types of their own.
 set(TESTS
     bjdata_scalar
@@ -33,14 +50,9 @@ foreach(TEST_NAME IN LISTS TESTS)
     add_executable(${TEST_NAME}_test "${TEST_NAME}_test.cpp")
     target_link_libraries(${TEST_NAME}_test PRIVATE serpent)
     target_include_directories(${TEST_NAME}_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
-    target_compile_options(${TEST_NAME}_test PRIVATE -Wall -Wextra)
+    serpent_test_options(${TEST_NAME}_test)
     target_compile_definitions(${TEST_NAME}_test PRIVATE
         SERPENT_FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures")
-
-    if(SERPENT_TEST_SANITIZE)
-        target_compile_options(${TEST_NAME}_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-        target_link_options(${TEST_NAME}_test PRIVATE -fsanitize=address,undefined)
-    endif()
 
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME}_test)
 endforeach()
@@ -53,7 +65,7 @@ if(SERPENT_USE_ZMIJ)
     target_link_libraries(real_text_small_test PRIVATE serpent_headers serpent_zmij_small_for_test)
     target_include_directories(real_text_small_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
     target_compile_definitions(real_text_small_test PRIVATE SERPENT_USE_ZMIJ=1)
-    target_compile_options(real_text_small_test PRIVATE -Wall -Wextra)
+    serpent_test_options(real_text_small_test)
     add_test(NAME real_text_small COMMAND real_text_small_test)
 endif()
 
@@ -65,11 +77,8 @@ foreach(TABLE IN ITEMS 0 1 2)
         "${PROJECT_SOURCE_DIR}/include" "${CMAKE_CURRENT_LIST_DIR}")
     target_compile_features(integer_text_${TABLE}_test PRIVATE cxx_std_23)
     target_compile_definitions(integer_text_${TABLE}_test PRIVATE SERPENT_INTEGER_TABLE=${TABLE})
-    target_compile_options(integer_text_${TABLE}_test PRIVATE -Wall -Wextra -O2)
-    if(SERPENT_TEST_SANITIZE)
-        target_compile_options(integer_text_${TABLE}_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-        target_link_options(integer_text_${TABLE}_test PRIVATE -fsanitize=address,undefined)
-    endif()
+    serpent_test_options(integer_text_${TABLE}_test)
+    target_compile_options(integer_text_${TABLE}_test PRIVATE $<IF:$<BOOL:${MSVC}>,/O2,-O2>)
     add_test(NAME integer_text_${TABLE} COMMAND integer_text_${TABLE}_test)
 endforeach()
 
@@ -102,7 +111,14 @@ endif()
 add_executable(no_exceptions_test no_exceptions_test.cpp)
 target_link_libraries(no_exceptions_test PRIVATE serpent)
 target_include_directories(no_exceptions_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
-target_compile_options(no_exceptions_test PRIVATE -Wall -Wextra -fno-exceptions)
+serpent_test_options(no_exceptions_test)
+if(MSVC)
+    # /EHs-c- overrides the /EHsc CMake gives every target; _HAS_EXCEPTIONS=0 is the STL's switch.
+    target_compile_options(no_exceptions_test PRIVATE /EHs-c-)
+    target_compile_definitions(no_exceptions_test PRIVATE _HAS_EXCEPTIONS=0)
+else()
+    target_compile_options(no_exceptions_test PRIVATE -fno-exceptions)
+endif()
 add_test(NAME no_exceptions COMMAND no_exceptions_test)
 
 # Every header must compile on its own. A missing include is otherwise invisible, because
@@ -121,4 +137,4 @@ endforeach()
 
 add_library(standalone_headers OBJECT ${STANDALONE_SOURCES})
 target_link_libraries(standalone_headers PRIVATE serpent)
-target_compile_options(standalone_headers PRIVATE -Wall -Wextra)
+serpent_test_options(standalone_headers)

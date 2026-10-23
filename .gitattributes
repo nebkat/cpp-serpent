@@ -1,0 +1,2 @@
+# The fixtures are compared byte for byte, so a checkout must not turn their newlines into CRLF.
+test/fixtures/** -text
