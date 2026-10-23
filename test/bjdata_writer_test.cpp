@@ -375,6 +375,53 @@ void sinks() {
     check_equal(seen, reference.size(), "a callable is a sink");
 }
 
+void counted_containers() {
+    produces("5b23550255015502", [](auto &w) {
+        const auto scope = w.counted_array(2);
+        scope.value(1);
+        scope.value(2);
+    }, "a counted array: its count, its elements, and nothing to close it");
+    produces("7b23550255016155015501625a", [](auto &w) {
+        const auto scope = w.counted_object(2);
+        scope.member("a", 1);
+        scope.member("b", nullptr);
+    }, "a counted object");
+    produces("5b2355015b235500", [](auto &w) {
+        const auto outer = w.counted_array(1);
+        const auto inner = w.counted_array(0);
+    }, "a counted array in one");
+
+    const auto bytes = emit([](auto &w) {
+        const auto scope = w.counted_object(1);
+        scope.member("ports", std::vector<int> { 1, 2 });
+    });
+    const auto document = reader::over(bytes);
+    check(validate(bytes).has_value(), "a counted object validates");
+    check_equal(document.size_hint(), std::optional<std::size_t> { 1 }, "and says how many members it has");
+    check_equal(document["ports"][1].as<int>(), std::optional<int> { 2 }, "and reads back");
+
+    std::vector<std::byte> buffer;
+    container_sink out { buffer };
+    {
+        basic_writer<prefer::size> target { out };
+        {
+            const auto scope = target.counted_array(1);
+            target.key("a");
+        }
+        check_equal(target.error_code(), errc::key_outside_object, "a counted array takes no keys");
+    }
+    {
+        basic_writer<prefer::size> target { out };
+        const auto nest = [&](auto &self, int remaining) -> void {
+            if (remaining == 0) return;
+            const auto scope = target.counted_array(1);
+            self(self, remaining - 1);
+        };
+        nest(nest, max_depth + 2);
+        check_equal(target.error_code(), errc::depth_exceeded, "counted containers count towards the depth");
+    }
+}
+
 void error_latching() {
     std::vector<std::byte> buffer;
     container_sink out { buffer };
@@ -438,6 +485,7 @@ int main() {
     containers();
     ranges_of_numbers();
     typed_arrays();
+    counted_containers();
     sinks();
     error_latching();
     return report("bjdata_writer");
