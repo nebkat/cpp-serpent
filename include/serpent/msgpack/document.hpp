@@ -46,27 +46,48 @@ template<typename T>
     return buffer;
 }
 
-/** Decodes a value from a buffer, or nullopt when it does not parse. */
+namespace detail {
+
+/** Whether a document that has been read ends exactly where its bytes do; as BJData's does. */
+[[nodiscard]] inline bool ends_with_buffer(const reader &root, std::span<const std::byte> buffer) noexcept {
+    return root.value_end() == buffer.data() + buffer.size();
+}
+
+} // namespace detail
+
+/**
+ * Decodes a value from a buffer, or nullopt when it does not parse or does not fit the type.
+ *
+ * The whole buffer is the document: one that ends early, breaks partway or has bytes after it is
+ * refused, as validate() would refuse it. Checked as it is read, so in one pass.
+ */
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
-    return reader::over(buffer).as<T>();
+    const auto root = reader::over(buffer);
+    auto value = root.as<T>();
+    if (!value || !detail::ends_with_buffer(root, buffer)) return std::nullopt;
+    return value;
 }
 
 /**
  * Decodes, saying why when it cannot: where the document stopped parsing, which member the type
- * needed and did not find, or errc::type_mismatch. A second pass over the bytes, as BJData's is.
+ * needed and did not find, or errc::type_mismatch. One pass for a document that decodes; only one
+ * that does not is walked again, to say why.
  */
 template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
+    const auto root = reader::over(buffer);
+    auto value = root.as<T>();
+    if (value && detail::ends_with_buffer(root, buffer)) return std::expected<T, error> { std::move(*value) };
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
-    auto value = reader::over(buffer).as<T>();
     if (!value) {
         if (const auto absent = first_missing_member<T>(reader::over(buffer)); !absent.empty()) {
             return std::unexpected { error { errc::missing_key, 0, absent } };
         }
         return std::unexpected { error { errc::type_mismatch, 0 } };
     }
-    return std::expected<T, error> { std::move(*value) };
+    // Read, and valid, yet not ending where the buffer does: only here to be total.
+    return std::unexpected { error { errc::trailing_data, 0 } };
 }
 
 /** The exact byte length a value would occupy. Allocates only where a container has to be gathered. */

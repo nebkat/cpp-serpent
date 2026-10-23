@@ -22,8 +22,12 @@ A document that does not parse is reported with the kind and the byte offset —
 `type_mismatch`, and carries no offset: nothing on the way in recorded where the shape stopped
 matching.
 
-It costs a second pass, because validating and decoding are separate walks. Reach for `decode`
-when the answer is all you want.
+A document that decodes is read once; only one that does not is walked again, to find what is
+wrong with it and where.
+
+Either way the whole text or buffer is the document. One that ends before its last container
+closes, breaks partway through, or has anything after it — in JSON, anything but whitespace — is
+refused, as `validate()` would refuse it. The decode notices as it reads, so this costs nothing.
 
 `decode_into` reads into a value that already exists, which keeps whatever capacity its
 containers had - for reading many documents into the one object:

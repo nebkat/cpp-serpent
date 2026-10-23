@@ -329,11 +329,27 @@ public:
      * has no format byte of its own, or for a value that does not parse.
      */
     [[nodiscard]] std::optional<std::span<const std::byte>> encoded() const noexcept {
-        if (this->payload == nullptr || this->in_binary) return std::nullopt;
+        if (this->in_binary) return std::nullopt;
+        const auto *const end = this->value_end();
+        if (end == nullptr) return std::nullopt;
+        return std::span<const std::byte> { this->payload - 1, static_cast<std::size_t>(end - (this->payload - 1)) };
+    }
+
+    /**
+     * One past this value's last byte, or null when it does not parse.
+     *
+     * Known without a walk once one has gone all the way through the value - which reading the
+     * whole of it does - and found by one otherwise. A walk that ran out of bytes before its
+     * count did leaves nothing known, so a document that was read to the end and does not end
+     * where its bytes do is one that is broken.
+     */
+    [[nodiscard]] const std::byte *value_end() const noexcept {
+        if (this->reached != nullptr) return this->reached;
+        if (this->payload == nullptr) return nullptr;
+        if (this->in_binary) return this->payload + 1;
         detail::cursor scan { this->source.data(), this->payload, this->limit() };
         detail::skip_value(scan, this->head, 0);
-        if (!scan.ok()) return std::nullopt;
-        return std::span<const std::byte> { this->payload - 1, static_cast<std::size_t>(scan.position - (this->payload - 1)) };
+        return scan.ok() ? scan.position : nullptr;
     }
 
     // ---------------- containers ----------------

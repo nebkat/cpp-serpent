@@ -480,6 +480,21 @@ void malformed() {
     }
 }
 
+// decode reads the whole buffer as the document: a count the bytes run out before, or bytes
+// after it, is a broken document and refused, with try_decode saying what validate() would have.
+void whole_documents() {
+    for (const auto *hex : { "930102", "9301020304", "93010203c0" }) {
+        const auto bytes = from_hex(hex);
+        check(!msgpack::decode<std::vector<int>>(bytes).has_value(), std::string { "decode refuses " } + hex);
+        const auto tried = msgpack::try_decode<std::vector<int>>(bytes);
+        check(!tried && tried.error().code() == msgpack::validate(bytes).error().code()
+                        && tried.error().offset() == msgpack::validate(bytes).error().offset(),
+                std::string { "try_decode reports what validate() does: " } + hex);
+    }
+    check(msgpack::decode<std::vector<int>>(from_hex("93010203")) == std::vector<int> { 1, 2, 3 }, "a whole one still reads");
+    check(!msgpack::decode<int>(from_hex("0101")).has_value(), "a scalar with a byte after it is refused");
+}
+
 } // namespace
 
 int main() {
@@ -490,5 +505,6 @@ int main() {
     python_can();
     reading();
     malformed();
+    whole_documents();
     return report("msgpack");
 }

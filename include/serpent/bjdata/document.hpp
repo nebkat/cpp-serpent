@@ -53,10 +53,31 @@ template<prefer Preference = prefer::size, typename T>
     return buffer;
 }
 
-/** Decodes a value from a buffer, or nullopt when it does not parse. */
+namespace detail {
+
+/**
+ * Whether a document that has been read ends exactly where its bytes do. A container cut short
+ * or broken partway leaves its walk short of its end, so this is what turns "the elements ran
+ * out" into "the document is broken" - and trailing bytes into a refusal rather than nothing.
+ */
+[[nodiscard]] inline bool ends_with_buffer(const reader &root, std::span<const std::byte> buffer) noexcept {
+    return root.value_end() == buffer.data() + buffer.size();
+}
+
+} // namespace detail
+
+/**
+ * Decodes a value from a buffer, or nullopt when it does not parse or does not fit the type.
+ *
+ * The whole buffer is the document: one that ends early, breaks partway or has bytes after it is
+ * refused, as validate() would refuse it. Checked as it is read, so in one pass.
+ */
 template<typename T>
 [[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
-    return reader::over(buffer).as<T>();
+    const auto root = reader::over(buffer);
+    auto value = root.as<T>();
+    if (!value || !detail::ends_with_buffer(root, buffer)) return std::nullopt;
+    return value;
 }
 
 /**
@@ -66,13 +87,14 @@ template<typename T>
  * found; one that parses but does not fit the type is errc::type_mismatch, which carries no
  * offset because nothing on the way in recorded where the shape stopped matching.
  *
- * It costs a second pass over the bytes, since validating and decoding are separate walks.
- * decode() is the one to use when the answer is all you want.
+ * One pass for a document that decodes; only one that does not is walked again, to say why.
  */
 template<typename T>
 [[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
+    const auto root = reader::over(buffer);
+    auto value = root.as<T>();
+    if (value && detail::ends_with_buffer(root, buffer)) return std::expected<T, error> { std::move(*value) };
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
-    auto value = reader::over(buffer).as<T>();
     if (!value) {
         // A member the type needed and the document left out is the one mismatch that can say
         // something specific, so it is worth the walk back over the document to name it.
@@ -81,7 +103,9 @@ template<typename T>
         }
         return std::unexpected { error { errc::type_mismatch, 0 } };
     }
-    return std::expected<T, error> { std::move(*value) };
+    // Read, and valid, yet not ending where the buffer does: no walk can disagree with
+    // validate() about where a value ends, so this is only here to be total.
+    return std::unexpected { error { errc::trailing_data, 0 } };
 }
 
 /** The exact byte length a value would occupy, with no allocation. */
