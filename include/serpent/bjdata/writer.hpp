@@ -49,6 +49,8 @@ template<prefer Preference = prefer::size>
 class array_scope;
 template<prefer Preference = prefer::size>
 class object_scope;
+template<prefer Preference = prefer::size>
+class counted_scope;
 
 namespace detail {
 
@@ -100,6 +102,7 @@ template<prefer Preference>
 class basic_writer : public byte_emitter {
     friend class array_scope<Preference>;
     friend class object_scope<Preference>;
+    friend class counted_scope<Preference>;
 
     writer_options options {};
 
@@ -124,6 +127,13 @@ class basic_writer : public byte_emitter {
         if (!this->push(true)) return;
         this->put_marker(marker::object_begin);
     }
+    void begin_counted_object(std::uint64_t count) noexcept {
+        if (!this->push(true)) return;
+        this->put_marker(marker::object_begin);
+        this->put_marker(marker::count);
+        this->put_length(count);
+    }
+    void end_counted_object() noexcept { this->pop(true); }
     void end_object() noexcept {
         if (!this->pop(true)) return;
         this->put_marker(marker::object_end);
@@ -352,6 +362,15 @@ public:
     [[nodiscard]] object_scope<Preference> object() noexcept;
 
     /**
+     * An array or object of `count` elements or members, its count written first, so that a
+     * reader sizes its container once. A counted container ends when its count runs out, so
+     * closing it writes nothing: writing other than `count` of them gives a document that says
+     * one thing and holds another.
+     */
+    [[nodiscard]] counted_scope<Preference> counted_array(std::uint64_t count) noexcept;
+    [[nodiscard]] counted_scope<Preference> counted_object(std::uint64_t count) noexcept;
+
+    /**
      * A strongly typed array written in place: header, then the payload in one copy.
      *
      * At the elements' own type whichever is preferred. Narrowing is for a value on its own; a
@@ -472,6 +491,51 @@ public:
     }
 };
 
+/** A counted array or object; the same arrangement as the two above, closing with nothing written. */
+template<prefer Preference>
+class counted_scope {
+    basic_writer<Preference> *out = nullptr;
+    bool object = false;
+
+    void close() noexcept {
+        if (this->out == nullptr) return;
+        if (this->object) this->out->end_counted_object();
+        else this->out->end_counted_array();
+    }
+
+public:
+    counted_scope(basic_writer<Preference> &out, bool object, std::uint64_t count) noexcept : out(&out), object(object) {
+        if (object) this->out->begin_counted_object(count);
+        else this->out->begin_counted_array(count);
+    }
+
+    counted_scope(const counted_scope &) = delete;
+    counted_scope &operator=(const counted_scope &) = delete;
+
+    counted_scope(counted_scope &&other) noexcept : out(std::exchange(other.out, nullptr)), object(other.object) {}
+    counted_scope &operator=(counted_scope &&other) noexcept {
+        if (this != &other) {
+            this->close();
+            this->out = std::exchange(other.out, nullptr);
+            this->object = other.object;
+        }
+        return *this;
+    }
+
+    ~counted_scope() { this->close(); }
+
+    template<typename T>
+    void value(const T &item) const noexcept {
+        this->out->value(item);
+    }
+
+    template<typename T>
+    void member(std::string_view name, const T &item) const noexcept {
+        this->out->key(name);
+        this->out->value(item);
+    }
+};
+
 template<prefer Preference>
 array_scope<Preference> basic_writer<Preference>::array() noexcept {
     return array_scope<Preference> { *this };
@@ -480,6 +544,16 @@ array_scope<Preference> basic_writer<Preference>::array() noexcept {
 template<prefer Preference>
 object_scope<Preference> basic_writer<Preference>::object() noexcept {
     return object_scope<Preference> { *this };
+}
+
+template<prefer Preference>
+counted_scope<Preference> basic_writer<Preference>::counted_array(std::uint64_t count) noexcept {
+    return counted_scope<Preference> { *this, false, count };
+}
+
+template<prefer Preference>
+counted_scope<Preference> basic_writer<Preference>::counted_object(std::uint64_t count) noexcept {
+    return counted_scope<Preference> { *this, true, count };
 }
 
 /** The default: everything the reference encoder does. */
