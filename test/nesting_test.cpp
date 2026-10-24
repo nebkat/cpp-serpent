@@ -81,6 +81,44 @@ void recursive_types() {
     check(bjdata::decode<node>(nested).has_value(), "the same in BJData");
 }
 
+#if SERPENT_HAS_REFLECTION
+/** The same, defined by reflection: read by each format's own reflected path, which walks with a cursor of its own. */
+struct [[= serpent::serializable {}]] reflected_node {
+    std::vector<reflected_node> c;
+};
+
+std::vector<std::byte> bjdata_nodes(int levels) {
+    std::string out;
+    for (int level = 0; level < levels; ++level) out += std::string("{U\x01" "c[");
+    for (int level = 0; level < levels; ++level) out += "]}";
+    return bytes_of(out);
+}
+
+std::vector<std::byte> msgpack_nodes(int levels) {
+    std::string out;
+    for (int level = 0; level < levels; ++level) out += "\x81\xa1" "c\x91";
+    out.back() = '\x90';
+    return bytes_of(out);
+}
+
+void reflected_types() {
+    const int limit = max_depth / 2;
+    check(json::decode<reflected_node>(json_nodes(limit)).has_value(), "reflected, JSON: to the limit reads");
+    check(!json::decode<reflected_node>(json_nodes(limit + 1)).has_value(), "and past it is refused");
+    check(json::try_decode<reflected_node>(json_nodes(limit + 1)).error().code() == errc::depth_exceeded, "as too deep");
+    check(!json::decode<reflected_node>(json_nodes(50'000)).has_value(), "however deep");
+
+    check(bjdata::decode<reflected_node>(bjdata_nodes(limit)).has_value(), "reflected, BJData: to the limit reads");
+    check(!bjdata::decode<reflected_node>(bjdata_nodes(limit + 1)).has_value(), "and past it is refused");
+    check(bjdata::try_decode<reflected_node>(bjdata_nodes(limit + 1)).error().code() == errc::depth_exceeded, "as too deep");
+    check(!bjdata::decode<reflected_node>(bjdata_nodes(50'000)).has_value(), "however deep");
+
+    check(msgpack::decode<reflected_node>(msgpack_nodes(limit)).has_value(), "reflected, MessagePack: to the limit reads");
+    check(!msgpack::decode<reflected_node>(msgpack_nodes(limit + 1)).has_value(), "and past it is refused");
+    check(!msgpack::decode<reflected_node>(msgpack_nodes(50'000)).has_value(), "however deep");
+}
+#endif
+
 void walks() {
     // A walk by hand stops at the limit as a decode does: the deepest container has nothing in it.
     const auto deep = json_arrays(max_depth + 1);
@@ -121,6 +159,9 @@ void counts() {
 int main() {
     trees();
     recursive_types();
+#if SERPENT_HAS_REFLECTION
+    reflected_types();
+#endif
     walks();
     counts();
     return report("nesting");

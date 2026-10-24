@@ -78,7 +78,7 @@ consteval bool read_with_cursor() {
  */
 template<bool Terminated, typename T>
     requires (read_with_cursor<T>())
-[[nodiscard]] bool read_at(scanner::basic_cursor<Terminated> &scan, std::string_view document, T &into);
+[[nodiscard]] bool read_at(scanner::basic_cursor<Terminated> &scan, std::string_view document, T &into, int depth);
 
 /**
  * Fills one object of a described type from the text of a JSON object.
@@ -110,15 +110,17 @@ class object_filler {
     std::string_view document;
 
     std::uint64_t seen = 0;   ///< one bit for each member read
+    int depth = 0;            ///< the object's own, the root being 0; its members are one deeper
     bool converted = true;    ///< whether every member read so far converted
     bool any_entry = false;   ///< whether an entry has been passed, so that a comma precedes the next
 
 public:
-    /** `scan` stands just past the object's opening brace, and is left just past its closing one. */
-    object_filler(T &value, scanner::basic_cursor<Terminated> &scan, std::string_view document) noexcept
+    /** `scan` stands just past the opening brace of an object `depth` deep, and is left just past its closing one. */
+    object_filler(T &value, scanner::basic_cursor<Terminated> &scan, std::string_view document, int depth) noexcept
     : value(value)
     , scan(scan)
-    , document(document) {}
+    , document(document)
+    , depth(depth) {}
 
     /**
      * Reads the members that stand exactly as this library would have written them.
@@ -172,7 +174,7 @@ public:
             }
             if (!this->read_member_named(name)) {
                 scanner::skip_whitespace(this->scan);
-                scanner::skip_value(this->scan, 1);
+                scanner::skip_value(this->scan, this->depth + 1);
             }
         }
     }
@@ -247,21 +249,21 @@ private:
             // inline, which read_at() below cannot be, since it recurses.
             if (direct::read(this->scan, field)) return;
             this->converted = false;
-            scanner::skip_value(this->scan, 1);
+            scanner::skip_value(this->scan, this->depth + 1);
         } else if constexpr (read_with_cursor<field_type>() && plain) {
             // A nested described type or a sequence, read with the same cursor. One that does
             // not convert is stepped over from its start, so the members after it are still
             // read and the object still closes.
             const char *const start = this->scan.position;
-            if (read_at(this->scan, this->document, field)) return;
+            if (read_at(this->scan, this->document, field, this->depth + 1)) return;
             this->converted = false;
             if (!this->scan.ok()) return;
             this->scan.position = start;
-            scanner::skip_value(this->scan, 1);
+            scanner::skip_value(this->scan, this->depth + 1);
         } else {
             // Anything else is read through a handle, by whatever reads that type anywhere else -
             // and says, as it is read, how far into the text it got.
-            const basic_reader<Terminated> held { this->document, this->scan.position };
+            const basic_reader<Terminated> held { this->document, this->scan.position, this->depth + 1 };
             // A tagged variant is read through the tag that names its alternatives, and a coded
             // member through its codec; reading either plainly would get it wrong.
             auto &&projection = serpent::detail::projected<Member>(field);
@@ -271,10 +273,25 @@ private:
     }
 };
 
-/** Reads the object whose opening brace the cursor has just passed, leaving it past the closing one. */
+/**
+ * Whether a container `depth` deep, whose opening bracket the cursor has passed, may be walked
+ * into: below max_depth always; at it, only if it is empty, as validate() says. A container
+ * with something in it there fails the cursor.
+ */
+template<bool Terminated>
+[[nodiscard]] bool may_open(scanner::basic_cursor<Terminated> &scan, int depth, char closing) noexcept {
+    if (depth < max_depth) return true;
+    scanner::skip_whitespace(scan);
+    if (scan.available(1) && scan.peek() == closing) return true;
+    scan.fail(errc::depth_exceeded);
+    return false;
+}
+
+/** Reads the object, `depth` deep, whose opening brace the cursor has just passed, leaving it past the closing one. */
 template<bool Terminated, typename T>
-[[nodiscard]] bool read_object(T &value, scanner::basic_cursor<Terminated> &scan, std::string_view document) {
-    object_filler<T, Terminated> filler { value, scan, document };
+[[nodiscard]] bool read_object(T &value, scanner::basic_cursor<Terminated> &scan, std::string_view document, int depth) {
+    if (!may_open(scan, depth, '}')) return false;
+    object_filler<T, Terminated> filler { value, scan, document, depth };
     filler.read_members_as_written();
     filler.read_remaining_entries();
     return filler.succeeded();
@@ -293,7 +310,7 @@ bool read_reflected(const basic_reader<Terminated> &source, T &value) {
     if (!source.is_object()) return false;
 
     scanner::basic_cursor<Terminated> scan { source.document(), source.data() + 1 };
-    const bool read = read_object(value, scan, source.document());
+    const bool read = read_object(value, scan, source.document(), source.nesting());
     // Whoever is stepping through the container this object sits in can step to here.
     if (scan.ok()) source.note_end(scan.position);
     return read;
@@ -301,33 +318,33 @@ bool read_reflected(const basic_reader<Terminated> &source, T &value) {
 
 template<bool Terminated, typename T>
     requires (read_with_cursor<T>())
-[[nodiscard]] bool read_at(scanner::basic_cursor<Terminated> &scan, std::string_view document, T &into) {
+[[nodiscard]] bool read_at(scanner::basic_cursor<Terminated> &scan, std::string_view document, T &into, int depth) {
     scanner::skip_whitespace(scan);
     if constexpr (direct::readable<T>) {
         return direct::read(scan, into);
     } else if constexpr (reflected_type<T>) {
         if (!scanner::accept(scan, '{')) return false;
-        return read_object(into, scan, document);
+        return read_object(into, scan, document, depth);
     } else if constexpr (serpent::detail::fixed_sequence<T>) {
         // Its length is part of what it is, so a document of another length is not this type.
-        if (!scanner::accept(scan, '[')) return false;
+        if (!scanner::accept(scan, '[') || !may_open(scan, depth, ']')) return false;
         auto slot = std::ranges::begin(into);
         const auto limit = std::ranges::end(into);
         scanner::skip_whitespace(scan);
         if (scanner::accept(scan, ']')) return slot == limit;
         do {
-            if (slot == limit || !read_at(scan, document, *slot)) return false;
+            if (slot == limit || !read_at(scan, document, *slot, depth + 1)) return false;
             ++slot;
             scanner::skip_whitespace(scan);
         } while (scanner::accept(scan, ','));
         return scanner::accept(scan, ']') && slot == limit;
     } else {
-        if (!scanner::accept(scan, '[')) return false;
+        if (!scanner::accept(scan, '[') || !may_open(scan, depth, ']')) return false;
         into.clear();
         scanner::skip_whitespace(scan);
         if (scanner::accept(scan, ']')) return true;
         do {
-            if (!read_at(scan, document, into.emplace_back())) return false;
+            if (!read_at(scan, document, into.emplace_back(), depth + 1)) return false;
             scanner::skip_whitespace(scan);
         } while (scanner::accept(scan, ','));
         return scanner::accept(scan, ']');
@@ -361,7 +378,7 @@ std::optional<bool> read_sequence(const basic_reader<Terminated> &source, C &out
     if (!source.is_array()) return std::nullopt;
 
     scanner::basic_cursor<Terminated> scan { source.document(), source.data() };
-    if (!read_at(scan, source.document(), out)) return false;
+    if (!read_at(scan, source.document(), out, source.nesting())) return false;
 
     source.note_end(scan.position);
     return true;

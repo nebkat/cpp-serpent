@@ -27,3 +27,12 @@ the plain way over millions of values.
 Żmij, Glaze's integer formatting and fast_float are other people's work, kept under
 `include/serpent/external/` with their licences and copied from pinned upstream versions by
 `tools/vendor-*.sh`; the README there says who wrote what.
+
+## How deep a document may nest
+
+`SERPENT_MAX_DEPTH`, 32 unless set, is how deep any reader or writer goes, counting the root as
+0. A document nested deeper is refused by `validate`, `decode` and `try_decode` alike, rather than
+recursed into: reading into `serpent::value` costs a few hundred bytes of stack a level, so a task
+with a small stack may want it lower. It can be from 1 to 32, since a writer remembers which
+levels are objects in one 32-bit word. Set it as a CMake cache variable, which puts it on every
+target that links serpent; every translation unit in a program must agree on it.

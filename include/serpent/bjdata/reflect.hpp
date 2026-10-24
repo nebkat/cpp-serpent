@@ -83,16 +83,22 @@ class object_filler {
     detail::container_prefix prefix;
     std::uint64_t entries_left = 0;
     std::uint64_t seen = 0;
+    int depth = 0; ///< the object's own, the root being 0; its members are one deeper
     bool every_value_read = true;
 
 public:
-    /** The cursor stands just after the opening brace. */
-    object_filler(detail::cursor &scan, std::span<const std::byte> buffer, T &value) noexcept
+    /** The cursor stands just after the opening brace of an object `depth` deep. */
+    object_filler(detail::cursor &scan, std::span<const std::byte> buffer, T &value, int depth) noexcept
     : scan(scan)
     , buffer(buffer)
     , value(value)
     , prefix(detail::parse_object_prefix(scan))
-    , entries_left(prefix.count) {}
+    , entries_left(prefix.count)
+    , depth(depth) {
+        // At max_depth an object may be there, but its members may not: one that has any is a
+        // document nested too deep, as validate() says, and is not read into.
+        if (depth >= max_depth && this->scan.ok() && this->has_entries()) this->scan.fail(errc::depth_exceeded);
+    }
 
     void read_members_as_written() {
         // A counted or typed object is laid out differently, and this library writes neither.
@@ -168,6 +174,14 @@ public:
     }
 
 private:
+    /** Whether the object holds anything, without moving the cursor. */
+    [[nodiscard]] bool has_entries() const noexcept {
+        if (!this->prefix.unbounded) return this->prefix.count != 0;
+        const std::byte *at = this->scan.position;
+        while (at < this->scan.limit && to_marker(*at) == marker::noop) ++at;
+        return at < this->scan.limit && to_marker(*at) != marker::object_end;
+    }
+
     /** Whether these bytes are next, with at least `then` more after them. */
     template<std::size_t Width>
     SERPENT_ALWAYS_INLINE [[nodiscard]] bool at(const std::array<std::byte, Width> &bytes, std::size_t then = 1) const noexcept {
@@ -239,7 +253,7 @@ private:
             if (this->scan.ok()) this->scan.fail(errc::unexpected_marker, this->scan.position - 1);
             return false;
         }
-        detail::skip_value(this->scan, kind, 1);
+        detail::skip_value(this->scan, kind, this->depth + 1);
         return this->scan.ok();
     }
 
@@ -273,20 +287,23 @@ private:
         }
 
         auto &field = this->value.[:Member:];
-        const reader held { kind, this->buffer, this->scan.position };
+        const reader held { kind, this->buffer, this->scan.position, this->depth + 1 };
         auto &&projection = serpent::detail::projected<Member>(field);
         if (!read_into(held, projection)) this->every_value_read = false;
-        detail::skip_value(this->scan, kind, 1);
+        // Where a read of it got all the way through, the handle knows where it ended and the
+        // value is not walked again; otherwise it is stepped over, at its depth in the document.
+        if (const auto *const end = held.value_end()) this->scan.position = end;
+        else detail::skip_value(this->scan, kind, this->depth + 1);
         return this->scan.ok();
     }
 };
 
 namespace detail {
 
-/** Reads one object at a cursor that stands just after its opening brace, and consumes it. */
+/** Reads one object, `depth` deep, at a cursor that stands just after its opening brace, and consumes it. */
 template<reflected_type T>
-bool read_object_body(detail::cursor &scan, const std::span<const std::byte> buffer, T &value) {
-    object_filler<T> filler { scan, buffer, value };
+bool read_object_body(detail::cursor &scan, const std::span<const std::byte> buffer, T &value, int depth) {
+    object_filler<T> filler { scan, buffer, value, depth };
     filler.read_members_as_written();
     filler.read_remaining_entries();
     return filler.succeeded();
@@ -526,9 +543,9 @@ public:
 
 /** Fills a container of described types from a table. */
 template<typename C, typename T = std::remove_cvref_t<typename C::value_type>>
-bool read_table(std::span<const std::byte> buffer, const detail::container_prefix &prefix, bool column_major, C &out) {
+bool read_table(const reader &container, const detail::container_prefix &prefix, C &out) {
     soa::table source;
-    if (!source.place(buffer, prefix, column_major)) return false;
+    if (!source.place(container.buffer(), prefix, container.type_marker() == marker::object_begin)) return false;
     const table_filler<T> filler { source };
     if (!filler.complete()) return false;
     out.clear();
@@ -536,6 +553,7 @@ bool read_table(std::span<const std::byte> buffer, const detail::container_prefi
     for (std::uint64_t index = 0; index < source.size(); ++index) {
         if (!filler.fill_record(index, out.emplace_back())) return false;
     }
+    container.note_end(source.end());
     return true;
 }
 
@@ -565,7 +583,11 @@ bool read_reflected(const reader &source, T &value) {
         return filler.complete() && filler.fill(source.data(), value);
     }
     detail::cursor scanner { source.buffer(), source.data() };
-    return detail::read_object_body(scanner, source.buffer(), value);
+    if (!detail::read_object_body(scanner, source.buffer(), value, source.nesting())) return false;
+    // Whoever is stepping through the container this object sits in - or checking that a
+    // document ends where its bytes do - can go straight to here.
+    source.note_end(scanner.position);
+    return true;
 }
 
 /**
@@ -586,9 +608,13 @@ std::optional<bool> read_sequence(const reader &source, C &out) {
     // one by one.
     if (!source.is_array()) return std::nullopt;
 
+    // An array at the limit may be there but may hold nothing, which the general path, walking
+    // it element by element, already says.
+    if (source.nesting() >= max_depth) return std::nullopt;
+
     const auto info = source.container_header();
     if (info.body == nullptr) return std::nullopt;
-    if (info.structured()) return detail::read_table(source.buffer(), info, source.type_marker() == marker::object_begin, out);
+    if (info.structured()) return detail::read_table(source, info, out);
     // A typed array of anything but objects is not a sequence of these.
     if (info.typed() && info.element != marker::object_begin) return std::nullopt;
 
@@ -619,9 +645,11 @@ std::optional<bool> read_sequence(const reader &source, C &out) {
         }
 
         auto &slot = out.emplace_back();
-        if (!detail::read_object_body(scanner, source.buffer(), slot)) return false;
+        if (!detail::read_object_body(scanner, source.buffer(), slot, source.nesting() + 1)) return false;
         if (counted && remaining > 0) --remaining;
     }
+    if (!scanner.ok()) return false;
+    source.note_end(scanner.position);
     return true;
 }
 

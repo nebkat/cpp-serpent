@@ -87,6 +87,11 @@ private:
 public:
     constexpr basic_reader() = default;
     constexpr basic_reader(std::string_view source, const char *first) noexcept : source(source), first(first) {}
+    /** A handle on a value `depth` deep in the document, for a reader that walks it by itself. */
+    constexpr basic_reader(std::string_view source, const char *first, int depth) noexcept
+    : source(source)
+    , first(first)
+    , depth(static_cast<std::uint8_t>(depth)) {}
     basic_reader(const basic_reader &) = delete;
     basic_reader &operator=(const basic_reader &) = delete;
     basic_reader(basic_reader &&) = default;
