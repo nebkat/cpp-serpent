@@ -61,7 +61,8 @@ def main() -> int:
             if value is None:
                 cells.append("")
                 continue
-            best = value == min(v for (w, o, l), v in default.items() if w == RECORDS and o == op)
+            # The best of the rows shown: the results also hold libraries and forms the table leaves out.
+            best = value == min(default[(RECORDS, op, other)] for other in NAMES if (RECORDS, op, other) in default)
             cells.append(cell(value, best))
         rows += f"| {name} | " + " | ".join(cells) + " |\n"
     page = replace_table(page, "| | JSON encode | JSON decode | binary encode | binary decode |\n|---|---:|---:|---:|---:|", rows)

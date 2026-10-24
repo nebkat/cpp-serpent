@@ -30,27 +30,27 @@ struct-mapping library too, which holds the format still.
 
 | | JSON encode | JSON decode | binary encode | binary decode |
 |---|---:|---:|---:|---:|
-| serpent | **233** | **417** | **119** | **152** |
-| serpent, bounded |  | 475 |  |  |
-| serpent, BJData for size |  |  | 196 | 228 |
-| struct-mapping lib | 284 | 585 | 154 | 164 |
-| the same, bounded |  | 698 |  |  |
-| the same, CBOR |  |  | 235 | 192 |
-| the same, built for size | 343 | 852 |  |  |
-| DOM lib | 4,317 | 7,893 | 3,564 | 5,824 |
+| serpent | **256** | **394** | **119** | **145** |
+| serpent, bounded |  | 450 |  |  |
+| serpent, BJData for size |  |  | 170 | 222 |
+| struct-mapping lib | 278 | 456 | 152 | 152 |
+| the same, bounded |  | 575 |  |  |
+| the same, CBOR |  |  | 228 | 189 |
+| the same, built for size | 332 | 830 |  |  |
+| DOM lib | 4,209 | 7,186 | 3,369 | 5,533 |
 
-Decoding, serpent allocates once per string and once for the container; the struct-mapping
-library 10,015 times and the DOM library 70,029.
+Decoding, serpent allocates 15 times, the struct-mapping library 15 and the DOM library
+70,029.
 
 The same, one kind of member at a time and a record of numbers in bulk, as a ratio to the
 struct-mapping library's normal build - below 1.0 is serpent ahead:
 
 | | strings | booleans | integers | reals | 100 × 2000 numbers |
 |---|---:|---:|---:|---:|---:|
-| JSON encode | **0.55** | 1.33 | **0.50** | 1.04 | **0.82** |
-| JSON decode | **0.80** | **0.78** | **0.85** | **0.76** | **0.84** |
-| binary encode | 1.01 | **0.93** | **0.97** | 1.00 | 1.04 |
-| binary decode | **0.81** | **0.98** | **0.98** | **0.98** | 1.18 |
+| JSON encode | **0.53** | 1.36 | **0.52** | 1.03 | **0.83** |
+| JSON decode | **0.98** | **0.76** | **0.82** | **0.76** | **0.84** |
+| binary encode | 1.29 | **0.90** | **0.96** | **0.99** | 1.05 |
+| binary decode | **0.84** | **0.98** | 1.18 | 1.09 | 1.19 |
 
 A described type is what all of this is for. The same record behind a hand-written
 `json_convert` takes 261 to encode to BJData and 1,186 to decode.
@@ -63,12 +63,12 @@ switch off:
 
 | | default | plain |
 |---|---:|---:|
-| JSON decode | 417 | 676 |
-| JSON encode | 233 | 1,193 |
-| JSON encode, five reals | 365 | 2,263 |
-| JSON encode, five integers | 119 | 405 |
-| binary decode | 152 | 147 |
-| binary encode | 119 | 167 |
+| JSON decode | 394 | 598 |
+| JSON encode | 256 | 1,149 |
+| JSON encode, five reals | 354 | 2,155 |
+| JSON encode, five integers | 116 | 392 |
+| binary decode | 145 | 148 |
+| binary encode | 119 | 213 |
 
 ## It was never the format
 
@@ -148,12 +148,12 @@ than by move, would take both out.
 
 | | first key of citm | last key of citm | sum ids, twitter | count every value, citm | sum coordinates, canada |
 |---|---:|---:|---:|---:|---:|
-| serpent | **0.07** | 655 | 233 | 829 | 2,696 |
-| serpent, over an index built first | 751 | 745 | 256 | 812 | 2,950 |
-| on-demand parser | 179 | **270** | **110** | **315** | 1,618 |
-| fast DOM A | 363 | 362 | 143 | 413 | **1,251** |
-| fast DOM B | 869 | 871 | 757 | 911 | 1,906 |
-| DOM lib | 7,221 | 7,233 | 3,307 | 7,365 | 13,244 |
+| serpent | **0.07** | 674 | 220 | 877 | 2,702 |
+| serpent, over an index built first | 751 | 735 | 239 | 816 | 2,884 |
+| on-demand parser | 172 | **257** | **105** | **298** | 1,533 |
+| fast DOM A | 353 | 352 | 136 | 398 | **1,207** |
+| fast DOM B | 840 | 839 | 704 | 877 | 1,848 |
+| DOM lib | 6,850 | 6,843 | 3,159 | 6,983 | 12,542 |
 
 serpent reads in place and builds nothing, so what it does not look at costs nothing and it never
 allocates; walking a whole document it is 2-4x behind parsers that index or build one first.
