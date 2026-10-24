@@ -57,6 +57,10 @@ using member_range = element_range<member_iterator>;
  */
 class reader {
     marker element = marker::invalid;
+    // How deep in the document this value is, the root being 0. Walking into a container past
+    // max_depth finds nothing, which is what bounds every recursive read; it sits in what would
+    // otherwise be padding after the marker.
+    std::uint8_t depth = 0;
     std::span<const std::byte> source {}; ///< the whole document, so bounds and offsets are absolute
     const std::byte *payload = nullptr; ///< first byte after this value's marker
     soa::place table {};                ///< set when this value is a record of a table, or a field of one
@@ -90,8 +94,12 @@ public:
     [[nodiscard]] reader clone() const noexcept {
         reader copy { this->element, this->source, this->payload };
         copy.table = this->table;
+        copy.depth = this->depth;
         return copy;
     }
+
+    /** How deep in the document this value is, the root being 0. */
+    [[nodiscard]] constexpr int nesting() const noexcept { return this->depth; }
 
     /** Where this value stands in a table, if it is a record or a field of one. */
     [[nodiscard]] constexpr const soa::place &place_in_table() const noexcept { return this->table; }
@@ -183,7 +191,7 @@ public:
         if (this->reached != nullptr) return this->reached;
         if (!this->is_valid()) return nullptr;
         auto scanner = this->scan();
-        detail::skip_value(scanner, this->element, 0);
+        detail::skip_value(scanner, this->element, this->depth);
         return scanner.ok() ? scanner.position : nullptr;
     }
 
@@ -557,6 +565,10 @@ public:
     , remaining(info.count)
     , counted(!info.unbounded)
     , current(marker::invalid, container.source, nullptr) {
+        // Past max_depth a container is not walked into: it has no elements, so no walk of it
+        // reaches its end, and a decode that needed one refuses the document.
+        if (container.depth >= max_depth) return;
+        this->current.depth = static_cast<std::uint8_t>(container.depth + 1);
         if (container.table.in_table() && container.element == marker::array_begin) {
             // A fixed run of elements in a record.
             this->layout = std::make_unique<soa::table>();
@@ -614,7 +626,7 @@ public:
             this->cursor = this->current.reached;
         } else {
             detail::cursor scanner { this->container->source, this->current.payload };
-            detail::skip_value(scanner, this->current.element, 1);
+            detail::skip_value(scanner, this->current.element, this->current.depth);
             if (!scanner.ok()) {
                 this->exhausted = true;
                 return *this;
@@ -739,6 +751,8 @@ public:
     , remaining(info.count)
     , counted(!info.unbounded)
     , current { {}, reader { marker::invalid, container.source, nullptr } } {
+        if (container.depth >= max_depth) return;
+        this->current.value.depth = static_cast<std::uint8_t>(container.depth + 1);
         if (container.table.in_table() && container.element == marker::object_begin) {
             this->layout = std::make_unique<soa::table>();
             if (this->layout->place_at(container.source, container.table.container)) {
@@ -791,7 +805,7 @@ public:
             this->cursor = this->current.value.reached;
         } else {
             detail::cursor scanner { this->container->source, this->current.value.payload };
-            detail::skip_value(scanner, this->current.value.element, 1);
+            detail::skip_value(scanner, this->current.value.element, this->current.value.depth);
             if (!scanner.ok()) {
                 this->exhausted = true;
                 return *this;
@@ -888,7 +902,9 @@ inline reader reader::operator[](std::size_t index) const noexcept {
         const auto width = payload_width(info.element);
         // Check before forming the pointer, so an out-of-range index never computes one.
         if (static_cast<std::uint64_t>(this->limit() - info.body) < (index + 1) * width) return {};
-        return reader { info.element, this->source, info.body + index * width };
+        reader element { info.element, this->source, info.body + index * width };
+        element.depth = static_cast<std::uint8_t>(this->depth + 1);
+        return element;
     }
 
     std::size_t position = 0;

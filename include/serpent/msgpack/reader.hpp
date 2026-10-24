@@ -241,6 +241,7 @@ class reader {
     const std::byte *payload = nullptr;   ///< the first byte after this value's format byte
     std::uint8_t head = format::never_used;
     bool in_binary = false; ///< one byte of a bin, handed out as a uint8 standing where it is
+    std::uint8_t depth = 0; ///< how deep in the document this value is, the root being 0; past max_depth nothing is walked into
 
     // One past the end of this value, once a walk of it has been completed - for the iterator
     // that owns this handle, which then steps there rather than walking the value a second time.
@@ -292,10 +293,13 @@ public:
     [[nodiscard]] reader clone() const noexcept {
         reader copy { this->head, this->source, this->payload };
         copy.in_binary = this->in_binary;
+        copy.depth = this->depth;
         return copy;
     }
 
     [[nodiscard]] constexpr std::uint8_t format_byte() const noexcept { return this->head; }
+    /** How deep in the document this value is, the root being 0. */
+    [[nodiscard]] constexpr int nesting() const noexcept { return this->depth; }
     [[nodiscard]] constexpr const std::byte *data() const noexcept { return this->payload; }
     [[nodiscard]] constexpr std::span<const std::byte> buffer() const noexcept { return this->source; }
     [[nodiscard]] std::size_t offset() const noexcept {
@@ -348,7 +352,7 @@ public:
         if (this->payload == nullptr) return nullptr;
         if (this->in_binary) return this->payload + 1;
         detail::cursor scan { this->source.data(), this->payload, this->limit() };
-        detail::skip_value(scan, this->head, 0);
+        detail::skip_value(scan, this->head, this->depth);
         return scan.ok() ? scan.position : nullptr;
     }
 
@@ -533,6 +537,10 @@ public:
 
     explicit array_iterator(const reader &container) noexcept : container(&container) {
         this->current.source = container.source;
+        // Past max_depth a container is not walked into: it has no elements, so no walk of it
+        // reaches its end, and a decode that needed one refuses the document.
+        if (container.depth >= max_depth) return;
+        this->current.depth = static_cast<std::uint8_t>(container.depth + 1);
         const auto holds = container.format_family();
         if (holds != family::array && holds != family::binary) return;
         const auto info = container.contents();
@@ -555,7 +563,7 @@ public:
             this->cursor = this->current.reached;
         } else {
             detail::cursor scan { this->container->source.data(), this->current.payload, this->limit() };
-            detail::skip_value(scan, this->current.head, 1);
+            detail::skip_value(scan, this->current.head, this->current.depth);
             if (!scan.ok()) {
                 this->exhausted = true;
                 return *this;
@@ -616,6 +624,8 @@ public:
 
     explicit member_iterator(const reader &container) noexcept : container(&container) {
         this->current.value.source = container.source;
+        if (container.depth >= max_depth) return;
+        this->current.value.depth = static_cast<std::uint8_t>(container.depth + 1);
         if (container.format_family() != family::map) return;
         const auto info = container.contents();
         if (!info.ok()) return;
@@ -634,7 +644,7 @@ public:
             this->cursor = this->current.value.reached;
         } else {
             detail::cursor scan { this->container->source.data(), this->current.value.payload, this->limit() };
-            detail::skip_value(scan, this->current.value.head, 1);
+            detail::skip_value(scan, this->current.value.head, this->current.value.depth);
             if (!scan.ok()) {
                 this->exhausted = true;
                 return *this;

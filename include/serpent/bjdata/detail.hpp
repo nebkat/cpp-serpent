@@ -352,6 +352,21 @@ template<typename Result>
         return result;
     }
 
+    // Every element takes some bytes - its marker, or its width in a typed container, and an
+    // object's key its length at least - so a count the rest of the buffer cannot hold is a
+    // document that ends early, said here rather than after a reader has reserved for it. A
+    // table's records are checked against its schema where it is placed.
+    if (result.table == nullptr) {
+        // At most ten bytes an element, so once the count is within the bytes left the product
+        // cannot overflow - and is a multiplication on every container rather than a division.
+        const std::uint64_t least = (object ? 2 : 0) + (result.typed() ? payload_width(result.element) : 1);
+        const std::uint64_t left = source.remaining();
+        if (shape.total > left || shape.total * least > left) {
+            source.fail(errc::unexpected_end, at);
+            return result;
+        }
+    }
+
     result.count = shape.total;
     if constexpr (requires { result.rank; }) {
         result.rank = shape.rank;
