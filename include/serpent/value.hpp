@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -1301,7 +1302,7 @@ struct serializer<value, void> {
             value::array_type *items = nullptr;
             if constexpr (requires { source.size_hint(); }) {
                 if (const auto hint = source.size_hint())
-                    items = value::array_type::reserved(static_cast<std::uint32_t>(*hint));
+                    items = value::array_type::reserved(static_cast<std::uint32_t>(std::min<std::size_t>(*hint, std::numeric_limits<std::uint32_t>::max())));
             }
             for (const auto &element : source.array()) {
                 value element_value;

@@ -39,7 +39,8 @@ set(TESTS
     msgpack
     fixture
     manual
-    value)
+    value
+    nesting)
 
 # Suites that define types the way types are meant to be defined, by annotation.
 if(SERPENT_HAS_REFLECTION_SUPPORT)

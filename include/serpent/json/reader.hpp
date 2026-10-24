@@ -80,6 +80,9 @@ private:
     // `for (auto &child : ...)` it walks them once, and the compiler insists on the second.
     mutable const char *reached = nullptr; ///< how far into this value anything has scanned
     mutable int open = 0;                  ///< containers still open at `reached`, counting from `first`
+    // How deep in the document this value is, the root being 0. Walking into a container past
+    // max_depth finds nothing, which is what bounds every recursive read.
+    std::uint8_t depth = 0;
 
 public:
     constexpr basic_reader() = default;
@@ -206,6 +209,9 @@ public:
     [[nodiscard]] basic_reader<Terminated> operator[](std::string_view key) const noexcept;
     [[nodiscard]] basic_reader<Terminated> find(std::string_view key) const noexcept { return (*this)[key]; }
 
+    /** How deep in the document this value is, the root being 0. */
+    [[nodiscard]] constexpr int nesting() const noexcept { return this->depth; }
+
     /** The text this value occupies, or nothing if it does not parse. */
     [[nodiscard]] std::optional<std::string_view> extent() const noexcept {
         const char *const end = this->value_end();
@@ -217,7 +223,7 @@ public:
      * One past this value's last character, or null when it does not parse.
      *
      * Known without a scan once a walk has gone all the way through the value - which reading
-     * the whole of it does - and otherwise found by scanning on from wherever a walk got to. A
+     * the whole of it does - and otherwise found by scanning it. A
      * walk that stopped early, at the end of the text or at a character that cannot be there,
      * leaves its container open, so a document that was read to the end and does not end where
      * its text does is one that is broken.
@@ -225,8 +231,10 @@ public:
     [[nodiscard]] const char *value_end() const noexcept {
         if (this->first == nullptr) return nullptr;
         if (this->reached != nullptr && this->open == 0) return this->reached;
+        // Scanned whole, from this value's own depth, so that the limit is counted from the
+        // root as validate() counts it.
         auto scan = this->scan();
-        step_over_value(scan, *this);
+        scanner::skip_value(scan, this->depth);
         return scan.ok() ? scan.position : nullptr;
     }
 
@@ -359,9 +367,13 @@ using key_value = basic_key_value<false>;
 
 namespace scanner {
 
-/** Consumes forward until `open` containers have been closed, leaving the cursor just past. */
+/**
+ * Consumes forward until `open` containers have been closed, leaving the cursor just past.
+ * `depth` is that of the value the outermost of them is, so a value met inside is stepped over
+ * at its own depth in the document and the limit is counted from the root.
+ */
 template<bool Terminated>
-void close_containers(basic_cursor<Terminated> &scan, int open) noexcept {
+void close_containers(basic_cursor<Terminated> &scan, int open, int depth) noexcept {
     while (open > 0) {
         skip_whitespace(scan);
         if (!scan.available(1)) {
@@ -379,7 +391,7 @@ void close_containers(basic_cursor<Terminated> &scan, int open) noexcept {
         case ',':
         case ':': scan.advance(1); break;
         default:
-            skip_value(scan, 1);
+            skip_value(scan, depth + open);
             if (!scan.ok()) return;
         }
     }
@@ -400,11 +412,11 @@ void step_over_value(scanner::basic_cursor<Terminated> &scan, const basic_reader
     if (value.reached != nullptr) {
         scan.position = value.reached;
         if (value.open > 0) {
-            scanner::close_containers(scan, value.open);
+            scanner::close_containers(scan, value.open, value.depth);
             return;
         }
     }
-    if (scan.position == start) scanner::skip_value(scan, 1);
+    if (scan.position == start) scanner::skip_value(scan, value.depth);
 }
 
 /**
@@ -435,6 +447,10 @@ public:
     explicit basic_array_iterator(const basic_reader<Terminated> &container) noexcept
     : container(&container)
     , current(container.source, nullptr) {
+        // Past max_depth a container is not walked into: it has no elements, so no walk of it
+        // reaches its end, and a decode that needed one refuses the document.
+        if (container.depth >= max_depth) return;
+        this->current.depth = static_cast<std::uint8_t>(container.depth + 1);
         if (container.type() != kind::array) return;
         scanner::basic_cursor<Terminated> scan { container.source, container.first + 1 };
         scanner::skip_whitespace(scan);
@@ -513,6 +529,8 @@ public:
     explicit basic_member_iterator(const basic_reader<Terminated> &container) noexcept
     : container(&container)
     , current { {}, basic_reader<Terminated> { container.source, nullptr } } {
+        if (container.depth >= max_depth) return;
+        this->current.value.depth = static_cast<std::uint8_t>(container.depth + 1);
         if (container.type() != kind::object) return;
         scanner::basic_cursor<Terminated> scan { container.source, container.first + 1 };
         scanner::skip_whitespace(scan);
@@ -604,7 +622,11 @@ template<bool Terminated>
 basic_reader<Terminated> basic_reader<Terminated>::operator[](std::size_t index) const noexcept {
     std::size_t position = 0;
     for (const auto &element : this->array()) {
-        if (position++ == index) return basic_reader<Terminated> { element.source, element.first };
+        if (position++ == index) {
+            basic_reader<Terminated> found { element.source, element.first };
+            found.depth = element.depth;
+            return found;
+        }
     }
     return {};
 }
@@ -612,7 +634,11 @@ basic_reader<Terminated> basic_reader<Terminated>::operator[](std::size_t index)
 template<bool Terminated>
 basic_reader<Terminated> basic_reader<Terminated>::operator[](std::string_view key) const noexcept {
     for (const auto &entry : this->items()) {
-        if (entry.key_is(key)) return basic_reader<Terminated> { entry.value.source, entry.value.first };
+        if (entry.key_is(key)) {
+            basic_reader<Terminated> found { entry.value.source, entry.value.first };
+            found.depth = entry.value.depth;
+            return found;
+        }
     }
     return {};
 }
