@@ -486,7 +486,10 @@ public:
     /** The elements; empty when this holds no array at all. */
     [[nodiscard]] std::span<const value> as_array() const noexcept {
         if (this->held() != shape::array_block || this->slot.items == nullptr) return {};
-        return { this->slot.items->data(), this->slot.items->size() };
+        // Not braces: from C++26 a span of const elements takes an initializer list, and a value
+        // is made from a pointer and from a count alike, so `{ data, size }` would be a span of
+        // two temporaries rather than of the elements.
+        return std::span<const value>(this->slot.items->data(), this->slot.items->size());
     }
     /** The members; empty when this holds no object at all. */
     [[nodiscard]] std::span<const member> as_object() const noexcept;
@@ -775,7 +778,8 @@ inline bool value::erase_member(std::string_view name) {
 inline std::span<const member> value::as_object() const noexcept {
     if (this->held() != shape::object_block || this->slot.members == nullptr) return {};
     const auto *first = static_cast<const detail::run<member> *>(this->slot.members)->data();
-    return { first, this->slot.members->size() };
+    // Not braces, for the reason as_array() gives.
+    return std::span<const member>(first, this->slot.members->size());
 }
 
 inline std::span<member> value::as_writable_object() noexcept {
