@@ -82,6 +82,12 @@ public:
     : element(element)
     , source(source)
     , payload(payload) {}
+    /** A handle on a value `depth` deep in the document, for a reader that walks it by itself. */
+    constexpr reader(marker element, std::span<const std::byte> source, const std::byte *payload, int depth) noexcept
+    : element(element)
+    , depth(static_cast<std::uint8_t>(depth))
+    , source(source)
+    , payload(payload) {}
     reader(const reader &) = delete;
     reader &operator=(const reader &) = delete;
     reader(reader &&) = default;

@@ -109,6 +109,11 @@ target_include_directories(serpent_headers INTERFACE
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(serpent_headers INTERFACE unaligned::unaligned)
 
+# How deep a document may nest; see serpent/limits.hpp. On the headers rather than on serpent, so
+# that serpent::plain and anything built from the headers alone agree with it.
+set(SERPENT_MAX_DEPTH 32 CACHE STRING "How deep any reader or writer goes, from 1 to 32")
+target_compile_definitions(serpent_headers INTERFACE SERPENT_MAX_DEPTH=${SERPENT_MAX_DEPTH})
+
 # The library as this build's options configure it.
 add_library(serpent INTERFACE)
 add_library(serpent::serpent ALIAS serpent)
