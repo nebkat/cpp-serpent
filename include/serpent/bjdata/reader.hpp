@@ -592,6 +592,10 @@ public:
         if (info.structured()) {
             this->layout = std::make_unique<soa::table>();
             if (!this->layout->place(container.source, info, container.element == marker::object_begin)) this->layout.reset();
+            // Records are stepped by index, not walked, so a record refused for depth would be
+            // passed over as an empty one: the table is refused whole instead, as skipping it is.
+            else if (this->layout->size() > 0 && container.depth + 2 + static_cast<int>(this->layout->fields().deepest) > max_depth)
+                this->layout.reset();
             this->exhausted = this->layout == nullptr;
             if (!this->exhausted) this->normalise();
             return;

@@ -137,6 +137,51 @@ void walks() {
     check(at->nesting() == max_depth, "and says how deep it is");
 }
 
+// `inner` wrapped in arrays so that it stands `depth` deep.
+std::vector<std::byte> bjdata_wrapped(int depth, const std::string &inner) {
+    return bytes_of(std::string(depth, '[') + inner + std::string(depth, ']'));
+}
+
+/** The value `depth` arrays down from the root of a tree. */
+const value *innermost(const value &root, int depth) {
+    const value *at = &root;
+    for (int level = 0; level < depth; ++level) {
+        if (at->as_array().size() != 1) return nullptr;
+        at = &at->as_array()[0];
+    }
+    return at;
+}
+
+void markerless_elements() {
+    // The elements of a typed container and the fields of a table have no markers of their own,
+    // so nothing steps over one of them to find how deep it is; the container is held to the
+    // limit for them. Read one level too deep, they were once left out and the rest kept.
+    const std::string typed { "[$i#U\x02\x01\x02", 8 };
+    const auto shallow = bjdata::decode<value>(bjdata_wrapped(max_depth - 1, typed));
+    const value *found = shallow ? innermost(*shallow, max_depth - 1) : nullptr;
+    check(found != nullptr && found->size() == 2 && found->as_array()[1].as<int>() == 2, "a typed array's elements to the limit read");
+    check(!bjdata::decode<value>(bjdata_wrapped(max_depth, typed)).has_value(), "one past it is refused, not read as empty");
+    check(bjdata::try_decode<value>(bjdata_wrapped(max_depth, typed)).error().code() == errc::depth_exceeded, "as too deep");
+    check(!bjdata::validate(bjdata_wrapped(max_depth, typed)), "and validate agrees");
+    check(bjdata::decode<value>(bjdata_wrapped(max_depth, std::string("[$i#U\x00", 6))).has_value(), "an empty one holds nothing too deep");
+
+    const std::string bytes { "[$U#U\x02\x01\x02", 8 };
+    check(bjdata::decode<value>(bjdata_wrapped(max_depth - 1, bytes)).has_value(), "bytes to the limit read");
+    check(!bjdata::decode<value>(bjdata_wrapped(max_depth, bytes)).has_value(), "and past it are refused, as numbers would be");
+
+    const std::string object { "{$i#U\x01U\x01" "a\x05", 10 };
+    check(bjdata::decode<value>(bjdata_wrapped(max_depth - 1, object)).has_value(), "a typed object to the limit reads");
+    check(!bjdata::decode<value>(bjdata_wrapped(max_depth, object)).has_value(), "and past it is refused");
+
+    // A table's records are a level below it and their fields one more.
+    const std::string table { "[${U\x01" "xU}#U\x01\x07", 12 };
+    const auto rows = bjdata::decode<value>(bjdata_wrapped(max_depth - 2, table));
+    const value *records = rows ? innermost(*rows, max_depth - 2) : nullptr;
+    check(records != nullptr && records->size() == 1 && records->as_array()[0]["x"].as<int>() == 7, "a table's fields to the limit read");
+    check(!bjdata::decode<value>(bjdata_wrapped(max_depth - 1, table)).has_value(), "one past it is refused, not read as empty");
+    check(!bjdata::validate(bjdata_wrapped(max_depth - 1, table)), "and validate agrees");
+}
+
 void counts() {
     // A count the rest of the buffer cannot hold is refused at the count, before anything is
     // reserved for it: 2^31 - 1 elements in seven bytes.
@@ -163,6 +208,7 @@ int main() {
     reflected_types();
 #endif
     walks();
+    markerless_elements();
     counts();
     return report("nesting");
 }

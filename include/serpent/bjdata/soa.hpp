@@ -22,6 +22,7 @@
 #include <serpent/bjdata/marker.hpp>
 #include <serpent/error.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -66,6 +67,7 @@ struct schema {
     std::vector<field> fields;           ///< every field, a record's or an array's children right after it
     std::uint32_t record_bytes = 0;      ///< payload bytes per record
     std::uint32_t top_level = 0;         ///< fields directly in the record
+    std::uint32_t deepest = 0;           ///< how far below the record's own fields its deepest field is
 
     [[nodiscard]] std::uint32_t count() const noexcept { return static_cast<std::uint32_t>(this->fields.size()); }
     [[nodiscard]] const field *begin() const noexcept { return this->fields.data(); }
@@ -133,6 +135,7 @@ inline std::uint32_t parse_type(cursor &source, schema &into, std::uint32_t inde
     if (!source.need(1)) return 0;
     const auto kind = source.peek_marker();
     source.advance(1);
+    into.deepest = std::max(into.deepest, static_cast<std::uint32_t>(depth));
 
     const auto done = [&](std::uint32_t width) {
         auto &field = into.fields[index];
@@ -469,12 +472,18 @@ inline void skip_schema(cursor &source) noexcept {
     std::ignore = soa::parse(source);
 }
 
-inline void skip_structured(cursor &source, const container_prefix &info) noexcept {
+inline void skip_structured(cursor &source, const container_prefix &info, int depth) noexcept {
     cursor at_schema = source;
     at_schema.position = info.table + 1;
     const auto layout = soa::parse(at_schema);
     if (!at_schema.ok()) {
         source.fail(at_schema.failure, at_schema.origin + at_schema.failure_offset);
+        return;
+    }
+    // A record is one level below the table and its fields another, so a table of any records
+    // is only as shallow as its deepest field; past max_depth a reader would not walk to it.
+    if (info.count > 0 && depth + 2 + static_cast<std::int64_t>(layout.deepest) > max_depth) {
+        source.fail(errc::depth_exceeded);
         return;
     }
     soa::skip_payload(source, layout, info.count);

@@ -390,8 +390,11 @@ template<typename Result>
 
 void skip_value(cursor &source, marker kind, int depth) noexcept;
 
-/** Steps over a table's records and the tables after them; defined with the schema reader. */
-void skip_structured(cursor &source, const container_prefix &info) noexcept;
+/**
+ * Steps over a table's records and the tables after them, the table being `depth` deep; defined
+ * with the schema reader.
+ */
+void skip_structured(cursor &source, const container_prefix &info, int depth) noexcept;
 
 inline void skip_container(cursor &source, bool object, int depth) noexcept {
     const auto info = parse_header(source, object);
@@ -443,7 +446,15 @@ inline void skip_container(cursor &source, bool object, int depth) noexcept {
     }
 
     if (info.structured()) {
-        skip_structured(source, info);
+        skip_structured(source, info, depth);
+        return;
+    }
+
+    // The elements of a typed container have no markers, so no step over one of them is where
+    // its depth would be checked; checked here instead, as an untyped element's is, so that a
+    // container whose elements a reader would not walk into is not passed over as if it had none.
+    if (info.typed() && info.count > 0 && depth >= max_depth) {
+        source.fail(errc::depth_exceeded);
         return;
     }
 
