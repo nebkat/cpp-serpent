@@ -20,6 +20,11 @@ jobs:
             os: windows-2025
             msvc_arch: x64
             build_type: RelWithDebInfo
+          # C++26 as well as the C++23 the library asks for: libc++ gives a span of const
+          # elements an initializer-list constructor there, which changes what braces build.
+          - name: macOS arm64 Apple Clang C++26
+            os: macos-15
+            cxx_standard: 26
     steps:
       - uses: actions/checkout@v7
 
@@ -34,6 +39,7 @@ jobs:
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Debug' }}
           -DSERPENT_TEST_SANITIZE=${{ matrix.sanitize || 'ON' }}
+          ${{ matrix.cxx_standard && format('-DCMAKE_CXX_STANDARD={0}', matrix.cxx_standard) || '' }}
 
       - name: Build
         run: cmake --build build
