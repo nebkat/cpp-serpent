@@ -428,7 +428,13 @@ inline void place_field(reader &handle, const soa::table &source, const soa::fie
         .record = handle.table.record };
     switch (field.kind) {
     case field_kind::scalar: handle.element = field.type; break;
-    case field_kind::boolean: handle.element = to_marker(*at); break;
+    case field_kind::boolean: {
+        // The byte is T or F. Anything else would be taken for a marker with this byte as its
+        // own payload, and read as nonsense rather than refused.
+        const auto truth = to_marker(*at);
+        handle.element = truth == marker::boolean_true || truth == marker::boolean_false ? truth : marker::invalid;
+        break;
+    }
     case field_kind::null: handle.element = marker::null; break;
     case field_kind::text:
         handle.element = field.type;
