@@ -1272,7 +1272,18 @@ struct serializer<value, void> {
         // source, as read_reflected is; one that offers nothing takes the walk below.
         if constexpr (requires { read_tree(source, item); }) {
             return read_tree(source, item);
+        } else {
+            return walk(source, item);
         }
+    }
+
+    /**
+     * The tree from asking a handle what each value is and then what it holds, any source at
+     * all. What a format's own builder hands over to for what it does not build itself, such as
+     * a BJData table, which is read a record at a time.
+     */
+    template<typename Source>
+    static bool walk(const Source &source, value &item) {
         switch (source.type()) {
         case kind::invalid: return false;
         case kind::null: item = value {}; return true;

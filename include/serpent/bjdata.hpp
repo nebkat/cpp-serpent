@@ -6,6 +6,7 @@
 #include <serpent/bjdata/marker.hpp>
 #include <serpent/bjdata/reflect.hpp>
 #include <serpent/bjdata/reader.hpp>
+#include <serpent/bjdata/tree.hpp>
 #include <serpent/bjdata/writer.hpp>
 #include <serpent/error.hpp>
 #include <serpent/kind.hpp>

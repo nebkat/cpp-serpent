@@ -190,8 +190,10 @@ struct [[= serpent::serializable {}]] failure {
 Binary stays binary in BJData, which has a type for it, and travels as an array of numbers in
 JSON, which does not — the same rule as `std::vector<std::byte>` anywhere else.
 
-From JSON text a tree is built in one pass, the way a reader generated for a type reads: each
-byte looked at once, each value converted straight into the place the tree keeps it. Where a
+From JSON text and from BJData a tree is built in one pass, the way a reader generated for a type
+reads: each byte looked at once, each value converted straight into the place the tree keeps it.
+From BJData it takes the same stack however deep the document goes, since the containers still
+open are kept in a stack of the builder's own rather than in calls. Where a
 document is only to be looked up in, not held or changed, reading the bytes in place is still
 cheaper again, and a [structural index](reading.md#an-index-for-a-document-read-more-than-once)
 answers the same questions over a document read more than once.

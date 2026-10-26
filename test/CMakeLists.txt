@@ -26,6 +26,7 @@ set(TESTS
     bjdata_container
     bjdata_ndarray
     bjdata_notation
+    bjdata_tree
     bjdata_writer
     json_reader
     json_real_read
