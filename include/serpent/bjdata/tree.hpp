@@ -11,14 +11,15 @@
 // checks in the same order, failing where that fails - so a document builds here if and only
 // if it would have been read and found whole.
 //
-// A table is the exception: its records are read through a handle placed in the table, as the
-// generic walk reads them, since their shape is the schema's and not the bytes'. A schema is
-// bounded by max_depth already, so that recursion is too.
+// A table's records have their shape from its schema rather than from bytes of their own, so
+// they are read from where the schema places each field, as a handle placed in the table reads
+// them. That recurses through the schema, which is bounded by max_depth and soa::max_fields.
 //
 // Found by serializer<value> through lookup on the source, as read_reflected is. A template on
 // the tree so that this header need not include value.hpp, nor value.hpp this one.
 
 #include <serpent/bjdata/detail.hpp>
+#include <serpent/bjdata/direct.hpp>
 #include <serpent/bjdata/marker.hpp>
 #include <serpent/bjdata/reader.hpp>
 #include <serpent/error.hpp>
@@ -138,6 +139,13 @@ private:
         if (!this->scan.need(width)) return false;
         const std::byte *at = this->scan.position;
         this->scan.advance(width);
+        if (scalar_at(kind, at, held)) return true;
+        this->scan.fail(errc::unexpected_marker, at - 1);
+        return false;
+    }
+
+    /** A fixed-width value whose payload, all there, is at `at`; false for a marker that is not one. */
+    static bool scalar_at(marker kind, const std::byte *at, Tree &held) {
         switch (kind) {
         case marker::null: held = Tree {}; return true;
         case marker::boolean_true: held = Tree { true }; return true;
@@ -161,7 +169,7 @@ private:
         case marker::float32: held = Tree { static_cast<double>(detail::load<float>(at)) }; return true;
         case marker::float64: held = Tree { detail::load<double>(at) }; return true;
         case marker::character: held = Tree { std::string_view { reinterpret_cast<const char *>(at), 1 } }; return true;
-        default: this->scan.fail(errc::unexpected_marker, at - 1); return false;
+        default: return false;
         }
     }
 
@@ -231,7 +239,12 @@ private:
         return true;
     }
 
-    /** A table, read a record at a time through a handle on it, once the skip has found it whole. */
+    /**
+     * A table, once the skip has found it whole: its records from where the schema places each
+     * field, as a handle in the table would read them. The schema nests no deeper than
+     * max_depth, and its fields number at most soa::max_fields, so the recursion through it
+     * is bounded by the schema rather than by the document.
+     */
     bool table(marker kind, const std::byte *payload, int depth, Tree &held) {
         detail::cursor probe { this->buffer, payload };
         detail::skip_value(probe, kind, depth);
@@ -239,13 +252,87 @@ private:
             this->scan.fail(probe.failure, probe.origin + probe.failure_offset);
             return false;
         }
-        const reader handle { kind, this->buffer, payload, depth };
-        if (!serializer<Tree>::walk(handle, held)) {
-            this->scan.fail(errc::type_mismatch, payload - 1);
+        const bool by_column = kind == marker::object_begin;
+        detail::cursor header { this->buffer, payload };
+        const auto prefix = detail::parse_header_as<detail::container_prefix>(header, by_column);
+        soa::table layout;
+        if (!header.ok() || !layout.place(this->buffer, prefix, by_column)) {
+            this->scan.fail(errc::invalid_dimensions, payload - 1);
             return false;
         }
+
+        // Records are gathered rather than reserved for: a table whose records take no bytes
+        // can claim any number of them, and a reservation would be made before any is read.
+        const std::size_t start = this->gathered_elements.size();
+        const auto &schema = layout.fields();
+        for (std::uint64_t record = 0; record < layout.size(); ++record) {
+            const std::size_t members = this->gathered_members.size();
+            for (std::uint32_t index = 0; index < schema.count(); index = schema.fields[index].next) {
+                const auto &field = schema.fields[index];
+                Tree element;
+                if (!this->table_field(layout, field, layout.at(field, record), element)) return false;
+                this->gathered_members.emplace_back(Tree { field.name }, std::move(element));
+            }
+            this->gathered_elements.push_back(this->members_from(members));
+        }
+        held = this->elements_from(start);
         this->scan.position = probe.position;
         return true;
+    }
+
+    /** One field of a record, whose bytes begin at `at`. */
+    bool table_field(const soa::table &layout, const soa::field &field, const std::byte *at, Tree &held) {
+        using soa::field_kind;
+        const auto refuse = [&] {
+            this->scan.fail(errc::type_mismatch, at);
+            return false;
+        };
+        switch (field.kind) {
+        // The payload is placed whole, so a field's bytes are all there.
+        case field_kind::scalar: return scalar_at(field.type, at, held) || refuse();
+        case field_kind::boolean: {
+            const auto truth = to_marker(*at);
+            if (truth != marker::boolean_true && truth != marker::boolean_false) return refuse();
+            held = Tree { truth == marker::boolean_true };
+            return true;
+        }
+        case field_kind::null: held = Tree {}; return true;
+        case field_kind::text: held = Tree { soa::table::fixed_text(field, at) }; return true;
+        case field_kind::dictionary:
+        case field_kind::offsets: {
+            std::uint64_t index = 0;
+            if (!direct::load_integer(field.type, at, field.width, index)) return refuse();
+            const auto entry = field.kind == field_kind::dictionary ? layout.dictionary_entry(field, index) : layout.offset_entry(field, index);
+            if (!entry) return refuse();
+            held = Tree { *entry };
+            return true;
+        }
+        case field_kind::record: {
+            const std::size_t start = this->gathered_members.size();
+            const auto &schema = layout.fields();
+            for (std::uint32_t index = field.children; index < field.next; index = schema.fields[index].next) {
+                const auto &child = schema.fields[index];
+                Tree element;
+                if (!this->table_field(layout, child, at + child.offset, element)) return false;
+                this->gathered_members.emplace_back(Tree { child.name }, std::move(element));
+            }
+            held = this->members_from(start);
+            return true;
+        }
+        case field_kind::array: {
+            const std::size_t start = this->gathered_elements.size();
+            const auto &schema = layout.fields();
+            for (std::uint32_t index = field.children; index < field.next; index = schema.fields[index].next) {
+                const auto &child = schema.fields[index];
+                Tree element;
+                if (!this->table_field(layout, child, at + child.offset, element)) return false;
+                this->gathered_elements.push_back(std::move(element));
+            }
+            held = this->elements_from(start);
+            return true;
+        }
+        }
+        return refuse();
     }
 
     void skip_noops() noexcept {
@@ -314,15 +401,19 @@ private:
         return held;
     }
 
+    /** The elements gathered since `start`, moved into a run of their own. */
+    Tree elements_from(std::size_t start) {
+        const auto gathered = std::span { this->gathered_elements }.subspan(start);
+        auto *block = array_type::reserved(static_cast<std::uint32_t>(gathered.size()));
+        array_type::place_all(block, gathered);
+        this->gathered_elements.resize(start);
+        return Tree { block };
+    }
+
     /** Closes the container on top, answering it. */
     Tree close() {
         const frame &top = this->frames[--this->open];
-        if (top.object) return this->members_from(top.start);
-        const auto gathered = std::span { this->gathered_elements }.subspan(top.start);
-        auto *block = array_type::reserved(static_cast<std::uint32_t>(gathered.size()));
-        array_type::place_all(block, gathered);
-        this->gathered_elements.resize(top.start);
-        return Tree { block };
+        return top.object ? this->members_from(top.start) : this->elements_from(top.start);
     }
 };
 

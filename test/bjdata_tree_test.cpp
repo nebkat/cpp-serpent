@@ -153,7 +153,8 @@ std::vector<std::byte> read_file(const std::filesystem::path &path) {
 
 /**
  * Each document whole, cut short at every length, and with every byte in turn changed - every
- * one of a small document, and spread over a large one, whose tables are slow to read.
+ * one of a small document, and spread over a large one, whose tables the reference walk is slow
+ * to read.
  */
 void mutated(const std::vector<std::byte> &document, const std::string &name) {
     const std::size_t stride = document.size() <= 256 ? 1 : document.size() / 16 + 1;
@@ -288,12 +289,166 @@ class generator {
         }
     }
 
+    /** A field of a table's schema, and what each record holds in it. */
+    struct field {
+        char kind = 'Z';   ///< a strong type's marker, T, Z, S, D for a dictionary, O for offset text, { or [
+        int width = 0;     ///< the bytes a record spends on it, children included
+        char index = 'U';  ///< an offset field's index type
+        std::string name;
+        std::vector<field> children;
+        int entries = 0;
+        std::vector<std::string> texts; ///< an offset field's text for each record
+    };
+
+    static int width_of(char type) {
+        return type == 'u' || type == 'I' || type == 'h' ? 2 : type == 'm' || type == 'l' || type == 'd' ? 4
+                : type == 'M' || type == 'L' || type == 'D' ? 8 : 1;
+    }
+
+    field table_field(int depth, std::size_t records, std::string &schema) {
+        static constexpr char numbers[] = { 'U', 'i', 'u', 'I', 'm', 'l', 'M', 'L', 'h', 'd', 'D', 'C', 'B' };
+        field made;
+        const int pick = this->below(depth < 2 ? 9 : 7);
+        switch (pick) {
+        case 0: case 1:
+            made.kind = numbers[this->below(sizeof numbers)];
+            made.width = width_of(made.kind);
+            schema += made.kind;
+            break;
+        case 2: made.kind = 'T'; made.width = 1; schema += 'T'; break;
+        case 3: made.kind = 'Z'; schema += 'Z'; break;
+        case 4:
+            made.kind = 'S';
+            made.width = this->below(5);
+            schema += 'S';
+            this->out.swap(schema);
+            this->length(static_cast<std::size_t>(made.width));
+            this->out.swap(schema);
+            break;
+        case 5: {
+            made.kind = 'D';
+            made.width = 1;
+            made.entries = this->below(3) + 1;
+            schema += "[$S#";
+            this->out.swap(schema);
+            this->length(static_cast<std::size_t>(made.entries));
+            for (int entry = 0; entry < made.entries; ++entry) {
+                const std::string text = "e" + std::to_string(this->below(100));
+                this->length(text.size());
+                this->out += text;
+            }
+            this->out.swap(schema);
+            break;
+        }
+        case 6:
+            made.kind = 'O';
+            made.index = this->below(2) == 0 ? 'U' : 'I';
+            made.width = width_of(made.index);
+            schema += "[$";
+            schema += made.index;
+            schema += ']';
+            for (std::size_t record = 0; record < records; ++record) made.texts.push_back(std::string(static_cast<std::size_t>(this->below(4)), 'o'));
+            break;
+        default: {
+            made.kind = pick == 7 ? '{' : '[';
+            schema += made.kind;
+            const int count = this->below(3) + 1;
+            for (int child = 0; child < count; ++child) {
+                std::string name;
+                if (made.kind == '{') {
+                    static constexpr const char *names[] = { "a", "b", "c" };
+                    name = names[this->below(3)];
+                    this->out.swap(schema);
+                    this->length(name.size());
+                    this->out += name;
+                    this->out.swap(schema);
+                }
+                auto &added = made.children.emplace_back(this->table_field(depth + 1, records, schema));
+                added.name = name;
+                made.width += added.width;
+            }
+            schema += made.kind == '{' ? '}' : ']';
+            break;
+        }
+        }
+        return made;
+    }
+
+    /** One record's bytes for a field. */
+    void table_value(const field &of, std::size_t record) {
+        switch (of.kind) {
+        case 'T': this->out += this->below(2) == 0 ? 'T' : 'F'; break;
+        case 'Z': break;
+        case 'S': {
+            const int used = of.width == 0 ? 0 : this->below(of.width + 1);
+            for (int index = 0; index < of.width; ++index) this->out += index < used ? static_cast<char>('a' + this->below(26)) : '\0';
+            break;
+        }
+        case 'D': this->raw(static_cast<std::uint64_t>(this->below(of.entries)), 1); break;
+        case 'O': this->raw(record, of.width); break;
+        case '{':
+        case '[':
+            for (const auto &child : of.children) this->table_value(child, record);
+            break;
+        default: this->raw(this->random(), of.width); break;
+        }
+    }
+
+    static void offset_fields(const std::vector<field> &fields, std::vector<const field *> &into) {
+        for (const auto &one : fields) {
+            if (one.kind == 'O') into.push_back(&one);
+            offset_fields(one.children, into);
+        }
+    }
+
+    void table() {
+        const bool by_column = this->below(2) == 0;
+        const auto records = static_cast<std::size_t>(this->below(4));
+        std::string schema;
+        std::vector<field> fields;
+        const int count = this->below(4) + 1;
+        for (int index = 0; index < count; ++index) {
+            static constexpr const char *names[] = { "x", "y", "id", "x" };
+            const std::string name = names[this->below(4)];
+            this->out.swap(schema);
+            this->length(name.size());
+            this->out += name;
+            this->out.swap(schema);
+            fields.push_back(this->table_field(0, records, schema));
+            fields.back().name = name;
+        }
+        this->out += by_column ? "{${" : "[${";
+        this->out += schema;
+        this->out += "}#";
+        this->length(records);
+        if (by_column) {
+            for (const auto &one : fields)
+                for (std::size_t record = 0; record < records; ++record) this->table_value(one, record);
+        } else {
+            for (std::size_t record = 0; record < records; ++record)
+                for (const auto &one : fields) this->table_value(one, record);
+        }
+        // Each offset field's table and text after the payload, in schema order.
+        std::vector<const field *> offsets;
+        offset_fields(fields, offsets);
+        for (const auto *one : offsets) {
+            std::uint64_t at = 0;
+            this->raw(0, one->width);
+            for (const auto &text : one->texts) {
+                at += text.size();
+                this->raw(at, one->width);
+            }
+            for (const auto &text : one->texts) this->out += text;
+        }
+    }
+
 public:
     explicit generator(std::uint64_t seed) : random(seed) {}
 
     void any(int depth) {
-        const int pick = this->below(10);
-        if (depth >= 6 || pick < 4) this->scalar();
+        const int pick = this->below(12);
+        if (pick >= 10) this->table();
+        else if (depth >= 6 || pick < 4) this->scalar();
         else if (pick < 6) this->typed(this->below(3) == 0);
         else this->container(depth);
     }
