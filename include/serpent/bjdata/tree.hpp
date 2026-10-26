@@ -5,11 +5,11 @@
 // The generic walk that serializer<value> makes over any source reads a value through a handle
 // and its containers through iterators, each level of the document a call deeper and an
 // iterator and a handle bigger - a few hundred bytes of stack a level. This one moves a single
-// cursor through the bytes and keeps the containers still open in a fixed stack of its own, so
-// the stack it takes is the same however deep the document goes, and every byte is looked at
-// once. It steps through a document exactly as the container skip in detail.hpp does - the same
-// checks in the same order, failing where that fails - so a document builds here if and only
-// if it would have been read and found whole.
+// cursor through the bytes and keeps the containers still open in a stack of its own, on the
+// heap, so the stack it takes is the same however deep the document goes, and every byte is
+// looked at once. It steps through a document exactly as the container skip in detail.hpp does -
+// the same checks in the same order, failing where that fails - so a document builds here if and
+// only if it would have been read and found whole.
 //
 // A table's records have their shape from its schema rather than from bytes of their own, so
 // they are read from where the schema places each field, as a handle placed in the table reads
@@ -26,7 +26,6 @@
 #include <serpent/fwd.hpp>
 #include <serpent/limits.hpp>
 
-#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -61,10 +60,8 @@ class tree_builder {
     detail::cursor scan;
     int base = 0; ///< how deep the value being built is, the root of the document being 0
 
-    // One frame a level. A value is refused past max_depth before anything is opened for it, so
-    // no more can be open than there are levels from where the build started down to the limit.
-    std::array<frame, max_depth + 1> frames {};
-    int open = 0;
+    // One frame a level, for the containers open from the outermost down.
+    std::vector<frame> frames;
 
     // The members and elements of the containers open, as the JSON builder gathers them: used as
     // a stack, each container's after its parent's, cut back when it closes, and moved into a
@@ -89,20 +86,20 @@ public:
         if (!this->begin(kind, this->base, held, complete)) return false;
         while (true) {
             if (complete) {
-                if (this->open == 0) {
+                if (this->frames.empty()) {
                     into = std::move(held);
                     return true;
                 }
                 this->deliver(std::move(held));
             }
-            const marker child = this->next(this->frames[this->open - 1]);
+            const marker child = this->next(this->frames.back());
             if (!this->scan.ok()) return false;
             if (child == marker::invalid) {
                 held = this->close();
                 complete = true;
                 continue;
             }
-            if (!this->begin(child, this->base + this->open, held, complete)) return false;
+            if (!this->begin(child, this->base + static_cast<int>(this->frames.size()), held, complete)) return false;
         }
     }
 
@@ -190,11 +187,10 @@ private:
         if (info.typed() && !object) return this->typed_elements(info, held);
         if (info.typed()) return this->typed_members(info, held);
 
-        frame &opened = this->frames[this->open++];
-        opened.remaining = info.count;
-        opened.unbounded = info.unbounded;
-        opened.object = object;
-        opened.start = object ? this->gathered_members.size() : this->gathered_elements.size();
+        this->frames.push_back({ .remaining = info.count,
+            .start = object ? this->gathered_members.size() : this->gathered_elements.size(),
+            .object = object,
+            .unbounded = info.unbounded });
         complete = false;
         return true;
     }
@@ -386,7 +382,7 @@ private:
 
     /** Puts a completed child where the container on top keeps it. */
     void deliver(Tree held) {
-        if (this->frames[this->open - 1].object) this->gathered_members.back().second = std::move(held);
+        if (this->frames.back().object) this->gathered_members.back().second = std::move(held);
         else this->gathered_elements.push_back(std::move(held));
     }
 
@@ -412,7 +408,8 @@ private:
 
     /** Closes the container on top, answering it. */
     Tree close() {
-        const frame &top = this->frames[--this->open];
+        const frame top = this->frames.back();
+        this->frames.pop_back();
         return top.object ? this->members_from(top.start) : this->elements_from(top.start);
     }
 };
