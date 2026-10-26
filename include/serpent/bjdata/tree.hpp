@@ -187,6 +187,8 @@ private:
         if (info.typed() && !object) return this->typed_elements(info, held);
         if (info.typed()) return this->typed_members(info, held);
 
+        // Room for a few levels at the first, so a document as deep as most are allocates once.
+        if (this->frames.capacity() == 0) this->frames.reserve(8);
         this->frames.push_back({ .remaining = info.count,
             .start = object ? this->gathered_members.size() : this->gathered_elements.size(),
             .object = object,
