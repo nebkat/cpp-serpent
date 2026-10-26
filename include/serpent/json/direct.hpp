@@ -175,9 +175,6 @@ template<bool Terminated, std::floating_point T>
     if (!scan.ok()) return false;
 
     double value = 0;
-    // fast_float where it is bundled: then this is only the slow way to fail, and the standard
-    // library a program is built against need not have from_chars for a double at all - which
-    // the libc++ of the Xcode on GitHub's macOS 15 runners does not.
 #if SERPENT_USE_FAST_FLOAT
     const auto converted = serpent::external::fast_float::from_chars(text.data(), text.data() + text.size(), value);
 #else
