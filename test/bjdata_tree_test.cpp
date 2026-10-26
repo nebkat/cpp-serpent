@@ -291,7 +291,7 @@ class generator {
 
     /** A field of a table's schema, and what each record holds in it. */
     struct field {
-        char kind = 'Z';   ///< a strong type's marker, T, Z, S, D for a dictionary, O for offset text, { or [
+        char kind = 'Z';   ///< a strong type's marker, T, Z, S, # for a dictionary, O for offset text, { or [
         int width = 0;     ///< the bytes a record spends on it, children included
         char index = 'U';  ///< an offset field's index type
         std::string name;
@@ -326,7 +326,7 @@ class generator {
             this->out.swap(schema);
             break;
         case 5: {
-            made.kind = 'D';
+            made.kind = '#';
             made.width = 1;
             made.entries = this->below(3) + 1;
             schema += "[$S#";
@@ -384,7 +384,7 @@ class generator {
             for (int index = 0; index < of.width; ++index) this->out += index < used ? static_cast<char>('a' + this->below(26)) : '\0';
             break;
         }
-        case 'D': this->raw(static_cast<std::uint64_t>(this->below(of.entries)), 1); break;
+        case '#': this->raw(static_cast<std::uint64_t>(this->below(of.entries)), 1); break;
         case 'O': this->raw(record, of.width); break;
         case '{':
         case '[':
