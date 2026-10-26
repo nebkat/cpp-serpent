@@ -167,7 +167,7 @@ void containers() {
             "5b5a5d", [](auto &w) { w.value(std::vector<std::optional<int>> { std::nullopt }); },
             "an empty optional writes null");
     produces(
-            "5b55075d", [](auto &w) { w.value(std::vector<std::optional<int>> { 7 }); },
+            "5b55075d", [](auto &w) { w.value(std::vector<std::optional<int>> { std::optional<int> { 7 } }); },
             "an engaged optional writes its value");
 }
 
