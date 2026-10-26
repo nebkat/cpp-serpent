@@ -16,6 +16,10 @@
 
 #include <serpent/json/reader.hpp>
 
+#if SERPENT_USE_FAST_FLOAT
+#include <serpent/external/fast_float/fast_float.h>
+#endif
+
 #include <charconv>
 #include <cstring>
 #include <cstdint>
@@ -270,7 +274,12 @@ public:
         const auto text = this->index->buffer();
         const char *const begin = text.data() + this->index->at(this->position).first;
         double value = 0;
+        // As the scanning reader's slow path converts: with fast_float where it is bundled.
+#if SERPENT_USE_FAST_FLOAT
+        const auto parsed = serpent::external::fast_float::from_chars(begin, text.data() + text.size(), value);
+#else
         const auto parsed = std::from_chars(begin, text.data() + text.size(), value);
+#endif
         if (parsed.ec != std::errc {}) return std::nullopt;
         return static_cast<T>(value);
     }
