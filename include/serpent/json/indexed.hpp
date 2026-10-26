@@ -274,7 +274,6 @@ public:
         const auto text = this->index->buffer();
         const char *const begin = text.data() + this->index->at(this->position).first;
         double value = 0;
-        // As the scanning reader's slow path converts: with fast_float where it is bundled.
 #if SERPENT_USE_FAST_FLOAT
         const auto parsed = serpent::external::fast_float::from_chars(begin, text.data() + text.size(), value);
 #else

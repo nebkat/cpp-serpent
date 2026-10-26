@@ -68,6 +68,8 @@
  * again to convert it; fast_float has a mode that accepts exactly JSON, and does both in one
  * walk. It brings 28 KB of code and tables, built for arm64 - much of which a standard library
  * whose own from_chars is built on fast_float, as libstdc++'s is, has a copy of already.
+ * Turned off, it needs a standard library with std::from_chars for floating point, which not
+ * every one has.
  */
 #ifndef SERPENT_USE_FAST_FLOAT
 #define SERPENT_USE_FAST_FLOAT 1
