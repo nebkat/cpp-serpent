@@ -1,4 +1,4 @@
-// Vendored from https://github.com/vitaut/zmij at a24bf7fce0f4fdee60c0153529b74bb537552b7b by tools/vendor-zmij.sh.
+// Vendored from https://github.com/vitaut/zmij at 5b87a80c60a4875a317a22dd3f6af410a39267c0 by tools/vendor-zmij.sh.
 // Do not edit: change the script and run it again. What differs from upstream, and why, is
 // described there. The licence is beside this file.
 //
@@ -32,12 +32,49 @@
 
 #ifdef _MSC_VER
 #  include <intrin.h>  // __lzcnt64/_umul128/__umulh
+#  define SERPENT_ZMIJ_MSC_VER _MSC_VER
+#else
+#  define SERPENT_ZMIJ_MSC_VER 0
+#endif
+
+#if defined(__has_builtin) && !defined(SERPENT_ZMIJ_NO_BUILTINS)
+#  define SERPENT_ZMIJ_HAS_BUILTIN(x) __has_builtin(x)
+#else
+#  define SERPENT_ZMIJ_HAS_BUILTIN(x) 0
+#endif
+// IBM double-double, the ppc64le default long double, is not IEEE 754, so the
+// long double API is not provided for it.
+#ifdef __LONG_DOUBLE_IBM128__
+#  define SERPENT_ZMIJ_USE_LONG_DOUBLE 0
+#else
+#  define SERPENT_ZMIJ_USE_LONG_DOUBLE 1
+#endif
+#ifdef __has_attribute
+#  define SERPENT_ZMIJ_HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#  define SERPENT_ZMIJ_HAS_ATTRIBUTE(x) 0
+#endif
+#ifdef __has_cpp_attribute
+#  define SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#  define SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(x) 0
 #endif
 
 #ifdef __cpp_lib_is_constant_evaluated
 #  define SERPENT_ZMIJ_CONSTEXPR20 constexpr
 #else
 #  define SERPENT_ZMIJ_CONSTEXPR20
+#endif
+
+#ifdef SERPENT_ZMIJ_USE_IS_CONSTANT_EVALUATED
+// Use the provided definition.
+#elif defined(__cpp_lib_is_constant_evaluated) ||                    \
+    SERPENT_ZMIJ_HAS_BUILTIN(__builtin_is_constant_evaluated) ||             \
+    (defined(_MSC_VER) && _MSC_VER >= 1925 && !defined(__clang__) && \
+     !defined(__CUDACC__) && !defined(SERPENT_ZMIJ_NO_BUILTINS))
+#  define SERPENT_ZMIJ_USE_IS_CONSTANT_EVALUATED 1
+#else
+#  define SERPENT_ZMIJ_USE_IS_CONSTANT_EVALUATED 0
 #endif
 
 // Disabling C++14 relaxed constexpr costs ~2x, so it is opt-in, not detected.
@@ -51,6 +88,80 @@
 #  define SERPENT_ZMIJ_CONSTEXPR
 // A default member initializer makes its class a non-aggregate in C++11.
 #  define SERPENT_ZMIJ_DEFAULT(...)
+#endif
+
+#ifdef __x86_64__
+#  define SERPENT_ZMIJ_X86_64 1
+#else
+#  define SERPENT_ZMIJ_X86_64 0
+#endif
+
+#ifndef SERPENT_ZMIJ_USE_SIMD
+#  define SERPENT_ZMIJ_USE_SIMD 1
+#endif
+
+#ifdef SERPENT_ZMIJ_USE_NEON
+// Use the provided definition.
+#elif defined(__ARM_NEON) || defined(_M_ARM64)
+#  define SERPENT_ZMIJ_USE_NEON SERPENT_ZMIJ_USE_SIMD
+#else
+#  define SERPENT_ZMIJ_USE_NEON 0
+#endif
+
+#ifdef SERPENT_ZMIJ_USE_SSE
+// Use the provided definition.
+#elif defined(__SSE2__)
+#  define SERPENT_ZMIJ_USE_SSE SERPENT_ZMIJ_USE_SIMD
+#elif defined(_M_AMD64) || (defined(_M_IX86_FP) && _M_IX86_FP == 2)
+#  define SERPENT_ZMIJ_USE_SSE SERPENT_ZMIJ_USE_SIMD
+#else
+#  define SERPENT_ZMIJ_USE_SSE 0
+#endif
+
+#ifdef SERPENT_ZMIJ_USE_SSE4_1
+// Use the provided definition.
+static_assert(!SERPENT_ZMIJ_USE_SSE4_1 || SERPENT_ZMIJ_USE_SSE, "SSE4.1 requires SSE");
+#elif defined(__SSE4_1__) || defined(__AVX__)
+// On MSVC there's no way to check for SSE4.1 specifically so check __AVX__.
+#  define SERPENT_ZMIJ_USE_SSE4_1 SERPENT_ZMIJ_USE_SSE
+#else
+#  define SERPENT_ZMIJ_USE_SSE4_1 0
+#endif
+
+#ifdef SERPENT_ZMIJ_OPTIMIZE_SIZE
+// Use the provided definition.
+#elif defined(__OPTIMIZE_SIZE__)
+#  define SERPENT_ZMIJ_OPTIMIZE_SIZE 1
+#else
+#  define SERPENT_ZMIJ_OPTIMIZE_SIZE 0
+#endif
+
+#if SERPENT_ZMIJ_HAS_ATTRIBUTE(always_inline) && !SERPENT_ZMIJ_OPTIMIZE_SIZE
+#  define SERPENT_ZMIJ_INLINE __attribute__((always_inline)) inline
+#elif SERPENT_ZMIJ_MSC_VER
+#  define SERPENT_ZMIJ_INLINE __forceinline
+#else
+#  define SERPENT_ZMIJ_INLINE inline
+#endif
+
+#if SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(likely) && SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(unlikely)
+#  define SERPENT_ZMIJ_LIKELY likely
+#  define SERPENT_ZMIJ_UNLIKELY unlikely
+#else
+#  define SERPENT_ZMIJ_LIKELY
+#  define SERPENT_ZMIJ_UNLIKELY
+#endif
+
+#if SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(maybe_unused)
+#  define SERPENT_ZMIJ_MAYBE_UNUSED maybe_unused
+#else
+#  define SERPENT_ZMIJ_MAYBE_UNUSED
+#endif
+
+#ifdef __GNUC__
+#  define SERPENT_ZMIJ_ASM(x) asm x
+#else
+#  define SERPENT_ZMIJ_ASM(x)
 #endif
 
 namespace serpent::external::zmij {
@@ -84,11 +195,24 @@ enum {
   long_double_buffer_size = 44,
 };
 
+// Minimum buffer capacities for integer write functions. They include space
+// for whole-block stores that may extend past the returned end pointer.
+enum {
+  uint32_buffer_size = 16,
+  int32_buffer_size = 17,
+  uint64_buffer_size = 20,
+  int64_buffer_size = 21,
+  uint128_buffer_size = 48,
+  int128_buffer_size = 49,
+};
+
 namespace detail {
 
 constexpr auto is_constant_evaluated() noexcept -> bool {
 #ifdef __cpp_lib_is_constant_evaluated
   return std::is_constant_evaluated();
+#elif SERPENT_ZMIJ_USE_IS_CONSTANT_EVALUATED
+  return __builtin_is_constant_evaluated();
 #else
   return false;
 #endif
@@ -181,16 +305,14 @@ inline SERPENT_ZMIJ_CONSTEXPR auto umul128(uint64_t x, uint64_t y) noexcept
 #if SERPENT_ZMIJ_USE_INT128
   return uint128_t(x) * y;
 #else
-#  ifdef __cpp_lib_is_constant_evaluated
-  if (!std::is_constant_evaluated()) {
-#    if defined(_M_AMD64)
+#  if SERPENT_ZMIJ_USE_IS_CONSTANT_EVALUATED && defined(_M_AMD64)
+  if (!is_constant_evaluated()) {
     uint64_t hi = 0;
     uint64_t lo = _umul128(x, y, &hi);
     return {hi, lo};
-#    elif defined(_M_ARM64)
-    return {__umulh(x, y), x * y};
-#    endif
   }
+#  elif SERPENT_ZMIJ_USE_IS_CONSTANT_EVALUATED && defined(_M_ARM64)
+  if (!is_constant_evaluated()) return {__umulh(x, y), x * y};
 #  endif
   uint64_t a = x >> 32;
   uint64_t b = uint32_t(x);
@@ -296,7 +418,7 @@ constexpr
 
 // Compressed 128-bit significands of powers of 10.
 template <typename = void> struct pow10_data {
-  static constexpr uint64_t minor[] = {
+  static constexpr uint64_t minor[28] = {
       0x8000000000000000, 0xa000000000000000, 0xc800000000000000,
       0xfa00000000000000, 0x9c40000000000000, 0xc350000000000000,
       0xf424000000000000, 0x9896800000000000, 0xbebc200000000000,
@@ -308,7 +430,7 @@ template <typename = void> struct pow10_data {
       0xd3c21bcecceda100, 0x84595161401484a0, 0xa56fa5b99019a5c8,
       0xcecb8f27f4200f3a,
   };
-  static constexpr uint128 major[] = {
+  static constexpr uint128 major[25] = {
       {0xaddcb9e83c6b1793, 0xdf4abe242a1bbf3e},  // -331 (+1 ULP: see fixups)
       {0xaf8e5410288e1b6f, 0x07ecf0ae5ee44dda},  // -303
       {0xb1442798f49ffb4a, 0x99cd11cfdf41779d},  // -275
@@ -335,7 +457,7 @@ template <typename = void> struct pow10_data {
       {0xd94ad8b1c7380874, 0x18375281ae7822bd},  //  313 (+1 ULP: see fixups)
       {0xdb68c2ca82ed2a05, 0xa67398db9f6820e1},  //  341
   };
-  static constexpr uint32_t fixups[] = {
+  static constexpr uint32_t fixups[21] = {
       0x8d8fc810, 0x06100293, 0x19000000, 0x00100000, 0x00000908, 0x00000000,
       0x04e00300, 0x3807e0b2, 0x3d83d793, 0x0006f5cc, 0x00000000, 0xffff0000,
       0x8076337d, 0x4ff45ba0, 0x09405033, 0x034376d9, 0x09000000, 0x4e100501,
@@ -381,8 +503,7 @@ inline SERPENT_ZMIJ_CONSTEXPR auto compute_pow10(int exp) noexcept -> uint128 {
 // 10^dec_exp puts the decimal point in different bit positions:
 //   3 * 2**59 / 100 = 1.72...e+16  (needs shift = 1 + 1)
 //   3 * 2**60 / 100 = 3.45...e+16  (needs shift = 2 + 1)
-inline SERPENT_ZMIJ_CONSTEXPR auto compute_exp_shift(int bin_exp,
-                                             int dec_exp) noexcept
+inline SERPENT_ZMIJ_CONSTEXPR auto compute_exp_shift(int bin_exp, int dec_exp) noexcept
     -> signed char {
   assert(dec_exp >= -350 && dec_exp <= 350);
   // log2_pow10_sig = round(log2(10) * 2**log2_pow10_exp) + 1
@@ -395,8 +516,8 @@ inline SERPENT_ZMIJ_CONSTEXPR auto compute_exp_shift(int bin_exp,
 
 // Converts the nonzero finite binary value bin_sig * 2**bin_exp using yy.
 template <typename Float>
-inline SERPENT_ZMIJ_CONSTEXPR20 auto to_decimal(uint64_t bin_sig,
-                                        int bin_exp) noexcept -> dec_fp<> {
+inline SERPENT_ZMIJ_CONSTEXPR20 auto to_decimal(uint64_t bin_sig, int bin_exp) noexcept
+    -> dec_fp<> {
   assert(bin_sig != 0);
   constexpr uint64_t implicit_bit = float_traits<Float>::implicit_bit;
   bool irregular = bin_sig == implicit_bit;
@@ -622,14 +743,21 @@ inline auto clamp_end(char* out, size_t size, size_t n) noexcept -> char* {
 // Copies the result in [`buffer`, `end`) to `out`, truncating after `n` chars,
 // and returns the past-the-end pointer.
 inline SERPENT_ZMIJ_CONSTEXPR20 auto copy_clamped(char* out, size_t n,
-                                         const char* buffer,
-                                         const char* end) noexcept -> char* {
+                                          const char* buffer,
+                                          const char* end) noexcept -> char* {
   size_t size = size_t(end - buffer);
-  if (is_constant_evaluated())
-    return copy_n(out, buffer, size < n ? size : n);
+  if (is_constant_evaluated()) return copy_n(out, buffer, size < n ? size : n);
   memcpy(out, buffer, size < n ? size : n);
   return clamp_end(out, size, n);
 }
+
+// Writes an unsigned integer's decimal representation to `out` and returns its
+// logical end. Whole-block stores may extend past that pointer but never past
+// the corresponding *_buffer_size capacity.
+template <typename UInt> auto itoa(char* out, UInt value) noexcept -> char*;
+
+template <typename Int>
+auto itoa_signed(char* out, Int value) noexcept -> char*;
 
 }  // namespace detail
 
@@ -642,6 +770,7 @@ inline auto to_decimal(float value) noexcept -> dec_fp<> {
 inline auto to_decimal(double value) noexcept -> dec_fp<> {
   return detail::to_decimal(value);
 }
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 inline auto to_decimal(long double value) noexcept
     -> dec_fp<detail::uint128_t> {
 #if LDBL_MANT_DIG == DBL_MANT_DIG
@@ -651,6 +780,7 @@ inline auto to_decimal(long double value) noexcept
   return detail::to_decimal_big(value);
 #endif
 }
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
 
 /// Buffer sizes for the write* functions, usable in generic code as
 /// buffer_sizes<Float>::shortest, ::scientific, ::fixed, and ::hex.
@@ -673,12 +803,14 @@ template <> struct buffer_sizes<double> {
 // long double: `scientific` is sized to round-trip: precision 35 (scientific)
 // or 36 (general). `fixed` is omitted as it would need an impractical buffer,
 // so callers must size fixed output themselves.
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 template <> struct buffer_sizes<long double> {
   static constexpr size_t shortest = long_double_buffer_size;  // write
   static constexpr size_t scientific = 44;  // write_scientific (and general)
   // Worst case is IEEE binary128: 1 sign + "0x1." + 28 digits + "p+16383".
   static constexpr size_t hex = 40;  // write_hex
 };
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
 
 /// Writes the shortest correctly rounded decimal representation of `value` to
 /// `out`, without a null terminator.
@@ -689,8 +821,8 @@ inline SERPENT_ZMIJ_CONSTEXPR20 auto write(char* out, size_t n, double value) no
     -> char* {
   if (detail::is_constant_evaluated()) {
     char buffer[double_buffer_size] = {};
-    return detail::copy_clamped(
-        out, n, buffer, detail::write_constexpr(buffer, value));
+    return detail::copy_clamped(out, n, buffer,
+                                detail::write_constexpr(buffer, value));
   }
   char buffer[double_buffer_size];
   if (n >= sizeof(buffer)) return detail::write(out, value);
@@ -701,18 +833,79 @@ inline SERPENT_ZMIJ_CONSTEXPR20 auto write(char* out, size_t n, float value) noe
     -> char* {
   if (detail::is_constant_evaluated()) {
     char buffer[float_buffer_size] = {};
-    return detail::copy_clamped(
-        out, n, buffer, detail::write_constexpr(buffer, value));
+    return detail::copy_clamped(out, n, buffer,
+                                detail::write_constexpr(buffer, value));
   }
   char buffer[float_buffer_size];
   if (n >= sizeof(buffer)) return detail::write(out, value);
   return detail::copy_clamped(out, n, buffer, detail::write(buffer, value));
 }
 
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 inline auto write(char* out, size_t n, long double value) noexcept -> char* {
   if (LDBL_MANT_DIG == DBL_MANT_DIG) return write(out, n, double(value));
   return detail::clamp_end(out, detail::write_big(out, n, value), n);
 }
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
+
+/// Writes the decimal representation of `value` to `out` without a null
+/// terminator. Returns a pointer past the last character written; if the
+/// representation exceeds `n` characters, only the first `n` are written.
+inline auto write(char* out, size_t n, int value) noexcept -> char* {
+  char buffer[int32_buffer_size];
+  if (n >= sizeof(buffer)) return detail::itoa_signed(out, int32_t(value));
+  return detail::copy_clamped(out, n, buffer,
+                              detail::itoa_signed(buffer, int32_t(value)));
+}
+
+inline auto write(char* out, size_t n, unsigned value) noexcept -> char* {
+  char buffer[uint32_buffer_size];
+  if (n >= sizeof(buffer)) return detail::itoa(out, uint32_t(value));
+  return detail::copy_clamped(out, n, buffer,
+                              detail::itoa(buffer, uint32_t(value)));
+}
+
+inline auto write(char* out, size_t n, long long value) noexcept -> char* {
+  char buffer[int64_buffer_size];
+  if (n >= sizeof(buffer)) return detail::itoa_signed(out, int64_t(value));
+  return detail::copy_clamped(out, n, buffer,
+                              detail::itoa_signed(buffer, int64_t(value)));
+}
+
+inline auto write(char* out, size_t n, unsigned long long value) noexcept
+    -> char* {
+  char buffer[uint64_buffer_size];
+  if (n >= sizeof(buffer)) return detail::itoa(out, uint64_t(value));
+  return detail::copy_clamped(out, n, buffer,
+                              detail::itoa(buffer, uint64_t(value)));
+}
+
+inline auto write(char* out, size_t n, long value) noexcept -> char* {
+  if (sizeof(long) <= sizeof(int32_t)) return write(out, n, int(value));
+  return write(out, n, static_cast<long long>(value));
+}
+
+inline auto write(char* out, size_t n, unsigned long value) noexcept -> char* {
+  if (sizeof(unsigned long) <= sizeof(uint32_t))
+    return write(out, n, static_cast<unsigned>(value));
+  return write(out, n, static_cast<unsigned long long>(value));
+}
+
+#if SERPENT_ZMIJ_USE_INT128
+inline auto write(char* out, size_t n, __int128 value) noexcept -> char* {
+  char buffer[int128_buffer_size];
+  if (n >= sizeof(buffer)) return detail::itoa_signed(out, value);
+  return detail::copy_clamped(out, n, buffer,
+                              detail::itoa_signed(buffer, value));
+}
+
+inline auto write(char* out, size_t n, unsigned __int128 value) noexcept
+    -> char* {
+  char buffer[uint128_buffer_size];
+  if (n >= sizeof(buffer)) return detail::itoa(out, value);
+  return detail::copy_clamped(out, n, buffer, detail::itoa(buffer, value));
+}
+#endif  // SERPENT_ZMIJ_USE_INT128
 
 /// Writes `value` in scientific format with `precision` digits after the
 /// decimal point (e.g. 1.234e+05) to `out`, without a null terminator, like
@@ -749,6 +942,7 @@ inline auto write_scientific(char* out, size_t n, float value,
       out, n, buffer, detail::write_scientific(buffer, value, precision + 1));
 }
 
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 inline auto write_scientific(char* out, size_t n, long double value,
                              int precision) noexcept -> char* {
   if (double(value) == value)
@@ -757,6 +951,7 @@ inline auto write_scientific(char* out, size_t n, long double value,
   auto size = detail::write_big(out, n, value, precision, format::scientific);
   return size != 0 ? detail::clamp_end(out, size, n) : nullptr;
 }
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
 
 /// Writes `value` in general format with up to `precision` significant digits
 /// and no trailing zeros (e.g. 1.5 or 1.5e+20) to `out`, without a null
@@ -793,6 +988,7 @@ inline auto write_general(char* out, size_t n, float value,
                               detail::write_general(buffer, value, precision));
 }
 
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 inline auto write_general(char* out, size_t n, long double value,
                           int precision) noexcept -> char* {
   if (double(value) == value)
@@ -801,6 +997,7 @@ inline auto write_general(char* out, size_t n, long double value,
   auto size = detail::write_big(out, n, value, precision, format::general);
   return size != 0 ? detail::clamp_end(out, size, n) : nullptr;
 }
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
 
 /// Writes `value` in fixed notation with exactly `precision` digits after the
 /// decimal point (e.g. 1.500) to `out`, without a null terminator. The result
@@ -836,6 +1033,7 @@ inline auto write_fixed(char* out, size_t n, float value,
                               detail::write_fixed(buffer, value, precision));
 }
 
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 inline auto write_fixed(char* out, size_t n, long double value,
                         int precision) noexcept -> char* {
   if (double(value) == value)
@@ -844,6 +1042,7 @@ inline auto write_fixed(char* out, size_t n, long double value,
   auto size = detail::write_big(out, n, value, precision, format::fixed);
   return size != 0 ? detail::clamp_end(out, size, n) : nullptr;
 }
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
 
 /// Writes `value` in hexadecimal floating-point notation (like printf's %a) in
 /// its shortest form (e.g. -0x1.8p+1) to `out`, without a null terminator.
@@ -860,12 +1059,14 @@ inline auto write_hex(char* out, size_t n, float value) noexcept -> char* {
   return write_hex(out, n, double(value));
 }
 
+#if SERPENT_ZMIJ_USE_LONG_DOUBLE
 inline auto write_hex(char* out, size_t n, long double value) noexcept
     -> char* {
   char buffer[buffer_sizes<long double>::hex];
   if (n >= sizeof(buffer)) return detail::write_hex(out, value);
   return detail::copy_clamped(out, n, buffer, detail::write_hex(buffer, value));
 }
+#endif  // SERPENT_ZMIJ_USE_LONG_DOUBLE
 
 }  // namespace serpent::external::zmij
 

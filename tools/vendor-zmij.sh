@@ -18,7 +18,7 @@
 #   the include guard   ->  follows from the macro rename
 set -eu
 
-PINNED=a24bf7fce0f4fdee60c0153529b74bb537552b7b
+PINNED=5b87a80c60a4875a317a22dd3f6af410a39267c0
 COMMIT=${1:-$PINNED}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 DEST="$HERE/include/serpent/external/zmij"

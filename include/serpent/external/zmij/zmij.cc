@@ -1,4 +1,4 @@
-// Vendored from https://github.com/vitaut/zmij at a24bf7fce0f4fdee60c0153529b74bb537552b7b by tools/vendor-zmij.sh.
+// Vendored from https://github.com/vitaut/zmij at 5b87a80c60a4875a317a22dd3f6af410a39267c0 by tools/vendor-zmij.sh.
 // Do not edit: change the script and run it again. What differs from upstream, and why, is
 // described there. The licence is beside this file.
 //
@@ -20,42 +20,11 @@
 #include <limits>       // std::numeric_limits
 #include <type_traits>  // std::conditional
 
-#ifndef SERPENT_ZMIJ_USE_SIMD
-#  define SERPENT_ZMIJ_USE_SIMD 1
-#endif
-
-#ifdef SERPENT_ZMIJ_USE_NEON
-// Use the provided definition.
-#elif defined(__ARM_NEON) || defined(_M_ARM64)
-#  define SERPENT_ZMIJ_USE_NEON SERPENT_ZMIJ_USE_SIMD
-#else
-#  define SERPENT_ZMIJ_USE_NEON 0
-#endif
 #if SERPENT_ZMIJ_USE_NEON
 #  include <arm_neon.h>
 #endif
-
-#ifdef SERPENT_ZMIJ_USE_SSE
-// Use the provided definition.
-#elif defined(__SSE2__)
-#  define SERPENT_ZMIJ_USE_SSE SERPENT_ZMIJ_USE_SIMD
-#elif defined(_M_AMD64) || (defined(_M_IX86_FP) && _M_IX86_FP == 2)
-#  define SERPENT_ZMIJ_USE_SSE SERPENT_ZMIJ_USE_SIMD
-#else
-#  define SERPENT_ZMIJ_USE_SSE 0
-#endif
 #if SERPENT_ZMIJ_USE_SSE
 #  include <immintrin.h>
-#endif
-
-#ifdef SERPENT_ZMIJ_USE_SSE4_1
-// Use the provided definition.
-static_assert(!SERPENT_ZMIJ_USE_SSE4_1 || SERPENT_ZMIJ_USE_SSE);
-#elif defined(__SSE4_1__) || defined(__AVX__)
-// On MSVC there's no way to check for SSE4.1 specifically so check __AVX__.
-#  define SERPENT_ZMIJ_USE_SSE4_1 SERPENT_ZMIJ_USE_SSE
-#else
-#  define SERPENT_ZMIJ_USE_SSE4_1 0
 #endif
 
 #ifdef __aarch64__
@@ -64,75 +33,14 @@ static_assert(!SERPENT_ZMIJ_USE_SSE4_1 || SERPENT_ZMIJ_USE_SSE);
 #  define SERPENT_ZMIJ_AARCH64 0
 #endif
 
-#ifdef __x86_64__
-#  define SERPENT_ZMIJ_X86_64 1
-#else
-#  define SERPENT_ZMIJ_X86_64 0
-#endif
-
 #ifdef __clang__
 #  define SERPENT_ZMIJ_CLANG 1
 #else
 #  define SERPENT_ZMIJ_CLANG 0
 #endif
 
-#ifdef _MSC_VER
-#  define SERPENT_ZMIJ_MSC_VER _MSC_VER
-#else
-#  define SERPENT_ZMIJ_MSC_VER 0
-#endif
-
-#if defined(__has_builtin) && !defined(SERPENT_ZMIJ_NO_BUILTINS)
-#  define SERPENT_ZMIJ_HAS_BUILTIN(x) __has_builtin(x)
-#else
-#  define SERPENT_ZMIJ_HAS_BUILTIN(x) 0
-#endif
-#ifdef __has_attribute
-#  define SERPENT_ZMIJ_HAS_ATTRIBUTE(x) __has_attribute(x)
-#else
-#  define SERPENT_ZMIJ_HAS_ATTRIBUTE(x) 0
-#endif
-#ifdef __has_cpp_attribute
-#  define SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
-#else
-#  define SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(x) 0
-#endif
-
-#if SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(likely) && SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(unlikely)
-#  define SERPENT_ZMIJ_UNLIKELY unlikely
-#else
-#  define SERPENT_ZMIJ_UNLIKELY
-#endif
-
-#if SERPENT_ZMIJ_HAS_CPP_ATTRIBUTE(maybe_unused)
-#  define SERPENT_ZMIJ_MAYBE_UNUSED maybe_unused
-#else
-#  define SERPENT_ZMIJ_MAYBE_UNUSED
-#endif
-
-#ifdef SERPENT_ZMIJ_OPTIMIZE_SIZE
-// Use the provided definition.
-#elif defined(__OPTIMIZE_SIZE__)
-#  define SERPENT_ZMIJ_OPTIMIZE_SIZE 1
-#else
-#  define SERPENT_ZMIJ_OPTIMIZE_SIZE 0
-#endif
 #ifndef SERPENT_ZMIJ_USE_EXP_STRING_TABLE
 #  define SERPENT_ZMIJ_USE_EXP_STRING_TABLE SERPENT_ZMIJ_OPTIMIZE_SIZE == 0
-#endif
-
-#if SERPENT_ZMIJ_HAS_ATTRIBUTE(always_inline) && !SERPENT_ZMIJ_OPTIMIZE_SIZE
-#  define SERPENT_ZMIJ_INLINE __attribute__((always_inline)) inline
-#elif SERPENT_ZMIJ_MSC_VER
-#  define SERPENT_ZMIJ_INLINE __forceinline
-#else
-#  define SERPENT_ZMIJ_INLINE inline
-#endif
-
-#ifdef __GNUC__
-#  define SERPENT_ZMIJ_ASM(x) asm x
-#else
-#  define SERPENT_ZMIJ_ASM(x)
 #endif
 
 // Declares struct members that must live in memory on ARM64 but are encoded as
@@ -226,10 +134,10 @@ SERPENT_ZMIJ_INLINE auto select(uint64_t condition, int64_t true_value,
 using serpent::external::zmij::detail::compute_dec_exp;
 using serpent::external::zmij::detail::compute_exp_shift;
 using serpent::external::zmij::detail::float_traits;
-using serpent::external::zmij::detail::umul128;
-using serpent::external::zmij::detail::umul192_hi128;
 using serpent::external::zmij::detail::uint128;
 using serpent::external::zmij::detail::uint128_t;
+using serpent::external::zmij::detail::umul128;
+using serpent::external::zmij::detail::umul192_hi128;
 
 #if SERPENT_ZMIJ_USE_INT128 && defined(__APPLE__)
 constexpr bool use_umul128_hi64 = true;  // Use umul128_hi64 for division.
@@ -458,74 +366,136 @@ struct exp_string_table {
     exp_string_table t;
     for (int e = min_dec_exp; e <= traits::max_exponent10 && enable; ++e) {
       uint64_t abs_e = e >= 0 ? e : -e;
-      uint64_t bc = abs_e % 100;
-      uint64_t val = ((bc % 10 + '0') << 8) | (bc / 10 + '0');
-      if (uint64_t a = abs_e / 100) val = (val << 8) | (a + '0');
+      // Left-aligning a two-digit exponent pads it with the '0' byte 4 holds.
+      uint64_t ddd = abs_e < 100 ? abs_e * 10 : abs_e;
+      uint64_t val = (ddd / 100 + '0') | ((ddd / 10 % 10 + '0') << 8) |
+                     ((ddd % 10 + '0') << 16);
       uint64_t len = 4 + (abs_e >= 100);
-      t.data[e + offset] =
-          (len << 48) | (val << 16) | (uint64_t(e >= 0 ? '+' : '-') << 8) | 'e';
+      // Bytes: 'e', sign, two digits, a third digit or '0', '.', '0', length.
+      // The float emitters insert an entry whole and add their last digit to
+      // the '0' in byte 4, so the point and the zero their shuffles need ride
+      // along and the length lands in a register byte nothing reads; the
+      // double path stores all eight bytes and returns past `len` of them.
+      t.data[e + offset] = (len << 56) | (uint64_t('0') << 48) |
+                           (uint64_t('.') << 40) | (val << 16) |
+                           (uint64_t(e >= 0 ? '+' : '-') << 8) | 'e';
     }
     return t;
   }
 };
 
-// Shuffle vectors to build strings for exponential notation.
+// Shuffle vectors to build float strings in both fixed and exponential
+// notation.
 //
-// Byte positions in the source register assembled by write_scientific_simd:
+// Byte positions in the source register assembled by write_float_simd:
 //   bytes [0, exp_pos):              BCD ASCII digits (reversed)
 //   bytes [exp_pos, exp_pos + 4):    exponent string "e±NN"
 //   byte  last_digit_pos:            rounded last digit
 //   byte  point_pos:                 '.'
+//   byte  zero_pos:                  '0', repeated by the shuffle for fixed
+//                                    notation's leading zeros and its
+//                                    integer-part padding
 //
 // The shuffle length (max 14) is stored in byte 15; the corresponding output
 // byte is past the string and ignored by the caller.
-struct exp_float_shuffle_table {
+//
+// Entries cover both output shapes so that choosing between them is a clamped
+// index rather than a branch: slots [0, sci_slot) hold the fixed layout for
+// each dec_exp in [min_fixed_dec_exp, max_fixed_dec_exp], and sci_slot holds
+// the exponential layout. Keep it branchless: floats reach the fixed range
+// often enough that predicting the shape costs more than emitting it.
+struct float_shuffle_table {
   static constexpr bool enable =
       (SERPENT_ZMIJ_USE_SSE4_1 || SERPENT_ZMIJ_USE_NEON) && exp_string_table::enable;
+  using traits = float_traits<float>;
   static constexpr unsigned char exp_pos = 8;
   static constexpr unsigned char last_digit_pos = 12;
   static constexpr unsigned char point_pos = 13;
-  alignas(16) unsigned char data[enable ? 32 * 16 : 1] = {};
+  static constexpr unsigned char zero_pos = 14;
+  static constexpr int num_bcd_digits = 8;
+  // A rounded last digit makes the shuffle span the whole padded BCD, so those
+  // variants collapse: sig_index is num_bcd_digits rather than num_digits - 1.
+  static constexpr int num_variants = (num_bcd_digits + 1) * 2;
+  static constexpr int sci_slot =
+      traits::max_fixed_dec_exp - traits::min_fixed_dec_exp + 1;
+  static constexpr int num_slots = sci_slot + 1;
+  static constexpr int num_shuffles = num_slots * num_variants;
+  alignas(16) unsigned char data[enable ? num_shuffles * 16 : 1] = {};
 
   struct entry {
     const unsigned char* shuffle;
     unsigned char length;
   };
 
-  SERPENT_ZMIJ_CONSTEXPR auto get_entry(int num_digits, bool has_last_digit,
+  // A `dec_exp` outside the fixed range clamps onto the scientific slot.
+  SERPENT_ZMIJ_CONSTEXPR auto get_entry(int dec_exp, int num_digits,
+                                bool has_last_digit,
                                 bool has_extra_digit) const noexcept -> entry {
-    int idx = (num_digits - 1) * 4 + has_last_digit * 2 + has_extra_digit;
+    unsigned rel = unsigned(dec_exp - traits::min_fixed_dec_exp);
+    unsigned slot = rel < unsigned(sci_slot) ? rel : unsigned(sci_slot);
+    int sig_index = has_last_digit ? num_bcd_digits : num_digits - 1;
+    int idx = int(slot) * num_variants + sig_index * 2 + has_extra_digit;
     return entry{&data[idx * 16], data[idx * 16 + 15]};
   }
 
-  static SERPENT_ZMIJ_CONSTEXPR auto make() -> exp_float_shuffle_table {
-    exp_float_shuffle_table t;
-    for (int idx = 0; idx < 32 && enable; ++idx) {
-      int num_digits = (idx >> 2) + 1;
-      bool has_last_digit = ((idx >> 1) & 1) != 0;
-      bool has_extra_digit = (idx & 1) != 0;
+  // Source-register positions of the significand digits, msb first.
+  struct sig_shuffle {
+    unsigned char pos[traits::max_digits10];
+    int len;
+  };
 
-      unsigned char* out = &t.data[idx * 16];
-      for (int i = 0; i < 16; ++i) out[i] = 0x80;  // shuffle high bit: output 0
-      unsigned char leading_digit_pos = has_extra_digit ? 7 : 6;
-      unsigned char length = 0;
-      if (has_last_digit) {
-        // Always 8 BCD chars in the significand plus a last-digit char; for
-        // !has_extra_digit the leading '0' of the 8-digit padded BCD is shown.
-        out[length++] = leading_digit_pos;
-        out[length++] = point_pos;
-        for (int i = leading_digit_pos - 1; i >= 0; --i) out[length++] = i;
-        out[length++] = last_digit_pos;
-      } else {
-        length = num_digits + has_extra_digit;
-        // Drop the '.' for single-digit output: "5e+02", not "5.0e+02".
-        if (length == 2) length = 1;
-        out[0] = leading_digit_pos;
-        out[1] = point_pos;
-        for (int i = 2; i < length; ++i) out[i] = leading_digit_pos + 1 - i;
+  static SERPENT_ZMIJ_CONSTEXPR auto make_sig_shuffle(int num_digits,
+                                              bool has_last_digit,
+                                              bool has_extra_digit) noexcept
+      -> sig_shuffle {
+    sig_shuffle s = {};
+    int leading_pos = has_extra_digit ? 7 : 6;
+    // Always the full padded BCD in the significand plus a last-digit char;
+    // for !has_extra_digit its leading '0' is shown.
+    s.len =
+        (has_last_digit ? num_bcd_digits : num_digits - 1) + has_extra_digit;
+    if (s.len < 1) s.len = 1;
+    for (int j = 0; j < s.len - has_last_digit; ++j) s.pos[j] = leading_pos - j;
+    if (has_last_digit) s.pos[s.len - 1] = last_digit_pos;
+    return s;
+  }
+
+  static SERPENT_ZMIJ_CONSTEXPR auto make() -> float_shuffle_table {
+    float_shuffle_table t;
+    for (int idx = 0; idx < num_variants && enable; ++idx) {
+      int sig_index = idx >> 1;
+      sig_shuffle s = make_sig_shuffle(
+          sig_index + 1, sig_index == num_bcd_digits, (idx & 1) != 0);
+      for (int slot = 0; slot < num_slots; ++slot) {
+        unsigned char* out = &t.data[(slot * num_variants + idx) * 16];
+        // Shuffle high bit: output 0.
+        for (int i = 0; i < 16; ++i) out[i] = 0x80;
+        int dec_exp = slot + traits::min_fixed_dec_exp;
+        int len = 0;
+
+        // Every shape is an integer part, '.', a fraction, and for the
+        // exponential slot a trailing exponent. Only the split point differs;
+        // when it falls left of the digits there is no integer digit, just a
+        // '0', and the shortfall becomes leading zeros in the fraction.
+        int int_digits = slot == sci_slot ? 1 : dec_exp + 1;
+        int split = int_digits > 0 ? int_digits : 0;
+        int lead_zeros = split - int_digits;
+        int int_sig = split < s.len ? split : s.len;  // integer digits present
+        if (int_digits < 1) out[len++] = zero_pos;
+        for (int j = 0; j < int_sig; ++j) out[len++] = s.pos[j];
+        for (int z = int_sig; z < split; ++z) out[len++] = zero_pos;
+        // A significand that ends at or before the split leaves no fraction,
+        // so the point is dropped: "5e+02", not "5.0e+02".
+        if (split < s.len) {
+          out[len++] = point_pos;
+          for (int z = 0; z < lead_zeros; ++z) out[len++] = zero_pos;
+          for (int j = split; j < s.len; ++j) out[len++] = s.pos[j];
+        }
+        if (slot == sci_slot) {
+          for (int i = 0; i < 4; ++i) out[len++] = exp_pos + i;
+        }
+        out[15] = len;
       }
-      for (unsigned char i = 0; i < 4; ++i) out[length++] = exp_pos + i;
-      out[15] = length;
     }
     return t;
   }
@@ -734,9 +704,9 @@ struct data {
   fixed_layout_table fixed_layouts = fixed_layout_table::enable
                                          ? fixed_layout_table::make()
                                          : fixed_layout_table();
-  exp_float_shuffle_table exp_float_shuffles =
-      exp_float_shuffle_table::enable ? exp_float_shuffle_table::make()
-                                      : exp_float_shuffle_table();
+  float_shuffle_table float_shuffles = float_shuffle_table::enable
+                                           ? float_shuffle_table::make()
+                                           : float_shuffle_table();
 
   // Shuffle indices for SIMD digit shift. Offset 0 = identity, offset 1 =
   // shift left by 1 (drops the leading '0' of a 16-digit significand).
@@ -884,7 +854,7 @@ auto to_bcd8(uint64_t abcdefgh) noexcept -> bcd_result {
 }
 
 template <int num_bits> struct dec_digits {
-  // `unshuffled` is the byte-reversed BCD vector used by write_scientific_simd.
+  // `unshuffled` is the byte-reversed BCD vector used by write_float_simd.
 #if SERPENT_ZMIJ_USE_NEON
   uint8x16_t unshuffled;
 #elif SERPENT_ZMIJ_USE_SSE4_1
@@ -1017,17 +987,20 @@ SERPENT_ZMIJ_INLINE void write_digits(char* buffer, uint64_t digits,
   memcpy(buffer, &digits, sizeof(digits));
 }
 
-SERPENT_ZMIJ_INLINE auto write_scientific_simd(char* buffer, const dec_digits<32>& dig,
-                                       int last_digit, bool has_last_digit,
-                                       bool has_extra_digit, uint64_t exp_data,
-                                       const data& d) noexcept -> char* {
-  // Packed for insertion into lane 1: byte 0 of `tail` lands at register
-  // byte exp_pos (8), so the exp string fills exp_pos..exp_pos+3; the prefix
-  // shifts place '0'+last_digit at last_digit_pos (12), '.' at point_pos (13).
-  uint32_t prefix = (uint32_t('.') << 8) + uint32_t('0') + last_digit;
-  uint64_t tail = exp_data | (uint64_t(prefix) << 32);
-  auto entry = d.exp_float_shuffles.get_entry(dig.num_digits, has_last_digit,
-                                              has_extra_digit);
+SERPENT_ZMIJ_INLINE auto write_float_simd(char* buffer, const dec_digits<32>& dig,
+                                  int last_digit, bool has_last_digit,
+                                  bool has_extra_digit, int dec_exp,
+                                  const data& d) noexcept -> char* {
+  // Inserted whole into lane 1: byte 0 of the entry lands at register byte
+  // exp_pos (8), so the exp string fills exp_pos..exp_pos+3, its '.' and '0'
+  // land at point_pos (13) and zero_pos (14), and its '0' at last_digit_pos
+  // (12) only has the last digit added to it. The entry's length ends up in
+  // byte 15, which no shuffle reads; the output length comes from the shuffle
+  // entry.
+  uint64_t exp_data = d.exp_strings.data[dec_exp + exp_string_table::offset];
+  uint64_t tail = exp_data + (uint64_t(last_digit) << 32);
+  auto entry = d.float_shuffles.get_entry(dec_exp, dig.num_digits,
+                                          has_last_digit, has_extra_digit);
 #if SERPENT_ZMIJ_USE_SSE4_1
   __m128i ascii =
       _mm_or_si128(dig.unshuffled, _mm_load_si128(m128ptr(&d.zeros)));
@@ -1046,9 +1019,8 @@ SERPENT_ZMIJ_INLINE auto write_scientific_simd(char* buffer, const dec_digits<32
   return buffer + entry.length;
 }
 
-SERPENT_ZMIJ_INLINE auto write_scientific_simd(char*, const dec_digits<64>&, int, bool,
-                                       bool, uint64_t, const data&) noexcept
-    -> char* {
+SERPENT_ZMIJ_INLINE auto write_float_simd(char*, const dec_digits<64>&, int, bool, bool,
+                                  int, const data&) noexcept -> char* {
   return nullptr;
 }
 
@@ -1330,9 +1302,8 @@ SERPENT_ZMIJ_INLINE auto to_decimal(uint64_t bin_sig, int bin_exp,
     dec_sig = scaled.integral / 10;
     uint64_t last_digit = scaled.integral - dec_sig * 10;
     bool has_fraction = (scaled.fraction | scaled.fraction_tail) != 0;
-    bool round_up =
-        5 < last_digit ||
-        (last_digit == 5 && (has_fraction || (dec_sig & 1) != 0));
+    bool round_up = 5 < last_digit ||
+                    (last_digit == 5 && (has_fraction || (dec_sig & 1) != 0));
     dec_sig += round_up;
     ++dec_exp;
   }
@@ -1598,8 +1569,7 @@ namespace serpent::external::zmij {
 
 namespace detail {
 
-template <typename Float>
-auto to_decimal(Float value) noexcept -> dec_fp<> {
+template <typename Float> auto to_decimal(Float value) noexcept -> dec_fp<> {
   using traits = float_traits<Float>;
   auto bits = traits::to_bits(value);
   auto bin_exp = traits::get_exp(bits);  // binary exponent
@@ -1676,9 +1646,15 @@ auto write(char* buffer, Float value) noexcept -> char* {
     --dec_exp;
   }
 
+  auto dig = to_digits<traits::num_bits>(dec.sig, *d);
+
+  if (traits::num_bits == 32 && float_shuffle_table::enable) {
+    return write_float_simd(buffer, dig, dec.last_digit, has_last_digit,
+                            has_extra_digit, dec_exp, *d);
+  }
+
   // Write significand/fixed.
   char* start = buffer;
-  auto dig = to_digits<traits::num_bits>(dec.sig, *d);
   constexpr int bcd_size = traits::num_bits == 64 ? 16 : 8;
   if (dec_exp >= traits::min_fixed_dec_exp &&
       dec_exp <= traits::max_fixed_dec_exp) {
@@ -1715,11 +1691,6 @@ auto write(char* buffer, Float value) noexcept -> char* {
     start[point_pos] = '.';
     return buffer + layout.end_pos[num_digits + has_extra_digit - 1];
   }
-  if (traits::num_bits == 32 && exp_float_shuffle_table::enable) {
-    uint64_t exp_data = d->exp_strings.data[dec_exp + exp_string_table::offset];
-    return write_scientific_simd(buffer, dig, dec.last_digit, has_last_digit,
-                                 has_extra_digit, exp_data, *d);
-  }
 
   buffer += has_extra_digit;
   memcpy(buffer, &dig.digits, bcd_size);
@@ -1732,7 +1703,7 @@ auto write(char* buffer, Float value) noexcept -> char* {
   // Write exponent.
   if (exp_string_table::enable) {
     uint64_t exp_data = d->exp_strings.data[dec_exp + exp_string_table::offset];
-    int len = int(exp_data >> 48);
+    int len = int(exp_data >> 56);
     if (is_big_endian) exp_data = bswap64(exp_data);
     memcpy(buffer, &exp_data, traits::max_exponent10 >= 100 ? 8 : 4);
     return buffer + len;
@@ -2030,9 +2001,8 @@ auto write_fixed(char* buffer, Float value, int precision) noexcept -> char* {
     dec_sig = integral / pow;
     uint64_t remainder = integral - dec_sig * pow;
     uint64_t half = pow / 2;
-    bool round_up =
-        half < remainder ||
-        (half == remainder && (has_fraction || (dec_sig & 1) != 0));
+    bool round_up = half < remainder ||
+                    (half == remainder && (has_fraction || (dec_sig & 1) != 0));
     dec_sig += round_up;
   } else {
     dec_sig = round_even(scaled);
@@ -2080,8 +2050,10 @@ auto write_hex(char* buffer, Float value, bool prefix) noexcept -> char* {
   if (!traits::is_normal(bin_exp)) [[SERPENT_ZMIJ_UNLIKELY]] {
     if (bin_exp != 0) return write_inf_nan(buffer, bin_sig != 0);
     zero = bin_sig == 0;
-    if (zero) bin_exp = traits::exp_bias;  // This cancels to 0 below.
-    else normalize<Float>(bin_sig, bin_exp);
+    if (zero)
+      bin_exp = traits::exp_bias;  // This cancels to 0 below.
+    else
+      normalize<Float>(bin_sig, bin_exp);
   }
   bin_exp -= traits::exp_bias;
 
@@ -2116,8 +2088,10 @@ auto write_hex(char* out, size_t n, Float value, int precision,
   if (!traits::is_normal(bin_exp)) [[SERPENT_ZMIJ_UNLIKELY]] {
     if (bin_exp != 0) return w.write(bin_sig != 0 ? "nan" : "inf", 3);
     zero = bin_sig == 0;
-    if (zero) bin_exp = traits::exp_bias;  // This cancels to 0 below.
-    else normalize<Float>(bin_sig, bin_exp);
+    if (zero)
+      bin_exp = traits::exp_bias;  // This cancels to 0 below.
+    else
+      normalize<Float>(bin_sig, bin_exp);
   }
   bin_exp -= traits::exp_bias;
 
@@ -2191,7 +2165,7 @@ template auto write_hex(char* out, size_t n, double value, int precision,
 
 // long double instantiations, only needed when it differs from double; else
 // the public wrappers forward long double to the double path.
-#if LDBL_MANT_DIG != DBL_MANT_DIG
+#if LDBL_MANT_DIG != DBL_MANT_DIG && SERPENT_ZMIJ_USE_LONG_DOUBLE
 template auto to_decimal_big(long double value) noexcept -> dec_fp<uint128_t>;
 template auto write_big(char* out, size_t n, long double value) noexcept
     -> size_t;
