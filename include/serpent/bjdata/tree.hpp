@@ -25,6 +25,7 @@
 #include <serpent/error.hpp>
 #include <serpent/fwd.hpp>
 #include <serpent/limits.hpp>
+#include <serpent/tree_stack.hpp>
 
 #include <concepts>
 #include <cstddef>
@@ -34,7 +35,6 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace serpent {
 class value;
@@ -43,32 +43,14 @@ class value;
 namespace serpent::bjdata {
 
 template<typename Tree>
-class tree_builder {
-    using member = std::pair<Tree, Tree>;
-    using array_type = typename Tree::array_type;
-    using object_type = typename Tree::object_type;
-
-    /** A container still open: what is left of it, and where its children start being gathered. */
-    struct frame {
-        std::uint64_t remaining = 0;
-        std::size_t start = 0;
-        bool object = false;
-        bool unbounded = false;
-    };
+class tree_builder : serpent::detail::tree_stack<Tree> {
+    using stack = serpent::detail::tree_stack<Tree>;
+    using typename stack::array_type;
+    using typename stack::frame;
 
     std::span<const std::byte> buffer;
     detail::cursor scan;
     int base = 0; ///< how deep the value being built is, the root of the document being 0
-
-    // One frame a level, for the containers open from the outermost down.
-    std::vector<frame> frames;
-
-    // The members and elements of the containers open, as the JSON builder gathers them: used as
-    // a stack, each container's after its parent's, cut back when it closes, and moved into a
-    // run sized exactly to it. A member is gathered with its name when the name is read, and its
-    // value put in place when that is complete, which for a container is when it closes.
-    std::vector<member> gathered_members;
-    std::vector<Tree> gathered_elements;
 
 public:
     tree_builder(std::span<const std::byte> buffer, const std::byte *payload, int depth) noexcept
@@ -187,12 +169,7 @@ private:
         if (info.typed() && !object) return this->typed_elements(info, held);
         if (info.typed()) return this->typed_members(info, held);
 
-        // Room for a few levels at the first, so a document as deep as most are allocates once.
-        if (this->frames.capacity() == 0) this->frames.reserve(8);
-        this->frames.push_back({ .remaining = info.count,
-            .start = object ? this->gathered_members.size() : this->gathered_elements.size(),
-            .object = object,
-            .unbounded = info.unbounded });
+        this->open(object, info.count, info.unbounded);
         complete = false;
         return true;
     }
@@ -361,7 +338,7 @@ private:
         if (top.object) {
             const auto name = detail::read_key(this->scan);
             if (!this->scan.ok()) return marker::invalid;
-            this->gathered_members.emplace_back(Tree { name }, Tree {});
+            this->name(Tree { name });
         }
 
         if (!this->scan.need(1)) {
@@ -380,39 +357,6 @@ private:
         }
         this->scan.advance(1);
         return kind;
-    }
-
-    /** Puts a completed child where the container on top keeps it. */
-    void deliver(Tree held) {
-        if (this->frames.back().object) this->gathered_members.back().second = std::move(held);
-        else this->gathered_elements.push_back(std::move(held));
-    }
-
-    /** The members gathered since `start`, moved into a run of their own with one per name. */
-    Tree members_from(std::size_t start) {
-        const auto gathered = std::span { this->gathered_members }.subspan(start);
-        auto *block = object_type::reserved(static_cast<std::uint32_t>(gathered.size()));
-        object_type::place_all(block, gathered);
-        this->gathered_members.resize(start);
-        Tree held { block };
-        held.coalesce_members();
-        return held;
-    }
-
-    /** The elements gathered since `start`, moved into a run of their own. */
-    Tree elements_from(std::size_t start) {
-        const auto gathered = std::span { this->gathered_elements }.subspan(start);
-        auto *block = array_type::reserved(static_cast<std::uint32_t>(gathered.size()));
-        array_type::place_all(block, gathered);
-        this->gathered_elements.resize(start);
-        return Tree { block };
-    }
-
-    /** Closes the container on top, answering it. */
-    Tree close() {
-        const frame top = this->frames.back();
-        this->frames.pop_back();
-        return top.object ? this->members_from(top.start) : this->elements_from(top.start);
     }
 };
 
