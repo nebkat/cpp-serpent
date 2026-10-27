@@ -55,5 +55,5 @@ the document.
 | on the wire | reads as |
 |---|---|
 | bin | an array of bytes, as BJData's `[$B` does: `as<std::span<const std::byte>>()` views it whole, `array()` walks it a byte at a time |
-| ext | no kind: `kind::invalid`, `is_extension()`, and `extension()` for its type and bytes. Stepped over wherever it stands, and never refused by `validate()` |
-| a map with a key that is not a str | valid, and `validate()` passes it; `items()` stops at the first such key, since it has no name to give it |
+| ext | no kind: `kind::invalid`, `is_extension()`, and `extension()` for its type and bytes. Stepped over wherever it stands, and never refused by `validate()`; decoding into `serpent::value` refuses it, a tree having no place for it |
+| a map with a key that is not a str | valid, and `validate()` passes it; `items()` stops at the first such key, since it has no name to give it, and decoding into `serpent::value` refuses the document rather than leave out what follows |

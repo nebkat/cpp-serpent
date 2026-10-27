@@ -6,6 +6,7 @@
 #include <serpent/msgpack/format.hpp>
 #include <serpent/msgpack/reader.hpp>
 #include <serpent/msgpack/reflect.hpp>
+#include <serpent/msgpack/tree.hpp>
 #include <serpent/msgpack/writer.hpp>
 #include <serpent/error.hpp>
 #include <serpent/kind.hpp>

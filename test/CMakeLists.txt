@@ -38,6 +38,7 @@ set(TESTS
     json_walking
     bjdata_walking
     msgpack
+    msgpack_tree
     fixture
     manual
     value
