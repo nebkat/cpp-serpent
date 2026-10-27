@@ -29,6 +29,7 @@ set(TESTS
     bjdata_tree
     bjdata_writer
     json_reader
+    json_tree
     json_real_read
     json_terminated
     json_string_scan
