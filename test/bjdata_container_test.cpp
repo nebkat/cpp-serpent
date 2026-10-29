@@ -257,6 +257,19 @@ void table_fields() {
         check(!tried && checked.has_value() == false && tried.error().code() == checked.error().code(), what + ": and try_decode says why");
     }
 
+    // Only a field with a byte to check costs anything a record, and each such field takes a byte,
+    // so a count the bytes cannot hold is refused before anything is walked; a table of records
+    // that take no bytes is not walked at all, whatever it claims.
+    std::string zero_width { "[${U\x01" "aZ}#L" };
+    std::string with_boolean { "[${U\x01" "aZU\x01" "bT}#L" };
+    for (int index = 0; index < 8; ++index) {
+        zero_width += static_cast<char>(index == 5 ? 1 : 0); // 2^40 records
+        with_boolean += static_cast<char>(index == 5 ? 1 : 0);
+    }
+    check(validate(bytes_of(zero_width)).has_value(), "a table of 2^40 records of no bytes is stepped over, not walked");
+    const auto unheld = validate(bytes_of(with_boolean));
+    check(!unheld && unheld.error().code() == errc::unexpected_end, "and 2^40 records of a byte each are refused by their length");
+
     // The block notation traces bytes, and stops at one that is not what the schema says.
     const auto notation = block_notation(bytes_of("[${U\x01" "aT}#U\x03" "TFU"sv));
     check(notation.ends_with("[T][F]"), "notation stops at the boolean byte that is neither: " + notation);
