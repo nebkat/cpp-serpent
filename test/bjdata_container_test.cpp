@@ -4,8 +4,11 @@
 #include "check.hpp"
 
 #include <serpent/bjdata.hpp>
+#include <serpent/bjdata/notation.hpp>
+#include <serpent/value.hpp>
 
 #include <algorithm>
+#include <array>
 #include <map>
 #include <ranges>
 #include <string>
@@ -187,6 +190,78 @@ void validation() {
     check(validate(from_hex(shallow)).has_value(), "moderate nesting is accepted");
 }
 
+std::vector<std::byte> bytes_of(std::string_view text) {
+    const auto *first = reinterpret_cast<const std::byte *>(text.data());
+    return { first, first + text.size() };
+}
+
+/** Whether a value and everything in it reads through a handle, as decoding it would read it. */
+bool reads(const reader &value) {
+    if (!value.is_valid()) return false;
+    if (value.is_object()) {
+        for (const auto &entry : value.items())
+            if (!reads(entry.value)) return false;
+    } else if (value.is_array()) {
+        for (const auto &element : value.array())
+            if (!reads(element)) return false;
+    }
+    return true;
+}
+
+bool fields_read(std::span<const std::byte> document) { return reads(reader::over(document)); }
+
+void table_fields() {
+    // A table's fields have no markers of their own, so validate() reads each as a handle placed
+    // on it would: a document it passes is one every field of which reads, and one it refuses is
+    // refused for the byte that would not. Each beside the same table with that byte put right.
+    struct twins {
+        const char *what;
+        std::string_view whole;
+        std::string_view broken;
+        errc code;
+        std::size_t offset;
+    };
+    using namespace std::string_view_literals;
+    const std::array<twins, 6> documents { {
+        { "a boolean field holding a byte other than T or F", "[${U\x01" "aT}#U\x03" "TFT"sv,
+            "[${U\x01" "aT}#U\x03" "TFU"sv, errc::unexpected_marker, 13 },
+        { "a dictionary index past its entries", "[${U\x01" "d[$S#U\x02" "U\x01" "xU\x01" "y}#U\x02" "\x01" "\x00"sv,
+            "[${U\x01" "d[$S#U\x02" "U\x01" "xU\x01" "y}#U\x02" "\x01" "\x02"sv, errc::out_of_range, 23 },
+        { "an offset index past the records", "[${U\x01" "o[$U]}#U\x02" "\x00" "\x01" "\x00" "\x01" "\x02" "ab"sv,
+            "[${U\x01" "o[$U]}#U\x02" "\x00" "\x05" "\x00" "\x01" "\x02" "ab"sv, errc::out_of_range, 15 },
+        { "an offset index whose text runs backwards", "[${U\x01" "o[$U]}#U\x02" "\x00" "\x01" "\x00" "\x01" "\x02" "ab"sv,
+            "[${U\x01" "o[$U]}#U\x02" "\x00" "\x01" "\x02" "\x01" "\x02" "ab"sv, errc::out_of_range, 14 },
+        { "a boolean in a column-major table", "{${U\x01" "aTU\x01" "bU}#U\x02" "TF\x01" "\x02"sv,
+            "{${U\x01" "aTU\x01" "bU}#U\x02" "T\x01" "\x01" "\x02"sv, errc::unexpected_marker, 16 },
+        { "a boolean nested in a record field", "[${U\x01" "r{U\x01" "aT}}#U\x01" "T"sv,
+            "[${U\x01" "r{U\x01" "aT}}#U\x01" "Z"sv, errc::unexpected_marker, 16 },
+    } };
+    for (const auto &twin : documents) {
+        const auto whole = bytes_of(twin.whole);
+        const auto broken = bytes_of(twin.broken);
+        const std::string what = twin.what;
+
+        check(validate(whole).has_value(), what + ": put right, validates");
+        check(fields_read(whole), what + ": put right, every field reads");
+        check(decode<value>(whole).has_value(), what + ": put right, decodes");
+
+        const auto checked = validate(broken);
+        check(!checked.has_value(), what + ": is refused by validate");
+        if (!checked) {
+            check_equal(checked.error().code(), twin.code, what + ": refused for what it is");
+            check_equal(checked.error().offset(), twin.offset, what + ": at the byte");
+        }
+        check(!fields_read(broken), what + ": does not read through a handle either");
+        check(!decode<value>(broken).has_value(), what + ": nor decode");
+        const auto tried = try_decode<value>(broken);
+        check(!tried && checked.has_value() == false && tried.error().code() == checked.error().code(), what + ": and try_decode says why");
+    }
+
+    // The block notation traces bytes, and stops at one that is not what the schema says.
+    const auto notation = block_notation(bytes_of("[${U\x01" "aT}#U\x03" "TFU"sv));
+    check(notation.ends_with("[T][F]"), "notation stops at the boolean byte that is neither: " + notation);
+}
+
 void truncation() {
     // Every prefix of a good document must fail cleanly, never read out of bounds.
     for (const auto *hex : { "5b5501550255035d", "7b5501615501550162550255016355037d", "5b2455235508ddccbbaa44332211",
@@ -298,6 +373,7 @@ int main() {
     typed_arrays_and_spans();
     strict_strong_types();
     validation();
+    table_fields();
     truncation();
     whole_documents();
     return report("bjdata_container");

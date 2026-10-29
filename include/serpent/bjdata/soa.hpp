@@ -472,7 +472,47 @@ inline void skip_schema(cursor &source) noexcept {
     std::ignore = soa::parse(source);
 }
 
-inline void skip_structured(cursor &source, const container_prefix &info, int depth) noexcept {
+/**
+ * The first field of a record whose bytes a reader would refuse, or null: a boolean that is not
+ * `T` or `F`, a dictionary index past the entries, an offset index that names no text. Asked of
+ * each field the way a handle placed on it asks, so that a table found whole is one every
+ * handle can read.
+ */
+inline const std::byte *unreadable_field(const soa::table &table, const soa::field &field, const std::byte *at, errc &why) noexcept {
+    using soa::field_kind;
+    switch (field.kind) {
+    case field_kind::boolean: {
+        const auto truth = to_marker(*at);
+        if (truth == marker::boolean_true || truth == marker::boolean_false) return nullptr;
+        why = errc::unexpected_marker;
+        return at;
+    }
+    case field_kind::dictionary:
+    case field_kind::offsets: {
+        // An index that is negative in its own type names nothing, as one past the end does not.
+        const std::int64_t index = load_integer(field.type, at);
+        const bool named = index >= 0
+                && (field.kind == field_kind::dictionary ? table.dictionary_entry(field, static_cast<std::uint64_t>(index))
+                                                         : table.offset_entry(field, static_cast<std::uint64_t>(index)))
+                        .has_value();
+        if (named) return nullptr;
+        why = errc::out_of_range;
+        return at;
+    }
+    case field_kind::record:
+    case field_kind::array: {
+        const auto &schema = table.fields();
+        for (auto index = field.children; index < field.next; index = schema.fields[index].next) {
+            const auto &child = schema.fields[index];
+            if (const auto *refused = unreadable_field(table, child, at + child.offset, why)) return refused;
+        }
+        return nullptr;
+    }
+    default: return nullptr;
+    }
+}
+
+inline void skip_structured(cursor &source, const container_prefix &info, bool by_column, int depth) noexcept {
     cursor at_schema = source;
     at_schema.position = info.table + 1;
     const auto layout = soa::parse(at_schema);
@@ -487,6 +527,24 @@ inline void skip_structured(cursor &source, const container_prefix &info, int de
         return;
     }
     soa::skip_payload(source, layout, info.count);
+    if (!source.ok()) return;
+
+    soa::table table;
+    if (!table.place({ source.origin, source.limit }, info, by_column)) {
+        source.fail(errc::invalid_dimensions);
+        return;
+    }
+    const auto &schema = table.fields();
+    for (std::uint64_t record = 0; record < table.size(); ++record) {
+        for (std::uint32_t index = 0; index < schema.count(); index = schema.fields[index].next) {
+            const auto &field = schema.fields[index];
+            errc why = errc::ok;
+            if (const auto *refused = unreadable_field(table, field, table.at(field, record), why)) {
+                source.fail(why, refused);
+                return;
+            }
+        }
+    }
 }
 
 } // namespace serpent::bjdata::detail

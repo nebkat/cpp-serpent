@@ -206,8 +206,8 @@ int main() {
     refuse(offsets_bad, "an offset past the text");
     auto index_bad = read_file(fixtures / "mixed.bjd");
     index_bad[index_bad.size() - 1] = std::byte { 9 }; // a dictionary index past its entries
-    check(bjdata::validate(index_bad).has_value(), "an index past the dictionary is well formed");
-    check(!bjdata::decode<value>(index_bad).has_value(), "but does not read");
+    refuse(index_bad, "an index past the dictionary, which no handle could read");
+    check(!bjdata::decode<value>(index_bad).has_value(), "and which does not decode");
 
     // ---------------- writing ----------------
 

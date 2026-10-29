@@ -394,7 +394,7 @@ void skip_value(cursor &source, marker kind, int depth) noexcept;
  * Steps over a table's records and the tables after them, the table being `depth` deep; defined
  * with the schema reader.
  */
-void skip_structured(cursor &source, const container_prefix &info, int depth) noexcept;
+void skip_structured(cursor &source, const container_prefix &info, bool by_column, int depth) noexcept;
 
 inline void skip_container(cursor &source, bool object, int depth) noexcept {
     const auto info = parse_header(source, object);
@@ -446,7 +446,7 @@ inline void skip_container(cursor &source, bool object, int depth) noexcept {
     }
 
     if (info.structured()) {
-        skip_structured(source, info, depth);
+        skip_structured(source, info, object, depth);
         return;
     }
 
