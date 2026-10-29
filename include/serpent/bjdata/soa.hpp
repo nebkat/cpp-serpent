@@ -529,6 +529,15 @@ inline void skip_structured(cursor &source, const container_prefix &info, bool b
     soa::skip_payload(source, layout, info.count);
     if (!source.ok()) return;
 
+    // Only a boolean, a dictionary index or an offset index can hold a byte no handle reads, and
+    // each takes a byte a record at least, so the payload just stepped over holds the count to
+    // the bytes there. A table with none of them is not walked at all: its records may take no
+    // bytes, and claim any number.
+    const bool checked = std::ranges::any_of(layout, [](const soa::field &field) {
+        return field.kind == soa::field_kind::boolean || field.kind == soa::field_kind::dictionary || field.kind == soa::field_kind::offsets;
+    });
+    if (!checked) return;
+
     soa::table table;
     if (!table.place({ source.origin, source.limit }, info, by_column)) {
         source.fail(errc::invalid_dimensions);
