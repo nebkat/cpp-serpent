@@ -198,12 +198,21 @@ inline void notate_schema_type(std::string &out, cursor &source, int depth) {
 /**
  * One field of one record, as the reference implementation writes it: a number or a `T` or `F`
  * with no marker of its own, since the schema has given it; a dictionary or offset index as
- * the integer it is; nothing for a null field; a nested record or run field by field.
+ * the integer it is; nothing for a null field; a nested record or run field by field. A boolean
+ * byte that is neither fails the cursor there, as the document does validate().
  */
-inline void notate_table_field(std::string &out, const soa::schema &layout, const soa::field &field, const std::byte *at) {
+inline void notate_table_field(std::string &out, cursor &source, const soa::schema &layout, const soa::field &field, const std::byte *at) {
     switch (field.kind) {
     case soa::field_kind::null: return;
-    case soa::field_kind::boolean: write_block(out, to_marker(*at)); return;
+    case soa::field_kind::boolean: {
+        const auto truth = to_marker(*at);
+        if (truth != marker::boolean_true && truth != marker::boolean_false) {
+            source.fail(errc::unexpected_marker, at);
+            return;
+        }
+        write_block(out, truth);
+        return;
+    }
     case soa::field_kind::text: write_block(out, soa::table::fixed_text(field, at)); return;
     case soa::field_kind::dictionary:
     case soa::field_kind::offsets: write_integer_block(out, load_integer(field.type, at)); return;
@@ -211,7 +220,8 @@ inline void notate_table_field(std::string &out, const soa::schema &layout, cons
     case soa::field_kind::array:
         for (auto index = field.children; index < field.next; index = layout.fields[index].next) {
             const auto &child = layout.fields[index];
-            notate_table_field(out, layout, child, at + child.offset);
+            notate_table_field(out, source, layout, child, at + child.offset);
+            if (!source.ok()) return;
         }
         return;
     case soa::field_kind::scalar: break;
@@ -256,15 +266,16 @@ inline void notate_table(std::string &out, cursor &source, const std::byte *cont
     const auto &layout = table.fields();
     if (table.by_column()) {
         for (std::uint32_t index = 0; index < layout.count(); index = layout.fields[index].next) {
-            for (std::uint64_t record = 0; record < table.size(); ++record)
-                notate_table_field(out, layout, layout.fields[index], table.at(layout.fields[index], record));
+            for (std::uint64_t record = 0; record < table.size() && source.ok(); ++record)
+                notate_table_field(out, source, layout, layout.fields[index], table.at(layout.fields[index], record));
         }
     } else {
         for (std::uint64_t record = 0; record < table.size(); ++record) {
-            for (std::uint32_t index = 0; index < layout.count(); index = layout.fields[index].next)
-                notate_table_field(out, layout, layout.fields[index], table.at(layout.fields[index], record));
+            for (std::uint32_t index = 0; index < layout.count() && source.ok(); index = layout.fields[index].next)
+                notate_table_field(out, source, layout, layout.fields[index], table.at(layout.fields[index], record));
         }
     }
+    if (!source.ok()) return;
 
     // Placing the table checked that every offset table and its text lie inside the buffer.
     const std::byte *after = table.payload_end();
