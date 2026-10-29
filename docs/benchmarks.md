@@ -30,14 +30,14 @@ struct-mapping library too, which holds the format still.
 
 | | JSON encode | JSON decode | binary encode | binary decode |
 |---|---:|---:|---:|---:|
-| serpent | **256** | **394** | **119** | **145** |
-| serpent, bounded |  | 450 |  |  |
-| serpent, BJData for size |  |  | 170 | 222 |
-| struct-mapping lib | 278 | 456 | 152 | 152 |
-| the same, bounded |  | 575 |  |  |
-| the same, CBOR |  |  | 228 | 189 |
-| the same, built for size | 332 | 830 |  |  |
-| DOM lib | 4,209 | 7,186 | 3,369 | 5,533 |
+| serpent | **254** | **397** | **118** | **144** |
+| serpent, bounded |  | 463 |  |  |
+| serpent, BJData for size |  |  | 168 | 220 |
+| struct-mapping lib | 273 | 455 | 148 | 149 |
+| the same, bounded |  | 567 |  |  |
+| the same, CBOR |  |  | 226 | 183 |
+| the same, built for size | 331 | 818 |  |  |
+| DOM lib | 4,032 | 7,020 | 3,316 | 5,501 |
 
 Decoding, serpent allocates 15 times, the struct-mapping library 15 and the DOM library
 70,029.
@@ -47,10 +47,10 @@ struct-mapping library's normal build - below 1.0 is serpent ahead:
 
 | | strings | booleans | integers | reals | 100 × 2000 numbers |
 |---|---:|---:|---:|---:|---:|
-| JSON encode | **0.53** | 1.36 | **0.52** | 1.03 | **0.83** |
-| JSON decode | **0.98** | **0.76** | **0.82** | **0.76** | **0.84** |
-| binary encode | 1.29 | **0.90** | **0.96** | **0.99** | 1.05 |
-| binary decode | **0.84** | **0.98** | 1.18 | 1.09 | 1.19 |
+| JSON encode | **0.53** | 1.23 | **0.52** | 1.06 | **0.83** |
+| JSON decode | **0.97** | **0.80** | **0.84** | **0.79** | **0.84** |
+| binary encode | 1.24 | **0.90** | **0.96** | **0.99** | 1.04 |
+| binary decode | **0.85** | 1.04 | 1.10 | 1.08 | 1.23 |
 
 A described type is what all of this is for. The same record behind a hand-written
 `json_convert` takes 261 to encode to BJData and 1,186 to decode.
@@ -63,12 +63,12 @@ switch off:
 
 | | default | plain |
 |---|---:|---:|
-| JSON decode | 394 | 598 |
-| JSON encode | 256 | 1,149 |
-| JSON encode, five reals | 354 | 2,155 |
-| JSON encode, five integers | 116 | 392 |
-| binary decode | 145 | 148 |
-| binary encode | 119 | 213 |
+| JSON decode | 397 | 625 |
+| JSON encode | 254 | 1,143 |
+| JSON encode, five reals | 354 | 2,091 |
+| JSON encode, five integers | 115 | 389 |
+| binary decode | 144 | 145 |
+| binary encode | 118 | 209 |
 
 ## It was never the format
 
@@ -148,12 +148,12 @@ than by move, would take both out.
 
 | | first key of citm | last key of citm | sum ids, twitter | count every value, citm | sum coordinates, canada |
 |---|---:|---:|---:|---:|---:|
-| serpent | **0.07** | 674 | 220 | 877 | 2,702 |
-| serpent, over an index built first | 751 | 735 | 239 | 816 | 2,884 |
-| on-demand parser | 172 | **257** | **105** | **298** | 1,533 |
-| fast DOM A | 353 | 352 | 136 | 398 | **1,207** |
-| fast DOM B | 840 | 839 | 704 | 877 | 1,848 |
-| DOM lib | 6,850 | 6,843 | 3,159 | 6,983 | 12,542 |
+| serpent | **0.07** | 665 | 218 | 850 | 2,833 |
+| serpent, over an index built first | 744 | 739 | 241 | 815 | 2,573 |
+| on-demand parser | 170 | **255** | **102** | **296** | 1,527 |
+| fast DOM A | 347 | 345 | 135 | 394 | **1,206** |
+| fast DOM B | 817 | 811 | 693 | 857 | 1,986 |
+| DOM lib | 6,736 | 6,719 | 3,126 | 6,958 | 12,692 |
 
 serpent reads in place and builds nothing, so what it does not look at costs nothing and it never
 allocates; walking a whole document it is 2-4x behind parsers that index or build one first.
@@ -163,7 +163,7 @@ allocates; walking a whole document it is 2-4x behind parsers that index or buil
 | If you | then |
 |---|---|
 | pull a few fields out of a large payload | serpent, by orders of magnitude |
-| convert your own types | level on JSON decode and binary decode, ahead on binary encode, 1.4x behind on JSON encode |
+| convert your own types | serpent, ahead on all four operations: 0.80–0.97x the struct-mapping library's time |
 | traverse whole documents repeatedly | an indexing parser is 2-4x quicker |
 | want a mutable document object | [`serpent::value`](value.md): a sixteen-byte node and one allocation per container - quicker than the other tree on three corpora of five and level on two, in a quarter to a third of the DOM library's allocations and less memory than either |
 | need BJData and JSON from one definition, or cannot allocate while reading | serpent |
