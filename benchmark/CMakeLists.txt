@@ -68,7 +68,9 @@ file(MAKE_DIRECTORY "${CORPUS_DIR}")
 foreach(PAIR
         "canada.json|https://raw.githubusercontent.com/miloyip/nativejson-benchmark/master/data/canada.json"
         "citm_catalog.json|https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/citm_catalog.json"
-        "twitter.json|https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json")
+        "twitter.json|https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json"
+        "gsoc-2018.json|https://raw.githubusercontent.com/simdjson/simdjson-data/master/jsonexamples/gsoc-2018.json"
+        "github_events.json|https://raw.githubusercontent.com/simdjson/simdjson-data/master/jsonexamples/github_events.json")
     string(REPLACE "|" ";" PARTS "${PAIR}")
     list(GET PARTS 0 CORPUS_NAME)
     list(GET PARTS 1 CORPUS_URL)
