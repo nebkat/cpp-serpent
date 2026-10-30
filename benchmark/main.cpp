@@ -10,9 +10,11 @@
 #include <serpent/json.hpp>
 #include <serpent/json/indexed.hpp>
 #include <serpent/msgpack.hpp>
+#include <serpent/value.hpp>
 
 #include <nlohmann/json.hpp>
 
+#include <glaze/beve.hpp>
 #include <glaze/cbor.hpp>
 #include <glaze/glaze.hpp>
 #include <glaze/msgpack.hpp>
@@ -729,6 +731,113 @@ static void documents(const std::string &canada, const std::string &twitter, con
     bench::measure(coordinates, "canada sum coords", "nlohmann", canada.size(), [&] { return query::canada_coordinates_nlohmann(canada); });
 }
 
+// ---------------- building a document object ----------------
+
+/** The struct-mapping library's generic tree as a serpent::value, to check the two hold the same. */
+template<typename Generic>
+static serpent::value as_value(const Generic &tree) {
+    return std::visit(
+            [](const auto &held) -> serpent::value {
+                using held_type = std::remove_cvref_t<decltype(held)>;
+                if constexpr (std::same_as<held_type, std::nullptr_t>) {
+                    return serpent::value {};
+                } else if constexpr (std::same_as<held_type, typename Generic::array_t>) {
+                    auto out = serpent::value::array();
+                    for (const auto &element : held) out.push_back(as_value(element));
+                    return out;
+                } else if constexpr (std::same_as<held_type, typename Generic::object_t>) {
+                    auto out = serpent::value::object();
+                    for (const auto &[key, element] : held) out.append_member(key, as_value(element));
+                    return out;
+                } else {
+                    return serpent::value { held };
+                }
+            },
+            tree.data);
+}
+
+/** The same tree with every number a double, for a tree that holds no other kind. */
+static serpent::value numbers_as_doubles(const serpent::value &tree) {
+    if (tree.is_number()) return serpent::value { *tree.as<double>() };
+    if (tree.is_array()) {
+        auto out = serpent::value::array();
+        for (const auto &element : tree.as_array()) out.push_back(numbers_as_doubles(element));
+        return out;
+    }
+    if (tree.is_object()) {
+        auto out = serpent::value::object();
+        for (const auto &entry : tree.as_object()) out.append_member(serpent::name_of(entry), numbers_as_doubles(entry.second));
+        return out;
+    }
+    return tree;
+}
+
+/**
+ * The whole document as a tree each library's users can hold and change, built and then freed:
+ * serpent::value, the struct-mapping library's generic tree in its default form - every number a
+ * double - and in the form that keeps a 64-bit integer whole, as serpent's does, and the DOM
+ * library's. From JSON text, and from each library's own binary: BJData for serpent, BEVE for the
+ * struct-mapping library, CBOR for the DOM library. Every tree is checked first to hold the same
+ * document as serpent's.
+ */
+static void document_objects(const std::vector<std::pair<std::string, std::string>> &corpora) {
+    const char *const workload = "document objects";
+    for (const auto &[name, text] : corpora) {
+        const auto ours = json::decode<serpent::value>(text);
+        glz::generic plain;
+        glz::generic_u64 whole;
+        const bool read_plain = !glz::read_json(plain, text);
+        const bool read_whole = !glz::read_json(whole, text);
+        const auto dom = other::parse(text);
+        const auto ours_binary = bjdata::encode(*ours);
+        std::string plain_binary, whole_binary;
+        std::ignore = glz::write_beve(plain, plain_binary);
+        std::ignore = glz::write_beve(whole, whole_binary);
+        const auto dom_binary = other::to_cbor(dom);
+
+        if (!bench::chosen.list_only) {
+            const auto label = [&](std::string_view what) { return name + ": " + std::string { what }; };
+            const auto same = [&](std::string_view what, const std::optional<serpent::value> &tree) {
+                agree(label(what), tree.has_value() && ours.has_value() && *tree == *ours, true);
+            };
+            same("serpent's BJData", bjdata::decode<serpent::value>(ours_binary));
+            same("glaze's tree, 64-bit", read_whole ? std::optional { as_value(whole) } : std::nullopt);
+            glz::generic_u64 whole_back;
+            same("glaze's BEVE, 64-bit", !glz::read_beve(whole_back, whole_binary) ? std::optional { as_value(whole_back) } : std::nullopt);
+            glz::generic plain_back;
+            const auto doubles = numbers_as_doubles(*ours);
+            agree(label("glaze's tree, doubles"), read_plain && numbers_as_doubles(as_value(plain)) == doubles, true);
+            agree(label("glaze's BEVE, doubles"), !glz::read_beve(plain_back, plain_binary) && numbers_as_doubles(as_value(plain_back)) == doubles, true);
+            same("nlohmann's tree", json::decode<serpent::value>(dom.dump()));
+            same("nlohmann's CBOR", json::decode<serpent::value>(other::from_cbor(dom_binary).dump()));
+        }
+
+        const std::string json_column = name + ", JSON";
+        bench::measure(workload, json_column, "serpent", text.size(), [&] { return json::decode<serpent::value>(text).has_value(); });
+        bench::measure(workload, json_column, "glaze", text.size(), [&] {
+            glz::generic tree;
+            return !glz::read_json(tree, text);
+        });
+        bench::measure(workload, json_column, "glaze (64-bit)", text.size(), [&] {
+            glz::generic_u64 tree;
+            return !glz::read_json(tree, text);
+        });
+        bench::measure(workload, json_column, "nlohmann", text.size(), [&] { return other::parse(text).size(); });
+
+        const std::string binary_column = name + ", binary";
+        bench::measure(workload, binary_column, "serpent", ours_binary.size(), [&] { return bjdata::decode<serpent::value>(ours_binary).has_value(); });
+        bench::measure(workload, binary_column, "glaze", plain_binary.size(), [&] {
+            glz::generic tree;
+            return !glz::read_beve(tree, plain_binary);
+        });
+        bench::measure(workload, binary_column, "glaze (64-bit)", whole_binary.size(), [&] {
+            glz::generic_u64 tree;
+            return !glz::read_beve(tree, whole_binary);
+        });
+        bench::measure(workload, binary_column, "nlohmann", dom_binary.size(), [&] { return other::from_cbor(dom_binary).size(); });
+    }
+}
+
 /** Which of the library's switches this build has on, since that is what the numbers depend on. */
 static void print_configuration() {
     std::printf("configuration: %s\n", bench::chosen.configuration.c_str());
@@ -749,15 +858,19 @@ int main(int argc, char **argv) {
     const auto canada = read_file(bench::chosen.corpus + "/canada.json");
     const auto citm = read_file(bench::chosen.corpus + "/citm_catalog.json");
     const auto twitter = read_file(bench::chosen.corpus + "/twitter.json");
+    const std::vector<std::pair<std::string, std::string>> corpora { { "twitter", twitter }, { "canada", canada },
+        { "citm_catalog", citm }, { "gsoc-2018", read_file(bench::chosen.corpus + "/gsoc-2018.json") },
+        { "github_events", read_file(bench::chosen.corpus + "/github_events.json") } };
     const auto readings = sample_readings();
 
     if (!bench::chosen.list_only) check_results(readings, canada, citm, twitter);
 
     bench::row_order = { "serpent", "serpent (bounded)", "serpent (for size)", "serpent (table)", "serpent (indexed)", "glaze", "glaze (bounded)", "glaze (CBOR)",
-        "glaze (size build)", "simdjson", "yyjson", "rapidjson", "nlohmann" };
+        "glaze (size build)", "glaze (64-bit)", "simdjson", "yyjson", "rapidjson", "nlohmann" };
     std::printf("\nmeasuring ");
     your_own_types(readings);
     documents(canada, twitter, citm);
+    document_objects(corpora);
     std::printf("\n");
 
     std::printf("\nbinary is BJData written for speed (serpent), BEVE (glaze) and CBOR (nlohmann, and glaze (CBOR)); allocations are "

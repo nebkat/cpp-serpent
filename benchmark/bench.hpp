@@ -51,6 +51,7 @@ struct result {
     double nanoseconds = 0;
     double error_percent = 0;
     double allocations = 0;
+    double allocated_bytes = 0;
 };
 
 inline std::vector<result> results;
@@ -123,6 +124,7 @@ void measure(std::string_view workload, std::string_view operation, std::string_
 
     // Allocation totals come from a separate single pass, so counting never taxes the timing.
     allocation_count = 0;
+    allocation_bytes = 0;
     counting = true;
     ankerl::nanobench::doNotOptimizeAway(run());
     counting = false;
@@ -134,7 +136,8 @@ void measure(std::string_view workload, std::string_view operation, std::string_
     note(libraries, library);
     results.push_back({ std::string { workload }, std::string { operation }, std::string { library },
         allocations_visible, timed.median(Result::Measure::elapsed) * 1e9,
-        timed.medianAbsolutePercentError(Result::Measure::elapsed) * 100, static_cast<double>(allocation_count) });
+        timed.medianAbsolutePercentError(Result::Measure::elapsed) * 100, static_cast<double>(allocation_count),
+        static_cast<double>(allocation_bytes) });
     if (!chosen.verbose) {
         std::printf(".");
         std::fflush(stdout);
@@ -217,7 +220,8 @@ inline void write_json() {
         out << "    {\"workload\": \"" << entry.workload << "\", \"operation\": \"" << entry.operation
             << "\", \"library\": \"" << entry.library << "\", \"ns\": " << entry.nanoseconds
             << ", \"error_percent\": " << entry.error_percent
-            << ", \"allocations\": " << (entry.allocations_visible ? entry.allocations : -1) << "}"
+            << ", \"allocations\": " << (entry.allocations_visible ? entry.allocations : -1)
+            << ", \"allocated_bytes\": " << (entry.allocations_visible ? entry.allocated_bytes : -1) << "}"
             << (index + 1 < results.size() ? ",\n" : "\n");
     }
     out << "  ]\n}\n";

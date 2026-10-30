@@ -25,11 +25,43 @@ KINDS = [("strings", "10k records of 5 strings"), ("booleans", "10k records of 5
 DOC_OPS = [("citm first key", "first key of citm"), ("citm last key", "last key of citm"), ("twitter sum ids", "sum ids, twitter"),
            ("citm count values", "count every value, citm"), ("canada sum coords", "sum coordinates, canada")]
 RECORDS = "10k records"
+TREES = ["serpent", "glaze", "glaze (64-bit)", "nlohmann"]
+CORPORA = [("twitter", "616 KB"), ("canada", "2.2 MB"), ("citm_catalog", "1.7 MB"), ("gsoc-2018", "3.2 MB"),
+           ("github_events", "63 KB")]
+JSON_TREES = ("| | serpent::value | struct-mapping lib's generic tree | the same, 64-bit integers | DOM lib |\n"
+              "|---|---:|---:|---:|---:|")
+BINARY_TREES = ("| | serpent::value from BJData | generic tree from BEVE | the same, 64-bit integers | DOM lib from CBOR |\n"
+                "|---|---:|---:|---:|---:|")
 
 
 def load(directory: pathlib.Path, configuration: str):
     results = json.loads((directory / f"{configuration}.json").read_text())["results"]
     return {(entry["workload"], entry["operation"], entry["library"]): entry["ns"] / 1000 for entry in results}
+
+
+def load_entries(directory: pathlib.Path, configuration: str):
+    results = json.loads((directory / f"{configuration}.json").read_text())["results"]
+    return {(entry["workload"], entry["operation"], entry["library"]): entry for entry in results}
+
+
+def tree_rows(entries, form: str, labelled: bool) -> str:
+    """A row a corpus: each library's allocations, kilobytes allocated and time, the least of each in bold."""
+    rows = ""
+    for corpus, size in CORPORA:
+        found = [entries[("document objects", f"{corpus}, {form}", library)] for library in TREES]
+        figures = [(entry["allocations"], entry["allocated_bytes"] / 1024, entry["ns"] / 1000) for entry in found]
+        least = [min(figure[index] for figure in figures) for index in range(3)]
+        cells = []
+        for column, (allocations, kilobytes, microseconds) in enumerate(figures):
+            def bold(text, index, value):
+                return f"**{text}**" if value == least[index] else text
+            time = f"{microseconds:.2f}" if microseconds < 10 else f"{microseconds:,.0f}"
+            units = " allocs" if column == 0 else ""
+            cells.append(f"{bold(f'{allocations:,.0f}', 0, allocations)}{units} · {bold(f'{kilobytes:,.0f}', 1, kilobytes)} KB · "
+                         f"{bold(time, 2, microseconds)} µs")
+        label = f"{corpus} ({size})" if labelled else corpus
+        rows += f"| {label} | " + " | ".join(cells) + " |\n"
+    return rows
 
 
 def cell(value: float, best: bool) -> str:
@@ -49,6 +81,7 @@ def main() -> int:
         return 2
     directory = pathlib.Path(sys.argv[1])
     default, plain = load(directory, "default"), load(directory, "plain")
+    entries = load_entries(directory, "default")
     page_path = pathlib.Path(__file__).resolve().parent.parent / "docs" / "benchmarks.md"
     page = page_path.read_text()
 
@@ -96,6 +129,10 @@ def main() -> int:
             cells.append(cell(value, best))
         rows += f"| {name} | " + " | ".join(cells) + " |\n"
     page = replace_table(page, "| | " + " | ".join(label for _, label in DOC_OPS) + " |\n|---|---:|---:|---:|---:|---:|", rows)
+
+    # Document objects, from JSON and from each library's binary.
+    page = replace_table(page, JSON_TREES, tree_rows(entries, "JSON", True))
+    page = replace_table(page, BINARY_TREES, tree_rows(entries, "binary", False))
 
     page_path.write_text(page)
     return 0

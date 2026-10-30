@@ -13,7 +13,7 @@ import json
 import pathlib
 import sys
 
-ROW_ORDER = ["serpent", "serpent (for size)", "serpent (indexed)", "glaze", "glaze (CBOR)", "glaze (size build)",
+ROW_ORDER = ["serpent", "serpent (for size)", "serpent (indexed)", "glaze", "glaze (CBOR)", "glaze (size build)", "glaze (64-bit)",
              "simdjson", "yyjson", "rapidjson", "nlohmann"]
 
 
