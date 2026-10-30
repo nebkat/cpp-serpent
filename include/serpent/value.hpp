@@ -117,8 +117,9 @@ public:
     static void place_all(run *block, std::span<T> items) noexcept {
         static_assert(std::is_nothrow_move_constructible_v<T>, "a run relocates its elements");
         if (items.empty()) return;
-        std::memcpy(block->data() + block->used, items.data(), items.size() * sizeof(T));
-        std::memset(items.data(), 0, items.size() * sizeof(T));
+        // As bytes, deliberately: through void * so that neither copy is taken for a mistake.
+        std::memcpy(static_cast<void *>(block->data() + block->used), items.data(), items.size() * sizeof(T));
+        std::memset(static_cast<void *>(items.data()), 0, items.size() * sizeof(T));
         block->used += static_cast<std::uint32_t>(items.size());
     }
 
