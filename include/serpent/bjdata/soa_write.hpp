@@ -56,20 +56,25 @@ consteval bool mappable() {
     return column_of<T>() != column::none;
 }
 
-/** A described type every member of which a schema can say. */
+/**
+ * A described type every member of which a schema can say, with one member at least: every
+ * column takes a byte a record, and a record of none would take none, which a table may not.
+ */
 template<typename T>
 consteval bool is_table_record() {
     if constexpr (!reflected_type<T>) {
         return false;
     } else {
         bool every = true;
+        bool any = false;
         template for (constexpr auto member : std::define_static_array(serpent::detail::members_including_bases<T>())) {
             if constexpr (!serpent::detail::has_annotation<skip>(member)) {
                 using field = std::remove_cvref_t<typename [:std::meta::type_of(member):]>;
                 if constexpr (serpent::detail::member_is_projected<member>() || !mappable<field>()) every = false;
+                any = true;
             }
         }
-        return every;
+        return every && any;
     }
 }
 

@@ -96,6 +96,15 @@ struct [[= serpent::serializable {}]] demanding {
     int absent = 0; ///< no such field, and not defaulted
 };
 
+/** Types a table could hold no byte of a record of: nothing to say, or nothing said. */
+struct [[= serpent::serializable {}]] nothing {};
+struct [[= serpent::serializable {}]] unsaid {
+    [[= serpent::skip {}]] int never = 0;
+};
+struct [[= serpent::serializable {}]] holding_nothing {
+    nothing inner;
+};
+
 std::vector<std::byte> read_file(const std::filesystem::path &path) {
     std::ifstream in { path, std::ios::binary };
     std::stringstream buffer;
@@ -216,6 +225,15 @@ int main() {
     // reads back as themselves and as the tree dart-bjdata's table is.
     const std::vector<record> forty = *by_row;
     check(bjdata::encode(forty)[1] != std::byte { '$' }, "a type with an optional member writes an array of objects");
+    // A record must take a byte, so a type whose records would take none is no table record.
+    const auto untabled = [](const auto &records, const char *what) {
+        const auto bytes = bjdata::encode(records);
+        check(bytes.size() > 1 && bytes[1] != std::byte { '$' }, what);
+        check(bjdata::validate(bytes).has_value(), what);
+    };
+    untabled(std::vector<nothing>(3), "a type with no members writes an array of objects");
+    untabled(std::vector<unsaid>(3), "a type whose every member is skipped writes one too");
+    untabled(std::vector<holding_nothing>(3), "and a type holding only such a record");
     std::vector<table_row> rows_out;
     for (const auto &row : forty) rows_out.push_back({ row.at, row.pos, row.v, row.station, row.flag, row.note });
     const auto written = bjdata::encode(rows_out);
