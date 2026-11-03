@@ -251,11 +251,17 @@ inline std::uint32_t parse_type(cursor &source, schema &into, std::uint32_t inde
  *
  * Every field's offset is where it lies in a row-major record; a column-major table lays a
  * top-level field's values out together, and the same offsets serve inside each of those.
+ *
+ * A record has to take a byte at least. One of null fields and empty text takes none, and a
+ * count of such records would be a count no bytes hold to - as a strong type with no payload
+ * would be, which is refused for the same reason.
  */
 [[nodiscard]] inline schema parse(bjdata::detail::cursor &source) noexcept {
+    const std::byte *const opening = source.position - 1;
     schema result;
     result.record_bytes = detail::parse_fields(source, result, 0);
     if (source.ok() && result.fields.empty()) source.fail(errc::invalid_dimensions);
+    if (source.ok() && result.record_bytes == 0) source.fail(errc::invalid_strong_type, opening);
     if (!source.ok()) return result;
     for (std::uint32_t index = 0; index < result.count(); index = result.fields[index].next) ++result.top_level;
     return result;
@@ -529,10 +535,9 @@ inline void skip_structured(cursor &source, const container_prefix &info, bool b
     soa::skip_payload(source, layout, info.count);
     if (!source.ok()) return;
 
-    // Only a boolean, a dictionary index or an offset index can hold a byte no handle reads, and
-    // each takes a byte a record at least, so the payload just stepped over holds the count to
-    // the bytes there. A table with none of them is not walked at all: its records may take no
-    // bytes, and claim any number.
+    // Only a boolean, a dictionary index or an offset index can hold a byte no handle reads, so a
+    // table with none of them is not walked at all. Every record takes a byte at least, so the
+    // payload just stepped over has held the count to the bytes there either way.
     const bool checked = std::ranges::any_of(layout, [](const soa::field &field) {
         return field.kind == soa::field_kind::boolean || field.kind == soa::field_kind::dictionary || field.kind == soa::field_kind::offsets;
     });

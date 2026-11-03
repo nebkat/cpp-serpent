@@ -98,7 +98,9 @@ fields. Every schema field type is understood: fixed-width scalars, the `T` bool
 padded `S`/`H` text, dictionaries, offset-table text, nested records and fixed runs. A member of
 the type that the schema has no field for keeps its value unless the type insists on it; a field
 the type has no member for is skipped. A table with more than one dimension is read flat, in
-record order.
+record order. A record must take a byte at least: a schema of null fields and text of no length,
+whose records would take none, is refused as a strong type with no payload is, since a count of
+such records is held to no bytes.
 
 Writing goes the other way from the type: a range of two or more records of a described type
 whose every member a schema can say — a number, a boolean, a character, text, a mapped

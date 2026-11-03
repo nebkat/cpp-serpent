@@ -257,18 +257,35 @@ void table_fields() {
         check(!tried && checked.has_value() == false && tried.error().code() == checked.error().code(), what + ": and try_decode says why");
     }
 
-    // Only a field with a byte to check costs anything a record, and each such field takes a byte,
-    // so a count the bytes cannot hold is refused before anything is walked; a table of records
-    // that take no bytes is not walked at all, whatever it claims.
-    std::string zero_width { "[${U\x01" "aZ}#L" };
-    std::string with_boolean { "[${U\x01" "aZU\x01" "bT}#L" };
-    for (int index = 0; index < 8; ++index) {
-        zero_width += static_cast<char>(index == 5 ? 1 : 0); // 2^40 records
-        with_boolean += static_cast<char>(index == 5 ? 1 : 0);
+    // Every record takes a byte at least, as every element of a typed container does: a schema
+    // whose fields take none - null fields, text of no length, records and runs of those - is
+    // refused where it opens, whatever the count, so no count can outrun the bytes there.
+    const auto count_of = [](std::string schema, std::uint64_t records) {
+        schema += "}#L";
+        for (int index = 0; index < 8; ++index) schema += static_cast<char>(records >> (8 * index));
+        return schema;
+    };
+    const std::uint64_t huge = std::uint64_t { 1 } << 40;
+    for (const auto &[what, schema] : std::array<std::pair<const char *, std::string>, 5> { {
+             { "a null field", std::string { "[${U\x01" "aZ" } },
+             { "text of no length", std::string { "[${U\x01" "aSU\x00", 9 } },
+             { "a nested record of null fields", std::string { "[${U\x01" "r{U\x01" "aZU\x01" "bZ}" } },
+             { "a run of null fields", std::string { "[${U\x01" "r[ZZ]" } },
+             { "a column-major table of null fields", std::string { "{${U\x01" "aZ" } },
+         } }) {
+        for (const auto records : { std::uint64_t { 0 }, std::uint64_t { 3 }, huge }) {
+            const auto document = bytes_of(count_of(schema, records));
+            const auto checked = validate(document);
+            const std::string named = std::string { "a schema of " } + what + ", " + std::to_string(records) + " records";
+            check(!checked && checked.error().code() == errc::invalid_strong_type && checked.error().offset() == 2,
+                    named + ": refused at the schema");
+            check(!decode<value>(document).has_value(), named + ": does not decode");
+        }
     }
-    check(validate(bytes_of(zero_width)).has_value(), "a table of 2^40 records of no bytes is stepped over, not walked");
-    const auto unheld = validate(bytes_of(with_boolean));
-    check(!unheld && unheld.error().code() == errc::unexpected_end, "and 2^40 records of a byte each are refused by their length");
+    const auto beside = bytes_of(count_of("[${U\x01" "aZU\x01" "bT", 2) + "TF");
+    check(validate(beside).has_value() && decode<value>(beside).has_value(), "a null field beside one that takes a byte is a table");
+    const auto unheld = validate(bytes_of(count_of("[${U\x01" "aZU\x01" "bT", huge)));
+    check(!unheld && unheld.error().code() == errc::unexpected_end, "and 2^40 of its records are refused by their length");
 
     // The block notation traces bytes, and stops at one that is not what the schema says.
     const auto notation = block_notation(bytes_of("[${U\x01" "aT}#U\x03" "TFU"sv));
