@@ -3,6 +3,7 @@
 // decode() and try_decode(): a whole document into one of your types.
 
 #include <serpent/json/reader.hpp>
+#include <serpent/locate.hpp>
 
 #include <expected>
 #include <optional>
@@ -98,21 +99,19 @@ bool decode_into(const char *text, T &value) {
  *
  * A document that does not parse is reported with the kind and the byte offset validate() found;
  * one that parses but does not fit the type is errc::type_mismatch, unless a member the type
- * needed was missing, which is named.
+ * needed was missing, which is named. With `options.trace` the error also has the path(), offset
+ * and found() kind of the value at fault, and a missing key is found at any depth.
  *
  * One pass for a document that decodes; only one that does not is walked again, to say why.
  */
 template<typename T, bool Terminated = false>
-[[nodiscard]] std::expected<T, error> try_decode(std::string_view text) {
+[[nodiscard]] std::expected<T, error> try_decode(std::string_view text, decode_options options = {}) {
     const auto root = basic_reader<Terminated>::over(text);
     auto value = root.template as<T>();
     if (value && scanner::ends_with_text(root, text)) return std::expected<T, error> { std::move(*value) };
     if (const auto checked = validate<Terminated>(text); !checked) return std::unexpected { checked.error() };
     if (!value) {
-        if (const auto absent = first_missing_member<T>(reader::over(text)); !absent.empty()) {
-            return std::unexpected { error { errc::missing_key, 0, absent } };
-        }
-        return std::unexpected { error { errc::type_mismatch, 0 } };
+        return std::unexpected { serpent::detail::explain_mismatch<T>(basic_reader<Terminated>::over(text), options) };
     }
     // Read, and valid, yet not ending where the text does: no walk can disagree with validate()
     // about where a value ends, so this is only here to be total.
@@ -120,13 +119,13 @@ template<typename T, bool Terminated = false>
 }
 
 template<typename T>
-[[nodiscard]] std::expected<T, error> try_decode(const std::string &text) {
-    return try_decode<T, true>(std::string_view { text });
+[[nodiscard]] std::expected<T, error> try_decode(const std::string &text, decode_options options = {}) {
+    return try_decode<T, true>(std::string_view { text }, options);
 }
 
 template<typename T>
-[[nodiscard]] std::expected<T, error> try_decode(const char *text) {
-    return try_decode<T, true>(std::string_view { text });
+[[nodiscard]] std::expected<T, error> try_decode(const char *text, decode_options options = {}) {
+    return try_decode<T, true>(std::string_view { text }, options);
 }
 
 } // namespace serpent::json

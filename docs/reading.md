@@ -19,11 +19,28 @@ if (!config) {
 
 A document that does not parse is reported with the kind and the byte offset — `unexpected_end`,
 `invalid_escape`, `invalid_number` and the rest. One that parses but is not this shape is
-`type_mismatch`, and carries no offset: nothing on the way in recorded where the shape stopped
-matching.
+`type_mismatch`, or `missing_key` with the `key()` the root object lacked. Asked to trace, it
+also says where:
+
+```cpp
+// {"aps":[{"ssid":"shed"},{"ssid":"yard","ip_info":{"ip":5}}]}
+const auto config = json::try_decode<networks>(text, { .trace = true });
+config.error().path();    // "aps[1].ip_info.ip"
+config.error().found();   // kind::integer
+config.error().offset();  // where the 5 stands
+```
+
+`path()` runs from the root through members and elements to the value that did not fit — for a
+missing key, the object that lacked it — and is empty for the root itself. A key a dot could not
+carry is written `["like this"]`. The error keeps the last `error::path_capacity` characters,
+marking a longer path's front with `...`. Where a variant fits none of its alternatives, the path
+ends at the variant, since which alternative was nearly right is anyone's guess. The first value
+read that does not fit is the one reported, and a key missing at any depth is named.
 
 A document that decodes is read once; only one that does not is walked again, to find what is
-wrong with it and where.
+wrong with it. With `.trace` that walk goes from the top down, reading each member or element
+of a value that did not fit on its own and following the first that does not fit either. It is
+apart from the readers, so a decode that works pays nothing for it either way.
 
 Either way the whole text or buffer is the document. One that ends before its last container
 closes, breaks partway through, or has anything after it — in JSON, anything but whitespace — is

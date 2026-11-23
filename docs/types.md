@@ -340,7 +340,7 @@ That way round on purpose: the strict answer is the one you get by not thinking 
 leniency is a thing you ask for by name. A `to_json`/`from_json` pair writes its own body and is
 on its own, as it is for everything else.
 
-A failed read names the member it wanted:
+A failed read names the member it wanted, and, asked to trace, `path()` the object it wanted it in:
 
 ```cpp
 const auto decoded = serpent::json::try_decode<calibration>(text);

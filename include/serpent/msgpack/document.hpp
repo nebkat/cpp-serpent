@@ -7,6 +7,7 @@
 #include <serpent/msgpack/writer.hpp>
 #include <serpent/serializer.hpp>
 #include <serpent/sink.hpp>
+#include <serpent/locate.hpp>
 
 #include <expected>
 #include <optional>
@@ -71,21 +72,17 @@ template<typename T>
 
 /**
  * Decodes, saying why when it cannot: where the document stopped parsing, which member the type
- * needed and did not find, or errc::type_mismatch. One pass for a document that decodes; only one
- * that does not is walked again, to say why.
+ * needed and did not find, or errc::type_mismatch - with `options.trace`, the last two with the
+ * path() to the value at fault. One pass for a document that decodes; only one that does not is
+ * walked again, to say why.
  */
 template<typename T>
-[[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
+[[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer, decode_options options = {}) {
     const auto root = reader::over(buffer);
     auto value = root.as<T>();
     if (value && detail::ends_with_buffer(root, buffer)) return std::expected<T, error> { std::move(*value) };
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
-    if (!value) {
-        if (const auto absent = first_missing_member<T>(reader::over(buffer)); !absent.empty()) {
-            return std::unexpected { error { errc::missing_key, 0, absent } };
-        }
-        return std::unexpected { error { errc::type_mismatch, 0 } };
-    }
+    if (!value) return std::unexpected { serpent::detail::explain_mismatch<T>(reader::over(buffer), options) };
     // Read, and valid, yet not ending where the buffer does: only here to be total.
     return std::unexpected { error { errc::trailing_data, 0 } };
 }

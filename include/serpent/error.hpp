@@ -1,13 +1,21 @@
 #pragma once
 
+#include <serpent/kind.hpp>
+
+#include <array>
 #include <exception>
 #include <string_view>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <tuple>
 
 namespace serpent {
+
+namespace detail {
+class failure_locator;
+}
 
 enum class errc {
     ok = 0,
@@ -81,9 +89,19 @@ enum class errc {
  * accessors, so a caller may pick either style over the same bytes.
  */
 class error : public std::exception {
+public:
+    /** The longest path() kept; a longer one loses its front, which is marked with "...". */
+    static constexpr std::size_t path_capacity = 63;
+
+private:
+    friend class detail::failure_locator;
+
     errc value = errc::ok;
     std::size_t byte_offset = 0;
     std::string_view subject {};
+    kind found_kind = kind::invalid;
+    std::uint8_t path_length = 0;
+    std::array<char, path_capacity> path_chars {};
 
 public:
     error() = default;
@@ -106,6 +124,18 @@ public:
 
     /** The key this is about, or empty when it is not about one. */
     [[nodiscard]] constexpr std::string_view key() const noexcept { return this->subject; }
+
+    /**
+     * Where in the document a value did not fit its type, as members and elements from the
+     * root - `aps[1].ip_info` - or empty for the root itself. For errc::missing_key it is the
+     * object that lacked key(). Only try_decode fills it, when asked to trace.
+     */
+    [[nodiscard]] constexpr std::string_view path() const noexcept {
+        return std::string_view { this->path_chars.data(), this->path_length };
+    }
+
+    /** What the document held at path(), where try_decode found a value that did not fit. */
+    [[nodiscard]] constexpr kind found() const noexcept { return this->found_kind; }
 
     [[nodiscard]] const char *what() const noexcept override { return message(this->value); }
 };

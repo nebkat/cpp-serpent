@@ -212,6 +212,14 @@ void a_failed_decode_can_say_why() {
     check(!wrong_shape && wrong_shape.error().code() == serpent::errc::type_mismatch,
             "a document that parses but does not fit is a type mismatch");
 
+    // Deeper down, the error leads to the value that did not fit, when asked to trace it.
+    const auto wrong_member
+            = json::try_decode<std::vector<labelled>>(R"([{"label":"a","count":1},{"label":"b","count":"two"}])",
+                    { .trace = true });
+    check(!wrong_member && wrong_member.error().code() == serpent::errc::type_mismatch, "a member of the wrong type");
+    check_equal(wrong_member.error().path(), std::string_view { "[1].count" }, "is found by its path");
+    check(wrong_member.error().found() == serpent::kind::string, "holding text");
+
     // And the same through BJData, where a truncated buffer is the usual failure.
     const auto bytes = bjdata::encode(labelled { "a", 2 });
     const auto whole = bjdata::try_decode<labelled>(bytes);
