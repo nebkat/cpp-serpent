@@ -31,7 +31,7 @@ the plain way over millions of values.
 ## How deep a document may nest
 
 `SERPENT_MAX_DEPTH`, 32 unless set, is how deep any reader or writer goes, counting the root as
-0. A document nested deeper is refused by `validate`, `decode` and `try_decode` alike, rather than
+0. A document nested deeper is refused by `validate`, `decode` and `decode_into` alike, rather than
 recursed into: reading into a recursive type of your own costs stack at every level, so a task with
 a small stack may want it lower. A `serpent::value` tree takes the same couple of kilobytes at any
 depth, from any of the formats.

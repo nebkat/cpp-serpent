@@ -2,16 +2,10 @@
 
 ## When it fails, and why
 
-`decode` says whether it worked:
+`decode` returns a `std::expected<T, serpent::error>`: the value, or why there is none.
 
 ```cpp
-if (const auto config = json::decode<link_config>(text)) { /* … */ }
-```
-
-`try_decode` says why it did not:
-
-```cpp
-const auto config = json::try_decode<link_config>(text);
+const auto config = json::decode<link_config>(text);
 if (!config) {
     log("bad config: %s at %zu", describe(config.error().code()), config.error().offset());
 }
@@ -24,7 +18,7 @@ also says where:
 
 ```cpp
 // {"aps":[{"ssid":"shed"},{"ssid":"yard","ip_info":{"ip":5}}]}
-const auto config = json::try_decode<networks>(text, { .trace = true });
+const auto config = json::decode<networks>(text, { .trace = true });
 config.error().path();    // "aps[1].ip_info.ip"
 config.error().found();   // kind::integer
 config.error().offset();  // where the 5 stands
@@ -73,7 +67,7 @@ json::decode<config>(R"({"host":"x"})");          // terminated: a literal ends 
 json::decode<config>(std::string_view { owned }); // bounded: a view promises nothing about what follows
 ```
 
-`decode_into`, `try_decode` and `validate` choose the same way. A buffer of your own that does end
+`decode`, `decode_into` and `validate` choose the same way. A buffer of your own that does end
 in a zero byte — a file read into storage one byte longer than its length, say — is read the
 terminated way through `json::terminated_reader::over(view)`; `json::reader` is the bounded one.
 A zero byte *inside* the text ends a run early in terminated reading; it can only be a control

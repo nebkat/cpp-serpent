@@ -128,13 +128,13 @@ public:
     /**
      * Where in the document a value did not fit its type, as members and elements from the
      * root - `aps[1].ip_info` - or empty for the root itself. For errc::missing_key it is the
-     * object that lacked key(). Only try_decode fills it, when asked to trace.
+     * object that lacked key(). Only decode fills it, when asked to trace.
      */
     [[nodiscard]] constexpr std::string_view path() const noexcept {
         return std::string_view { this->path_chars.data(), this->path_length };
     }
 
-    /** What the document held at path(), where try_decode found a value that did not fit. */
+    /** What the document held at path(), where decode found a value that did not fit. */
     [[nodiscard]] constexpr kind found() const noexcept { return this->found_kind; }
 
     [[nodiscard]] const char *what() const noexcept override { return message(this->value); }

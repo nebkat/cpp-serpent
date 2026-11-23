@@ -12,7 +12,7 @@ struct [[= serpent::serializable {}]] reading {
 auto text  = json::encode(value);          // std::string
 auto bytes = bjdata::encode(value);        // std::vector<std::byte>
 
-auto a = json::decode<reading>(text);      // std::optional<reading>
+auto a = json::decode<reading>(text);      // std::expected<reading, serpent::error>
 auto b = bjdata::decode<reading>(bytes);
 ```
 

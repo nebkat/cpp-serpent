@@ -343,7 +343,7 @@ on its own, as it is for everything else.
 A failed read names the member it wanted, and, asked to trace, `path()` the object it wanted it in:
 
 ```cpp
-const auto decoded = serpent::json::try_decode<calibration>(text);
+const auto decoded = serpent::json::decode<calibration>(text);
 if (!decoded && decoded.error().code() == serpent::errc::missing_key) {
     log("the document has no %s", decoded.error().key());
 }
@@ -351,5 +351,5 @@ if (!decoded && decoded.error().code() == serpent::errc::missing_key) {
 
 Naming it costs a second walk over the document, taken only on the way to reporting an error —
 the generated reader knows a member was missing, not which one, and the check that told it that
-costs a bit set per member. `decode()` skips all of it and returns nothing.
+costs a bit set per member. A document that decodes never pays for it.
 

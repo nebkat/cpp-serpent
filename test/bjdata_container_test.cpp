@@ -253,8 +253,8 @@ void table_fields() {
         }
         check(!fields_read(broken), what + ": does not read through a handle either");
         check(!decode<value>(broken).has_value(), what + ": nor decode");
-        const auto tried = try_decode<value>(broken);
-        check(!tried && checked.has_value() == false && tried.error().code() == checked.error().code(), what + ": and try_decode says why");
+        const auto tried = decode<value>(broken);
+        check(!tried && checked.has_value() == false && tried.error().code() == checked.error().code(), what + ": and decode says why");
     }
 
     // Every record takes a byte at least, as every element of a typed container does: a schema
@@ -376,21 +376,21 @@ void checked_accessors() {
 }
 
 // decode reads the whole buffer as the document: an array whose elements run out before its
-// end, or bytes after it, is a broken document and refused - in one pass, with try_decode saying
+// end, or bytes after it, is a broken document and refused - in one pass, with decode saying
 // what validate() would have.
 void whole_documents() {
     for (const auto *hex : { "5b550155025503", "5b55015502", "5b5501550255035d55", "5b23550355015502" }) {
         const auto bytes = from_hex(hex);
         check(!bjdata::decode<std::vector<int>>(bytes).has_value(), std::string { "decode refuses " } + hex);
-        const auto tried = bjdata::try_decode<std::vector<int>>(bytes);
+        const auto tried = bjdata::decode<std::vector<int>>(bytes);
         check(!tried && tried.error().code() == validate(bytes).error().code() && tried.error().offset() == validate(bytes).error().offset(),
-                std::string { "try_decode reports what validate() does: " } + hex);
+                std::string { "decode reports what validate() does: " } + hex);
     }
     check(!bjdata::decode<std::map<std::string, int>>(from_hex("7b55016155015501625502")).has_value(), "an object too");
     check(!bjdata::decode<int>(from_hex("55015501")).has_value(), "and a scalar with a byte after it");
     check(bjdata::decode<std::vector<int>>(from_hex("5b5501550255035d")) == std::vector<int> { 1, 2, 3 }, "a whole one still reads");
     check(bjdata::decode<std::vector<int>>(from_hex("5b2455235503010203")) == std::vector<int> { 1, 2, 3 }, "a typed one too");
-    check(bjdata::try_decode<std::vector<int>>(from_hex("5b5501550255035d55")).error().code() == errc::trailing_data,
+    check(bjdata::decode<std::vector<int>>(from_hex("5b5501550255035d55")).error().code() == errc::trailing_data,
             "bytes after the document are trailing data");
 }
 

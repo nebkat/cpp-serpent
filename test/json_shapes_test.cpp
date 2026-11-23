@@ -155,11 +155,11 @@ int main() {
     // Read into an object that already holds one, a nested member is filled where it stands: its
     // containers keep the capacity they have rather than being built afresh and moved in.
     holder reused;
-    check(json::decode_into(R"({"name":"a","inner":{"id":1,"name":"north","ratio":0.5,"active":true,"tags":[1,2,3,4,5,6,7,8]}})", reused),
+    check(json::decode_into(R"({"name":"a","inner":{"id":1,"name":"north","ratio":0.5,"active":true,"tags":[1,2,3,4,5,6,7,8]}})", reused).has_value(),
             "a nested described member reads in place");
     const auto *const tags_before = reused.inner.tags.data();
     const auto *const name_before = reused.inner.name.data();
-    check(json::decode_into(R"({"name":"b","inner":{"id":2,"name":"south","ratio":0.25,"active":false,"tags":[9,8,7]}})", reused),
+    check(json::decode_into(R"({"name":"b","inner":{"id":2,"name":"south","ratio":0.25,"active":false,"tags":[9,8,7]}})", reused).has_value(),
             "and again");
 
     // And written into a string that already exists, the same way round: the first write leaves

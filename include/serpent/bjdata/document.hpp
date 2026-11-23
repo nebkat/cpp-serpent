@@ -68,31 +68,19 @@ namespace detail {
 } // namespace detail
 
 /**
- * Decodes a value from a buffer, or nullopt when it does not parse or does not fit the type.
+ * Decodes a value from a buffer, or says why it cannot.
  *
  * The whole buffer is the document: one that ends early, breaks partway or has bytes after it is
- * refused, as validate() would refuse it. Checked as it is read, so in one pass.
- */
-template<typename T>
-[[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
-    const auto root = reader::over(buffer);
-    auto value = root.as<T>();
-    if (!value || !detail::ends_with_buffer(root, buffer)) return std::nullopt;
-    return value;
-}
-
-/**
- * Decodes, saying why when it cannot.
+ * refused, as validate() would refuse it. Checked as it is read, so a document that decodes is
+ * read once; only one that does not is walked again, to say why.
  *
  * A document that does not parse is reported with the kind and the byte offset validate()
  * found; one that parses but does not fit the type is errc::type_mismatch, or errc::missing_key
  * naming a key the root object lacks. With `options.trace` the error also has the path(), offset
  * and found() kind of the value at fault, and a missing key is found at any depth.
- *
- * One pass for a document that decodes; only one that does not is walked again, to say why.
  */
 template<typename T>
-[[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer, decode_options options = {}) {
+[[nodiscard]] std::expected<T, error> decode(std::span<const std::byte> buffer, decode_options options = {}) {
     const auto root = reader::over(buffer);
     auto value = root.as<T>();
     if (value && detail::ends_with_buffer(root, buffer)) return std::expected<T, error> { std::move(*value) };

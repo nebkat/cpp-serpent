@@ -1,9 +1,9 @@
 #pragma once
 
-// Where a document stopped fitting its type, for try_decode to report.
+// Where a document stopped fitting its type, for decode to report.
 //
 // Every reader answers a bare bool, so a value deep inside a document that does not fit reaches
-// the top as nothing more than false. Asked, try_decode finds the value from the top down instead:
+// the top as nothing more than false. Asked, decode finds the value from the top down instead:
 // a part of a value that did not fit is read again on its own, and the first part that does not
 // fit either is where to look next. The readers are untouched, so a decode that succeeds - or one
 // that fails without asking - pays nothing for this.
@@ -26,7 +26,7 @@
 
 namespace serpent {
 
-/** How try_decode reports a document that does not fit its type. */
+/** How decode reports a document that does not fit its type. */
 struct decode_options {
     /**
      * Read a document that parses but does not fit again, part by part, to give the error the

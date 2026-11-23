@@ -670,6 +670,6 @@ template<bool Terminated = false>
     return validate<true>(std::string_view { text });
 }
 
-// decode() and try_decode() are in json/decode.hpp, which can reach the walking reader.
+// decode() and decode_into() are in json/decode.hpp, which can reach the walking reader.
 
 } // namespace serpent::json
