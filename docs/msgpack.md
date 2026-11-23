@@ -13,7 +13,7 @@ const auto again = serpent::msgpack::decode<can_frame>(bytes);
 ```
 
 The same type definitions serve it as serve JSON and BJData, and `write`, `encode`, `decode`,
-`try_decode`, `measure`, `validate` and `write_value` are the calls BJData offers.
+`measure`, `validate` and `write_value` are the calls BJData offers.
 
 ## Counts come first
 

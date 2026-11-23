@@ -209,7 +209,9 @@ template<typename T>
 std::optional<T> round_trip(const T &value) {
     const auto bytes = encode(value);
     check(validate(bytes).has_value(), "the encoding is well formed");
-    return decode<T>(bytes);
+    auto decoded = decode<T>(bytes);
+    if (!decoded) return std::nullopt;
+    return std::move(*decoded);
 }
 
 void annotated_form() {
@@ -400,7 +402,7 @@ void members_named_from_outside() {
     check(from_text && from_text->netmask == 8, "and through text, from one definition");
 
     // The strictness rule reaches a foreign type too, and names what was missing.
-    const auto partial = json::try_decode<foreign_endpoint>(R"({"address":9})");
+    const auto partial = json::decode<foreign_endpoint>(R"({"address":9})");
     check(!partial && partial.error().code() == errc::missing_key && partial.error().key() == "mask",
             "a member the table names and the document leaves out is a failure");
 
@@ -488,7 +490,7 @@ void a_type_whose_members_may_be_absent() {
     check(old_file && old_file->port == 8080, "and the member it never had keeps its default");
 
     // A member may still be the exception.
-    const auto without_version = json::try_decode<stored_config>(R"({"host":"device"})");
+    const auto without_version = json::decode<stored_config>(R"({"host":"device"})");
     check(!without_version && without_version.error().key() == "version",
             "a member marked required is still insisted on, and named");
 
@@ -532,10 +534,10 @@ void key_order_and_absence() {
 
     // And says which member it wanted, in both formats. The generated reader knows only that
     // one was missing, so naming it is a second walk taken on the way to the error.
-    const auto named = try_decode<point>(partial);
+    const auto named = decode<point>(partial);
     check(!named && named.error().code() == errc::missing_key && named.error().key() == "y",
             "the failure names the member the document left out");
-    const auto from_text = json::try_decode<point>(R"({"x":7})");
+    const auto from_text = json::decode<point>(R"({"x":7})");
     check(!from_text && from_text.error().code() == errc::missing_key && from_text.error().key() == "y",
             "and the same reading text");
 
@@ -559,7 +561,7 @@ void key_order_and_absence() {
     const auto maybe = decode<with_optional>(without);
     check(maybe && !maybe->note.has_value(), "an absent optional is nothing, not an error");
     check(!decode<with_insisted_optional>(without), "unless the type insists the key be stated");
-    const auto insisted = try_decode<with_insisted_optional>(without);
+    const auto insisted = decode<with_insisted_optional>(without);
     check(insisted.error().code() == errc::missing_key && insisted.error().key() == "note",
             "an insisted-on optional names itself too");
 
@@ -729,8 +731,9 @@ void containers_need_no_customization() {
     check(json::decode<std::vector<std::byte>>(json::encode(raw)) == raw, "bytes through JSON");
 
     const std::optional<int> engaged { 7 };
-    check(decode<std::optional<int>>(encode(engaged)) == engaged, "optional through BJData");
-    check(json::decode<std::optional<int>>(json::encode(engaged)) == engaged, "optional through JSON");
+    check(decode<std::optional<int>>(encode(engaged)).value_or(std::nullopt) == engaged, "optional through BJData");
+    check(json::decode<std::optional<int>>(json::encode(engaged)).value_or(std::nullopt) == engaged,
+            "optional through JSON");
 }
 
 /**

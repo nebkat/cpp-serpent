@@ -147,7 +147,7 @@ int main() {
     const auto by_row = bjdata::decode<std::vector<record>>(rows);
     const auto by_column = bjdata::decode<std::vector<record>>(columns);
     check(by_row.has_value() && by_row->size() == 40, "records read into a type");
-    check(by_column.has_value() && by_row == by_column, "and the same by column as by row");
+    check(by_column.has_value() && by_row.has_value() && *by_row == *by_column, "and the same by column as by row");
     if (by_row) {
         const auto &first = by_row->front();
         const auto &last = by_row->back();
@@ -191,10 +191,10 @@ int main() {
         check(as_record.has_value() && as_record->at == 1700000003, "a record handle reads as the type");
     }
 
-    // Malformed tables are refused by validate(), and so by try_decode(), which validates first.
+    // Malformed tables are refused by validate(), and so by decode(), which says what validate() does.
     const auto refuse = [](std::vector<std::byte> bytes, const char *what) {
         check(!bjdata::validate(bytes).has_value(), what);
-        check(!bjdata::try_decode<value>(bytes).has_value(), what);
+        check(!bjdata::decode<value>(bytes).has_value(), what);
     };
     auto cut = rows;
     cut.resize(cut.size() - 1);

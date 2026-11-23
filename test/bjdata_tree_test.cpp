@@ -126,17 +126,13 @@ void agree(std::span<const std::byte> buffer, const std::string &what) {
     if (!tree) return;
     ++built;
     check(same(*reference, *tree), what + ": builds a different tree");
-
-    // try_decode builds the same, or fails as validate() says the document is broken.
-    const auto tried = bjdata::try_decode<value>(buffer);
-    check(tried.has_value() && same(*tried, *tree), what + ": try_decode builds it too");
 }
 
 void agree_refused(std::span<const std::byte> buffer, const std::string &what) {
     agree(buffer, what);
-    const auto tried = bjdata::try_decode<value>(buffer);
+    const auto tried = bjdata::decode<value>(buffer);
     const auto checked = bjdata::validate(buffer);
-    if (!tried && !checked) check(tried.error().code() == checked.error().code(), what + ": try_decode fails as validate does");
+    if (!tried && !checked) check(tried.error().code() == checked.error().code(), what + ": decode fails as validate does");
 }
 
 std::vector<std::byte> bytes_of(const std::string &text) {

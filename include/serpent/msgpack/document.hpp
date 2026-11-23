@@ -7,6 +7,7 @@
 #include <serpent/msgpack/writer.hpp>
 #include <serpent/serializer.hpp>
 #include <serpent/sink.hpp>
+#include <serpent/locate.hpp>
 
 #include <expected>
 #include <optional>
@@ -56,37 +57,26 @@ namespace detail {
 } // namespace detail
 
 /**
- * Decodes a value from a buffer, or nullopt when it does not parse or does not fit the type.
+ * Decodes a value from a buffer, or says why it cannot.
  *
  * The whole buffer is the document: one that ends early, breaks partway or has bytes after it is
- * refused, as validate() would refuse it. Checked as it is read, so in one pass.
+ * refused, as validate() would refuse it. Checked as it is read, so a document that decodes is
+ * read once; only one that does not is walked again, to say why.
+ *
+ * A document that does not parse is reported with the kind and the byte offset validate()
+ * found; one that parses but does not fit the type is errc::type_mismatch, or errc::missing_key
+ * naming a key the root object lacks. With `options.trace` the error also has the path(), offset
+ * and found() kind of the value at fault, and a missing key is found at any depth.
  */
 template<typename T>
-[[nodiscard]] std::optional<T> decode(std::span<const std::byte> buffer) {
-    const auto root = reader::over(buffer);
-    auto value = root.as<T>();
-    if (!value || !detail::ends_with_buffer(root, buffer)) return std::nullopt;
-    return value;
-}
-
-/**
- * Decodes, saying why when it cannot: where the document stopped parsing, which member the type
- * needed and did not find, or errc::type_mismatch. One pass for a document that decodes; only one
- * that does not is walked again, to say why.
- */
-template<typename T>
-[[nodiscard]] std::expected<T, error> try_decode(std::span<const std::byte> buffer) {
+[[nodiscard]] std::expected<T, error> decode(std::span<const std::byte> buffer, decode_options options = {}) {
     const auto root = reader::over(buffer);
     auto value = root.as<T>();
     if (value && detail::ends_with_buffer(root, buffer)) return std::expected<T, error> { std::move(*value) };
     if (const auto checked = validate(buffer); !checked) return std::unexpected { checked.error() };
-    if (!value) {
-        if (const auto absent = first_missing_member<T>(reader::over(buffer)); !absent.empty()) {
-            return std::unexpected { error { errc::missing_key, 0, absent } };
-        }
-        return std::unexpected { error { errc::type_mismatch, 0 } };
-    }
-    // Read, and valid, yet not ending where the buffer does: only here to be total.
+    if (!value) return std::unexpected { serpent::detail::explain_mismatch<T>(reader::over(buffer), options) };
+    // Read, and valid, yet not ending where the buffer does: no walk can disagree with
+    // validate() about where a value ends, so this is only here to be total.
     return std::unexpected { error { errc::trailing_data, 0 } };
 }
 

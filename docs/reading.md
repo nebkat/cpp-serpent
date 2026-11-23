@@ -2,16 +2,10 @@
 
 ## When it fails, and why
 
-`decode` says whether it worked:
+`decode` returns a `std::expected<T, serpent::error>`: the value, or why there is none.
 
 ```cpp
-if (const auto config = json::decode<link_config>(text)) { /* … */ }
-```
-
-`try_decode` says why it did not:
-
-```cpp
-const auto config = json::try_decode<link_config>(text);
+const auto config = json::decode<link_config>(text);
 if (!config) {
     log("bad config: %s at %zu", describe(config.error().code()), config.error().offset());
 }
@@ -19,11 +13,28 @@ if (!config) {
 
 A document that does not parse is reported with the kind and the byte offset — `unexpected_end`,
 `invalid_escape`, `invalid_number` and the rest. One that parses but is not this shape is
-`type_mismatch`, and carries no offset: nothing on the way in recorded where the shape stopped
-matching.
+`type_mismatch`, or `missing_key` with the `key()` the root object lacked. Asked to trace, it
+also says where:
+
+```cpp
+// {"aps":[{"ssid":"shed"},{"ssid":"yard","ip_info":{"ip":5}}]}
+const auto config = json::decode<networks>(text, { .trace = true });
+config.error().path();    // "aps[1].ip_info.ip"
+config.error().found();   // kind::integer
+config.error().offset();  // where the 5 stands
+```
+
+`path()` runs from the root through members and elements to the value that did not fit — for a
+missing key, the object that lacked it — and is empty for the root itself. A key a dot could not
+carry is written `["like this"]`. The error keeps the last `error::path_capacity` characters,
+marking a longer path's front with `...`. Where a variant fits none of its alternatives, the path
+ends at the variant, since which alternative was nearly right is anyone's guess. The first value
+read that does not fit is the one reported, and a key missing at any depth is named.
 
 A document that decodes is read once; only one that does not is walked again, to find what is
-wrong with it and where.
+wrong with it. With `.trace` that walk goes from the top down, reading each member or element
+of a value that did not fit on its own and following the first that does not fit either. It is
+apart from the readers, so a decode that works pays nothing for it either way.
 
 Either way the whole text or buffer is the document. One that ends before its last container
 closes, breaks partway through, or has anything after it — in JSON, anything but whitespace — is
@@ -56,7 +67,7 @@ json::decode<config>(R"({"host":"x"})");          // terminated: a literal ends 
 json::decode<config>(std::string_view { owned }); // bounded: a view promises nothing about what follows
 ```
 
-`decode_into`, `try_decode` and `validate` choose the same way. A buffer of your own that does end
+`decode`, `decode_into` and `validate` choose the same way. A buffer of your own that does end
 in a zero byte — a file read into storage one byte longer than its length, say — is read the
 terminated way through `json::terminated_reader::over(view)`; `json::reader` is the bounded one.
 A zero byte *inside* the text ends a run early in terminated reading; it can only be a control

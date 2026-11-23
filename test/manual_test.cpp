@@ -193,36 +193,44 @@ void chrono_types() {
     check(as_seconds && as_seconds->count() == 1500, "a count read as another unit is that count, not that time");
 }
 
-/** decode() says whether it worked; try_decode() says why it did not. */
+/** decode() says whether it worked, and why when it did not. */
 void a_failed_decode_can_say_why() {
-    const auto good = json::try_decode<labelled>(R"({"label":"a","count":2})");
+    const auto good = json::decode<labelled>(R"({"label":"a","count":2})");
     check(good && good->count == 2, "a document that fits gives the value");
 
     // Malformed: the kind and where.
-    const auto truncated = json::try_decode<labelled>(R"({"label":"a","count":)");
+    const auto truncated = json::decode<labelled>(R"({"label":"a","count":)");
     check(!truncated, "a truncated document fails");
     check(truncated.error().code() == serpent::errc::unexpected_end, "and says what was wrong");
     check(truncated.error().offset() > 0, "and where it ran out");
 
-    const auto bad_escape = json::try_decode<labelled>(R"({"label":"a\q"})");
+    const auto bad_escape = json::decode<labelled>(R"({"label":"a\q"})");
     check(!bad_escape && bad_escape.error().code() == serpent::errc::invalid_escape, "an unknown escape is named");
 
     // Well formed, but not this shape: named, with no offset to give.
-    const auto wrong_shape = json::try_decode<labelled>("[1,2,3]");
+    const auto wrong_shape = json::decode<labelled>("[1,2,3]");
     check(!wrong_shape && wrong_shape.error().code() == serpent::errc::type_mismatch,
             "a document that parses but does not fit is a type mismatch");
 
+    // Deeper down, the error leads to the value that did not fit, when asked to trace it.
+    const auto wrong_member
+            = json::decode<std::vector<labelled>>(R"([{"label":"a","count":1},{"label":"b","count":"two"}])",
+                    { .trace = true });
+    check(!wrong_member && wrong_member.error().code() == serpent::errc::type_mismatch, "a member of the wrong type");
+    check_equal(wrong_member.error().path(), std::string_view { "[1].count" }, "is found by its path");
+    check(wrong_member.error().found() == serpent::kind::string, "holding text");
+
     // And the same through BJData, where a truncated buffer is the usual failure.
     const auto bytes = bjdata::encode(labelled { "a", 2 });
-    const auto whole = bjdata::try_decode<labelled>(bytes);
-    check(whole && whole->label == "a", "binary round-trips through try_decode");
-    const auto cut = bjdata::try_decode<labelled>(std::span { bytes }.first(bytes.size() / 2));
+    const auto whole = bjdata::decode<labelled>(bytes);
+    check(whole && whole->label == "a", "binary round-trips through decode");
+    const auto cut = bjdata::decode<labelled>(std::span { bytes }.first(bytes.size() / 2));
     check(!cut, "a half a document fails");
     check(cut.error().code() == serpent::errc::unexpected_end, "and says so");
 
     // A hand-written walk gets the same guarantee the annotated types do, from writing
     // member() and nothing more: the member has to be there.
-    const auto short_of_a_member = json::try_decode<labelled>(R"({"label":"a"})");
+    const auto short_of_a_member = json::decode<labelled>(R"({"label":"a"})");
     check(!short_of_a_member, "a member the type names and the document leaves out is a failure");
     check(short_of_a_member.error().code() == serpent::errc::missing_key
                     && short_of_a_member.error().key() == "count",

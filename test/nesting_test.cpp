@@ -1,5 +1,5 @@
 // Nesting: every reader stops walking into containers at max_depth, so a document nested past
-// it is refused - by decode and try_decode alike, into a tree or a recursive type, in each
+// it is refused - by decode and decode alike, into a tree or a recursive type, in each
 // format - rather than recursed into until the stack runs out. A document exactly at the limit
 // still reads, so the readers agree with validate() about where the limit is.
 
@@ -49,25 +49,21 @@ std::string json_nodes(int levels) {
     return out;
 }
 
-template<typename Decode, typename TryDecode, typename Document>
-void bounded(const char *format, Document (*arrays)(int), Decode decode, TryDecode try_decode) {
+template<typename Decode, typename Document>
+void bounded(const char *format, Document (*arrays)(int), Decode decode) {
     const std::string name { format };
-    check(decode(arrays(max_depth)), name + ": nesting to the limit reads");
-    check(!decode(arrays(max_depth + 1)), name + ": one past it is refused");
-    const auto tried = try_decode(arrays(max_depth + 1));
-    check(!tried && tried.error().code() == errc::depth_exceeded, name + ": and try_decode says why");
+    check(decode(arrays(max_depth)).has_value(), name + ": nesting to the limit reads");
+    const auto past = decode(arrays(max_depth + 1));
+    check(!past, name + ": one past it is refused");
+    check(!past && past.error().code() == errc::depth_exceeded, name + ": and decode says why");
     // Deep enough to overflow any stack a few hundred bytes a level would, were it recursed into.
     check(!decode(arrays(100'000)), name + ": a hundred thousand levels are refused, not recursed into");
-    check(!try_decode(arrays(100'000)), name + ": by try_decode too");
 }
 
 void trees() {
-    bounded("json", json_arrays, [](const std::string &text) { return json::decode<value>(text).has_value(); },
-            [](const std::string &text) { return json::try_decode<value>(text); });
-    bounded("bjdata", bjdata_arrays, [](const std::vector<std::byte> &bytes) { return bjdata::decode<value>(bytes).has_value(); },
-            [](const std::vector<std::byte> &bytes) { return bjdata::try_decode<value>(bytes); });
-    bounded("msgpack", msgpack_arrays, [](const std::vector<std::byte> &bytes) { return msgpack::decode<value>(bytes).has_value(); },
-            [](const std::vector<std::byte> &bytes) { return msgpack::try_decode<value>(bytes); });
+    bounded("json", json_arrays, [](const std::string &text) { return json::decode<value>(text); });
+    bounded("bjdata", bjdata_arrays, [](const std::vector<std::byte> &bytes) { return bjdata::decode<value>(bytes); });
+    bounded("msgpack", msgpack_arrays, [](const std::vector<std::byte> &bytes) { return msgpack::decode<value>(bytes); });
 }
 
 void recursive_types() {
@@ -75,7 +71,6 @@ void recursive_types() {
     check(json::decode<node>(json_nodes(max_depth / 2)).has_value(), "a recursive type to the limit reads");
     check(!json::decode<node>(json_nodes(max_depth / 2 + 1)).has_value(), "and past it is refused");
     check(!json::decode<node>(json_nodes(50'000)).has_value(), "however deep, without recursing into it");
-    check(!json::try_decode<node>(json_nodes(50'000)).has_value(), "by try_decode too");
 
     const auto nested = bjdata::encode(*json::decode<value>(json_nodes(max_depth / 2)));
     check(bjdata::decode<node>(nested).has_value(), "the same in BJData");
@@ -105,12 +100,12 @@ void reflected_types() {
     const int limit = max_depth / 2;
     check(json::decode<reflected_node>(json_nodes(limit)).has_value(), "reflected, JSON: to the limit reads");
     check(!json::decode<reflected_node>(json_nodes(limit + 1)).has_value(), "and past it is refused");
-    check(json::try_decode<reflected_node>(json_nodes(limit + 1)).error().code() == errc::depth_exceeded, "as too deep");
+    check(json::decode<reflected_node>(json_nodes(limit + 1)).error().code() == errc::depth_exceeded, "as too deep");
     check(!json::decode<reflected_node>(json_nodes(50'000)).has_value(), "however deep");
 
     check(bjdata::decode<reflected_node>(bjdata_nodes(limit)).has_value(), "reflected, BJData: to the limit reads");
     check(!bjdata::decode<reflected_node>(bjdata_nodes(limit + 1)).has_value(), "and past it is refused");
-    check(bjdata::try_decode<reflected_node>(bjdata_nodes(limit + 1)).error().code() == errc::depth_exceeded, "as too deep");
+    check(bjdata::decode<reflected_node>(bjdata_nodes(limit + 1)).error().code() == errc::depth_exceeded, "as too deep");
     check(!bjdata::decode<reflected_node>(bjdata_nodes(50'000)).has_value(), "however deep");
 
     check(msgpack::decode<reflected_node>(msgpack_nodes(limit)).has_value(), "reflected, MessagePack: to the limit reads");
@@ -161,7 +156,7 @@ void markerless_elements() {
     const value *found = shallow ? innermost(*shallow, max_depth - 1) : nullptr;
     check(found != nullptr && found->size() == 2 && found->as_array()[1].as<int>() == 2, "a typed array's elements to the limit read");
     check(!bjdata::decode<value>(bjdata_wrapped(max_depth, typed)).has_value(), "one past it is refused, not read as empty");
-    check(bjdata::try_decode<value>(bjdata_wrapped(max_depth, typed)).error().code() == errc::depth_exceeded, "as too deep");
+    check(bjdata::decode<value>(bjdata_wrapped(max_depth, typed)).error().code() == errc::depth_exceeded, "as too deep");
     check(!bjdata::validate(bjdata_wrapped(max_depth, typed)), "and validate agrees");
     check(bjdata::decode<value>(bjdata_wrapped(max_depth, std::string("[$i#U\x00", 6))).has_value(), "an empty one holds nothing too deep");
 
